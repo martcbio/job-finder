@@ -40,6 +40,8 @@
     "search": "bun scripts/search-only.ts",
     "search:db": "bun scripts/search-db.ts",
     "source:health": "bun scripts/source-health.ts",
+    "sweeps:list": "bun scripts/list-sweeps.ts",
+    "sweeps:save": "bun scripts/save-sweep.ts",
     "scrape": "bun src/index.ts",
     "reconcile": "bun src/index.ts --reconcile-only",
     "test": "bun test src/**/__tests__/",

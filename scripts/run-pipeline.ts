@@ -1,3 +1,4 @@
+import { runPsqlJson } from "../src/db/psql";
 import {
   type PipelinePlanOptions,
   type PipelineStep,
@@ -6,11 +7,23 @@ import {
   isPipelineStepName,
   shellQuoteArgs,
 } from "../src/pipeline/pipelinePlan";
+import {
+  type SavedSweepRow,
+  buildGetSavedSweepSql,
+  savedSweepToPipelineOptions,
+} from "../src/pipeline/savedSweeps";
 import { type BrianTimeFilter, isBrianTimeFilter } from "../src/pipeline/searchEngines";
 
 interface RunPipelineOptions extends PipelinePlanOptions {
   dryRun: boolean;
   json: boolean;
+}
+
+interface RuntimeOptions {
+  dryRun: boolean;
+  json: boolean;
+  sweepName: string | null;
+  skipSteps: PipelineStepName[];
 }
 
 function splitList(value: string): string[] {
@@ -92,7 +105,33 @@ function parseSkipSteps(values: string[]): PipelineStepName[] {
   return [...new Set(steps)];
 }
 
-function parseOptions(args: string[]): RunPipelineOptions {
+function parseRuntimeOptions(args: string[]): RuntimeOptions {
+  return {
+    dryRun: args.includes("--dry-run"),
+    json: args.includes("--json"),
+    sweepName: readStringFlag(args, "--sweep"),
+    skipSteps: parseSkipSteps(readRepeatedFlag(args, ["--skip"])),
+  };
+}
+
+async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
+  const runtime = parseRuntimeOptions(args);
+  if (runtime.sweepName !== null) {
+    const row = await runPsqlJson<SavedSweepRow | null>(buildGetSavedSweepSql(runtime.sweepName));
+    if (row === null) {
+      throw new Error(`No saved sweep found named "${runtime.sweepName}"`);
+    }
+    if (!row.enabled) {
+      throw new Error(`Saved sweep "${runtime.sweepName}" is disabled`);
+    }
+
+    return {
+      ...savedSweepToPipelineOptions(row, runtime.skipSteps),
+      dryRun: runtime.dryRun,
+      json: runtime.json,
+    };
+  }
+
   const keywords = readRepeatedFlag(args, ["--keyword", "-k"]);
   const sites = readRepeatedFlag(args, ["--site", "-s"]);
   const defaultKeyword = "Agentic";
@@ -112,19 +151,21 @@ function parseOptions(args: string[]): RunPipelineOptions {
     duplicateLimit: readNumberFlag(args, "--duplicate-limit", 250),
     duplicateThreshold: readFloatFlag(args, "--duplicate-threshold", 0.82),
     queueLimit: readNumberFlag(args, "--queue-limit", 25),
-    skipSteps: parseSkipSteps(readRepeatedFlag(args, ["--skip"])),
-    dryRun: args.includes("--dry-run"),
-    json: args.includes("--json"),
+    skipSteps: runtime.skipSteps,
+    dryRun: runtime.dryRun,
+    json: runtime.json,
   };
 }
 
 function printUsage(): void {
   console.log(`Usage:
   bun run pipeline:run -- --dry-run -k "Agentic" --site greenhouse --site lever
+  bun run pipeline:run -- --dry-run --sweep daily-agentic
   bun run pipeline:run -- -k "Agentic" --site all --max-queries 50 --search-limit 3
   bun run pipeline:run -- --skip search --skip ingest_pages
 
 Options:
+  --sweep                  Saved sweep name from job_search.saved_sweeps.
   -k, --keyword            Search keyword. Repeatable. Defaults to Agentic.
   -s, --site               Brian site ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
   --time                   Brian-style time filter. Defaults to 24hours.
@@ -168,7 +209,7 @@ async function run(): Promise<void> {
     return;
   }
 
-  const options = parseOptions(args);
+  const options = await parseOptions(args);
   const plan = buildPipelinePlan(options);
 
   if (options.dryRun) {

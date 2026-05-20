@@ -1,0 +1,257 @@
+import type { Client } from "@notionhq/client";
+import {
+  atsApiRateLimiter,
+  atsApiSemaphore,
+  isRetryableJina,
+  isRetryableLLM,
+  isRetryableNotion,
+  jinaBreaker,
+  jinaReaderSemaphore,
+  llmBreaker,
+  llmSemaphore,
+  notionBreaker,
+  notionRateLimiter,
+  withRetry,
+} from "../concurrency";
+import type { JobFinderConfig } from "../config";
+import type { EvaluationFilter } from "../config/evaluation";
+import { logger } from "../logger";
+import { atsStructuralFilter, fetchAtsData, formatAtsBlock } from "../services/ats";
+import { insertJob } from "../services/notion";
+import type { NotionCacheUpdater } from "../services/notionCache";
+import type { TokenTracker } from "../services/tokenTracker";
+import { checkFuzzyDuplicate } from "./dedup";
+import { enrichJob } from "./enrich";
+import { evaluateJob } from "./evaluate";
+import { parseJobDetails, scrapeJobPage } from "./scrape";
+import { structuralFilter } from "./structuralFilter";
+
+const log = logger.child({ component: "processUrl" });
+
+export type ProcessResult =
+  | "inserted"
+  | "rejected"
+  | "duplicated"
+  | "skipped"
+  | "companyApplied"
+  | "archived"
+  | "errored";
+
+export interface ScrapeStats {
+  inserted: number;
+  skipped: number;
+  companyApplied: number;
+  rejected: number;
+  archived: number;
+  duplicated: number;
+  errored: number;
+}
+
+export interface ProcessContext {
+  notion: Client;
+  config: JobFinderConfig;
+  syncer: NotionCacheUpdater;
+  seenUrls: Set<string>;
+  tracker?: TokenTracker;
+  filters?: EvaluationFilter[];
+}
+
+export async function processUrl(
+  url: string,
+  keyword: string,
+  ctx: ProcessContext,
+): Promise<ProcessResult> {
+  const { notion, config, syncer, seenUrls, tracker } = ctx;
+  const cache = syncer.cache;
+
+  // In-run dedup
+  if (seenUrls.has(url)) return "skipped";
+  seenUrls.add(url);
+
+  // Cache-based URL dedup
+  if (cache.existingUrls.has(url)) {
+    log.debug({ url }, "skipped (exists in cache)");
+    return "skipped";
+  }
+
+  // Scrape
+  const markdown = await jinaReaderSemaphore.run(() =>
+    jinaBreaker.run(() =>
+      withRetry(() => scrapeJobPage(url, config), {
+        shouldRetry: isRetryableJina,
+        onRetry: (a) => log.warn({ url, attempt: a }, "jina scrape retry"),
+      }),
+    ),
+  );
+  const job = parseJobDetails(markdown, url, keyword);
+
+  // ATS-native enrichment — query the ATS public API for clean structured
+  // location/workplaceType/country data and prepend it to the body before the
+  // LLM eval. Failures fall back to Jina-only.
+  if (config.enableAtsEnrichment) {
+    const atsData = await atsApiSemaphore.run(() =>
+      atsApiRateLimiter.run(() => fetchAtsData(url, { title: job.title })),
+    );
+    if (atsData) {
+      log.debug({ url, source: atsData.source }, "ats enriched");
+      job.description = `${formatAtsBlock(atsData)}\n\n${job.description}`;
+
+      // ATS hard reject — workplaceType=OnSite is decided deterministically.
+      // The location-eligibility prompt explicitly tells the LLM to discount
+      // ATS metadata in favour of body text, which means OnSite signals leak
+      // through whenever the body is silent about workplace. Catch them here.
+      const atsCheck = atsStructuralFilter(atsData);
+      if (!atsCheck.pass) {
+        log.info(
+          { url, title: job.title, company: job.company, reason: atsCheck.reason },
+          "rejected (ats)",
+        );
+        await notionRateLimiter.run(() =>
+          notionBreaker.run(() =>
+            withRetry(() => insertJob(notion, config.notionDatabaseId, job, "Auto-Rejected"), {
+              shouldRetry: isRetryableNotion,
+            }),
+          ),
+        );
+        return "rejected";
+      }
+    }
+  }
+
+  // Structural pre-filter — deterministic checks (aggregators, etc.) before paying for LLM eval
+  const structural = structuralFilter(job);
+  if (!structural.pass) {
+    log.info(
+      { url, title: job.title, company: job.company, reason: structural.reason },
+      "rejected (structural)",
+    );
+    await notionRateLimiter.run(() =>
+      notionBreaker.run(() =>
+        withRetry(() => insertJob(notion, config.notionDatabaseId, job, "Auto-Rejected"), {
+          shouldRetry: isRetryableNotion,
+        }),
+      ),
+    );
+    return "rejected";
+  }
+
+  // Evaluate (profiles run in parallel internally)
+  const evaluation = await llmSemaphore.run(() =>
+    llmBreaker.run(() =>
+      withRetry(
+        () =>
+          evaluateJob(job, config.openrouterApiKey, {
+            tracker,
+            filters: ctx.filters,
+            model: config.llmModel,
+          }),
+        {
+          shouldRetry: isRetryableLLM,
+          onRetry: (a) => log.warn({ url, attempt: a }, "llm eval retry"),
+        },
+      ),
+    ),
+  );
+
+  if (evaluation.profileName) {
+    job.profile = evaluation.profileName;
+  }
+
+  if (!evaluation.pass) {
+    log.info(
+      { url, title: job.title, company: job.company, reason: evaluation.reason },
+      "rejected",
+    );
+    await notionRateLimiter.run(() =>
+      notionBreaker.run(() =>
+        withRetry(() => insertJob(notion, config.notionDatabaseId, job, "Auto-Rejected"), {
+          shouldRetry: isRetryableNotion,
+        }),
+      ),
+    );
+    return "rejected";
+  }
+
+  // Enrich
+  const enriched = await llmSemaphore.run(() =>
+    llmBreaker.run(() =>
+      withRetry(() => enrichJob(job, config.openrouterApiKey, tracker, config.llmModel), {
+        shouldRetry: isRetryableLLM,
+        onRetry: (a) => log.warn({ url, attempt: a }, "llm enrich retry"),
+      }),
+    ),
+  );
+  job.title = enriched.title;
+  job.company = enriched.company;
+  job.description = enriched.description;
+  job.location = enriched.location;
+
+  // Fuzzy dedup (cache-based company lookup, LLM for title comparison)
+  const existingTitles = cache.jobsByCompany.get(job.company) ?? [];
+  if (existingTitles.length > 0) {
+    const dedup = await llmSemaphore.run(() =>
+      withRetry(
+        () =>
+          checkFuzzyDuplicate(
+            job.title,
+            existingTitles,
+            config.openrouterApiKey,
+            tracker,
+            config.llmModel,
+          ),
+        { shouldRetry: isRetryableLLM },
+      ),
+    );
+    if (dedup.isDuplicate) {
+      log.info(
+        { url, title: job.title, company: job.company, matchedTitle: dedup.matchedTitle },
+        "duplicate",
+      );
+      return "duplicated";
+    }
+  }
+
+  // Company blocked (cache lookup)
+  if (cache.blockedCompanies.has(job.company)) {
+    log.info({ url, title: job.title, company: job.company }, "archived (company blocked)");
+    await notionRateLimiter.run(() =>
+      notionBreaker.run(() =>
+        withRetry(() => insertJob(notion, config.notionDatabaseId, job, "Archived"), {
+          shouldRetry: isRetryableNotion,
+        }),
+      ),
+    );
+    return "archived";
+  }
+
+  // Recent application (cache lookup)
+  if (cache.recentAppCompanies.has(job.company)) {
+    log.info({ url, title: job.title, company: job.company }, "company applied");
+    await notionRateLimiter.run(() =>
+      notionBreaker.run(() =>
+        withRetry(() => insertJob(notion, config.notionDatabaseId, job, "Company Applied"), {
+          shouldRetry: isRetryableNotion,
+        }),
+      ),
+    );
+    syncer.addTitle(job.company, job.title);
+    syncer.addUrl(url);
+    return "companyApplied";
+  }
+
+  // Insert
+  await notionRateLimiter.run(() =>
+    notionBreaker.run(() =>
+      withRetry(() => insertJob(notion, config.notionDatabaseId, job), {
+        shouldRetry: isRetryableNotion,
+      }),
+    ),
+  );
+  log.info({ url, title: job.title, company: job.company }, "inserted");
+
+  // Update cache for within-run dedup
+  syncer.addTitle(job.company, job.title);
+  syncer.addUrl(url);
+
+  return "inserted";
+}

@@ -94,6 +94,10 @@ describe("classification SQL builders", () => {
     expect(sql).toContain("category = 'agentic_engineer'");
     expect(sql).toContain("classification_confidence = 0.7420");
     expect(sql).toContain("classification_reason = 'agent''s signal'");
+    expect(sql).toContain("review_state = CASE");
+    expect(sql).toContain("THEN 'ready_for_review'");
+    expect(sql).toContain("INSERT INTO job_search.review_events");
+    expect(sql).toContain("ARRAY['classified', 'metadata']::text[]");
     expect(sql).toContain("DELETE FROM job_search.job_classification_labels");
     expect(sql).toContain("'agentic_engineer'");
     expect(sql).toContain("'metadata'");

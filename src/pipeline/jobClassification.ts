@@ -82,21 +82,52 @@ export function buildUpdateJobClassificationSql(
   jobId: string,
   classification: JobClassification,
 ): string {
-  return `WITH updated_job AS (
+  return `WITH current_job AS (
+  SELECT id, review_state
+  FROM job_search.jobs
+  WHERE id = ${quoteSqlLiteral(jobId)}
+  FOR UPDATE
+),
+updated_job AS (
   UPDATE job_search.jobs
 SET category = ${quoteSqlLiteral(classification.category)},
     rag_focus = ${quoteSqlLiteral(classification.ragFocus)},
     enterprise_focus = ${quoteSqlLiteral(classification.enterpriseFocus)},
     classification_confidence = ${classification.confidence.toFixed(4)},
     classification_reason = ${quoteSqlLiteral(classification.reason)},
-    classified_at = now()
-WHERE id = ${quoteSqlLiteral(jobId)}
-RETURNING id
+    classified_at = now(),
+    review_state = CASE
+      WHEN job_search.jobs.review_state IN ('new', 'needs_page_ingest', 'needs_classification')
+        THEN 'ready_for_review'
+      ELSE job_search.jobs.review_state
+    END
+FROM current_job
+WHERE job_search.jobs.id = current_job.id
+RETURNING job_search.jobs.id, current_job.review_state AS from_state, job_search.jobs.review_state AS to_state
 ),
 deleted_old_labels AS (
   DELETE FROM job_search.job_classification_labels
   WHERE job_id IN (SELECT id FROM updated_job)
     AND source_stage = ${quoteSqlLiteral(classification.sourceStage)}
+),
+inserted_review_event AS (
+  INSERT INTO job_search.review_events (
+    job_id,
+    from_state,
+    to_state,
+    reason_codes,
+    note,
+    actor
+  )
+  SELECT
+    id,
+    from_state,
+    to_state,
+    ARRAY['classified', ${quoteSqlLiteral(classification.sourceStage)}]::text[],
+    ${quoteSqlLiteral(classification.reason)},
+    'system'
+  FROM updated_job
+  WHERE from_state <> to_state
 )
 ${buildInsertLabelsSql(classification)};`;
 }

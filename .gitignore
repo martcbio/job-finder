@@ -5,6 +5,8 @@ node_modules
 out
 dist
 *.tgz
+brian-source-proof*.json
+brian-source-proof-summary.md
 
 # code coverage
 coverage

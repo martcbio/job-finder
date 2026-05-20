@@ -1,10 +1,12 @@
 import { runPsql, runPsqlJson } from "../src/db/psql";
 import {
   type PageIngestJobRow,
+  buildInsertPageIngestAttemptSql,
   buildPendingPageIngestSql,
   buildUpsertJobPageSql,
 } from "../src/pipeline/jobPageIngest";
 import { fetchJinaReaderWithUsage } from "../src/pipeline/search";
+import { fetchAtsData, formatAtsBlock } from "../src/services/ats";
 
 interface IngestPagesOptions {
   limit: number;
@@ -72,14 +74,18 @@ async function run(): Promise<void> {
   let totalReportedTokens = 0;
 
   for (const row of rows) {
+    const atsCaptured = await captureAtsMetadata(row);
     try {
+      const startedAt = Date.now();
       const call = await fetchJinaReaderWithUsage(
         row.canonical_url,
         { jinaApiKey, jinaBaseUrl: "https://r.jina.ai" },
         { timeoutMs: options.timeoutMs },
       );
+      const durationMs = Date.now() - startedAt;
       await runPsql(
         buildUpsertJobPageSql(row, {
+          source: "jina_reader",
           status: "success",
           markdown: call.markdown,
           usageTokens: call.usage.tokens,
@@ -87,13 +93,24 @@ async function run(): Promise<void> {
           error: null,
         }),
       );
+      await runPsql(
+        buildInsertPageIngestAttemptSql(row.id, {
+          source: "jina_reader",
+          status: "success",
+          durationMs,
+          usageTokens: call.usage.tokens,
+          metadata: { decompressedBytes: call.usage.decompressedContentLength },
+          error: null,
+        }),
+      );
       if (call.usage.tokens !== null) totalReportedTokens += call.usage.tokens;
-      results.push({ id: row.id, status: "success", tokens: call.usage.tokens });
+      results.push({ id: row.id, status: "success", atsCaptured, tokens: call.usage.tokens });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const status = errorStatus(message);
       await runPsql(
         buildUpsertJobPageSql(row, {
+          source: "jina_reader",
           status,
           markdown: null,
           usageTokens: null,
@@ -101,7 +118,17 @@ async function run(): Promise<void> {
           error: message,
         }),
       );
-      results.push({ id: row.id, status, error: message });
+      await runPsql(
+        buildInsertPageIngestAttemptSql(row.id, {
+          source: "jina_reader",
+          status,
+          durationMs: null,
+          usageTokens: null,
+          metadata: {},
+          error: message,
+        }),
+      );
+      results.push({ id: row.id, status, atsCaptured, error: message });
     }
   }
 
@@ -112,6 +139,49 @@ async function run(): Promise<void> {
 
   console.log(`Ingested ${results.length} page(s).`);
   console.log(`Reported Jina tokens: ${totalReportedTokens}`);
+}
+
+async function captureAtsMetadata(row: PageIngestJobRow): Promise<boolean> {
+  const startedAt = Date.now();
+  const atsData = await fetchAtsData(row.canonical_url, { title: row.title });
+  const durationMs = Date.now() - startedAt;
+
+  if (!atsData) {
+    await runPsql(
+      buildInsertPageIngestAttemptSql(row.id, {
+        source: "ats_api",
+        status: "skipped",
+        durationMs,
+        usageTokens: null,
+        metadata: { reason: "unsupported_or_unavailable" },
+        error: null,
+      }),
+    );
+    return false;
+  }
+
+  await runPsql(
+    buildUpsertJobPageSql(row, {
+      source: "ats_api",
+      status: "success",
+      markdown: formatAtsBlock(atsData),
+      usageTokens: null,
+      decompressedBytes: null,
+      error: null,
+    }),
+  );
+  await runPsql(
+    buildInsertPageIngestAttemptSql(row.id, {
+      source: "ats_api",
+      status: "success",
+      durationMs,
+      usageTokens: null,
+      metadata: atsData,
+      error: null,
+    }),
+  );
+
+  return true;
 }
 
 run().catch((err) => {

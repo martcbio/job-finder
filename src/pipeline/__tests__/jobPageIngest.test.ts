@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildPendingPageIngestSql, buildUpsertJobPageSql } from "../jobPageIngest";
+import {
+  buildInsertPageIngestAttemptSql,
+  buildPendingPageIngestSql,
+  buildUpsertJobPageSql,
+} from "../jobPageIngest";
 
 describe("buildPendingPageIngestSql", () => {
   test("selects jobs needing page ingestion", () => {
@@ -24,11 +28,49 @@ describe("buildUpsertJobPageSql", () => {
     );
 
     expect(sql).toContain("ON CONFLICT (job_id, source)");
+    expect(sql).toContain("'jina_reader'");
     expect(sql).toContain("Title: Agentic Engineer");
     expect(sql).toContain("usage_tokens");
     expect(sql).toContain("DELETE FROM job_search.job_classification_labels");
     expect(sql).toContain("source_stage = 'page'");
     expect(sql).toContain("category = CASE WHEN category = 'unclassified'");
     expect(sql).toContain("classification_confidence = CASE WHEN category = 'unclassified'");
+  });
+
+  test("upserts ATS metadata separately from Jina markdown", () => {
+    const sql = buildUpsertJobPageSql(
+      { id: "42", title: "Engineer", canonical_url: "https://example.com/job" },
+      {
+        source: "ats_api",
+        status: "success",
+        markdown: "## ATS Structured Data\n- Workplace type: Remote",
+        usageTokens: null,
+        decompressedBytes: null,
+        error: null,
+      },
+    );
+
+    expect(sql).toContain("'ats_api'");
+    expect(sql).toContain("## ATS Structured Data");
+    expect(sql).toContain("NULL");
+  });
+});
+
+describe("buildInsertPageIngestAttemptSql", () => {
+  test("records method attempts with structured metadata", () => {
+    const sql = buildInsertPageIngestAttemptSql("42", {
+      source: "ats_api",
+      status: "success",
+      durationMs: 123,
+      usageTokens: null,
+      metadata: { source: "greenhouse", workplaceType: null },
+      error: null,
+    });
+
+    expect(sql).toContain("INSERT INTO job_search.job_page_ingest_attempts");
+    expect(sql).toContain("'ats_api'");
+    expect(sql).toContain("'success'");
+    expect(sql).toContain("123");
+    expect(sql).toContain('"source":"greenhouse"');
   });
 });

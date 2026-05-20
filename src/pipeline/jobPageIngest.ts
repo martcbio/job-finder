@@ -1,5 +1,11 @@
 import { quoteSqlLiteral } from "../db/config";
+import { jsonbLiteral } from "../db/jsonSql";
 import { extractTitle } from "./scrape";
+
+export type PageIngestSource = "jina_reader" | "ats_api";
+export type PageIngestAttemptSource = PageIngestSource | "http_extract" | "browser";
+export type PageIngestStatus = "success" | "error" | "timeout";
+export type PageIngestAttemptStatus = PageIngestStatus | "skipped";
 
 export interface PageIngestJobRow {
   id: string;
@@ -8,10 +14,20 @@ export interface PageIngestJobRow {
 }
 
 export interface PageIngestResult {
-  status: "success" | "error" | "timeout";
+  source?: PageIngestSource;
+  status: PageIngestStatus;
   markdown: string | null;
   usageTokens: number | null;
   decompressedBytes: number | null;
+  error: string | null;
+}
+
+export interface PageIngestAttempt {
+  source: PageIngestAttemptSource;
+  status: PageIngestAttemptStatus;
+  durationMs: number | null;
+  usageTokens: number | null;
+  metadata: unknown;
   error: string | null;
 }
 
@@ -30,7 +46,9 @@ FROM (
 }
 
 export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestResult): string {
-  const titleRaw = result.markdown ? extractTitle(result.markdown) : null;
+  const source = result.source ?? "jina_reader";
+  const titleRaw =
+    source === "jina_reader" && result.markdown ? extractTitle(result.markdown) : null;
 
   return `WITH upserted_page AS (
   INSERT INTO job_search.job_pages (
@@ -46,7 +64,7 @@ export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestR
   )
   VALUES (
     ${quoteSqlLiteral(job.id)},
-    'jina_reader',
+    ${quoteSqlLiteral(source)},
     ${quoteSqlLiteral(result.status)},
     ${quoteSqlLiteral(job.canonical_url)},
     ${nullableText(titleRaw)},
@@ -82,6 +100,27 @@ SET page_ingest_status = ${quoteSqlLiteral(result.status)},
     classification_reason = CASE WHEN category = 'unclassified' THEN classification_reason ELSE NULL END,
     classified_at = CASE WHEN category = 'unclassified' THEN classified_at ELSE NULL END
 WHERE id IN (SELECT job_id FROM upserted_page);`;
+}
+
+export function buildInsertPageIngestAttemptSql(jobId: string, attempt: PageIngestAttempt): string {
+  return `INSERT INTO job_search.job_page_ingest_attempts (
+  job_id,
+  source,
+  status,
+  duration_ms,
+  usage_tokens,
+  metadata,
+  error
+)
+VALUES (
+  ${quoteSqlLiteral(jobId)},
+  ${quoteSqlLiteral(attempt.source)},
+  ${quoteSqlLiteral(attempt.status)},
+  ${nullableNumber(attempt.durationMs)},
+  ${nullableNumber(attempt.usageTokens)},
+  ${jsonbLiteral(attempt.metadata)},
+  ${nullableText(attempt.error)}
+);`;
 }
 
 function nullableText(value: string | null): string {

@@ -59,11 +59,15 @@ FROM (
     COUNT(DISTINCT jo.id)::int AS observations,
     COALESCE(array_remove(array_agg(DISTINCT sq.source_label), NULL), ARRAY[]::text[]) AS source_labels,
     COALESCE(array_remove(array_agg(DISTINCT sq.source_id), NULL), ARRAY[]::text[]) AS source_ids,
-    MIN(sr.description_raw) FILTER (WHERE sr.description_raw <> '') AS description_sample
+    COALESCE(
+      MAX(jp.markdown) FILTER (WHERE jp.markdown <> ''),
+      MIN(sr.description_raw) FILTER (WHERE sr.description_raw <> '')
+    ) AS description_sample
   FROM job_search.jobs j
   LEFT JOIN job_search.job_observations jo ON jo.job_id = j.id
   LEFT JOIN job_search.search_results sr ON sr.id = jo.search_result_id
   LEFT JOIN job_search.search_queries sq ON sq.id = sr.query_id
+  LEFT JOIN job_search.job_pages jp ON jp.job_id = j.id AND jp.status = 'success'
   ${whereSql}
   GROUP BY j.id
   ORDER BY j.last_seen_at DESC, j.id DESC

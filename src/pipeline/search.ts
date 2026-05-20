@@ -22,8 +22,13 @@ export interface JinaSearchCall {
   usage: JinaSearchUsage;
 }
 
-interface JinaSearchOptions {
+export interface JinaRequestOptions {
   timeoutMs?: number;
+}
+
+export interface JinaReaderCall {
+  markdown: string;
+  usage: JinaSearchUsage;
 }
 
 export function buildSearchQuery(keyword: string, domain: string): string {
@@ -60,7 +65,7 @@ function parseNumericHeader(headers: Headers, name: string): number | null {
 export async function fetchJinaSearchWithUsage(
   query: string,
   config: Pick<JobFinderConfig, "jinaApiKey">,
-  options: JinaSearchOptions = {},
+  options: JinaRequestOptions = {},
 ): Promise<JinaSearchCall> {
   const url = `https://s.jina.ai/?q=${encodeURIComponent(query)}`;
   const headers: Record<string, string> = {
@@ -109,6 +114,15 @@ export async function fetchViaJina(
   targetUrl: string,
   config: Pick<JobFinderConfig, "jinaBaseUrl" | "jinaApiKey">,
 ): Promise<string> {
+  const call = await fetchJinaReaderWithUsage(targetUrl, config);
+  return call.markdown;
+}
+
+export async function fetchJinaReaderWithUsage(
+  targetUrl: string,
+  config: Pick<JobFinderConfig, "jinaBaseUrl" | "jinaApiKey">,
+  options: JinaRequestOptions = {},
+): Promise<JinaReaderCall> {
   const jinaUrl = `${config.jinaBaseUrl}/${targetUrl}`;
   const headers: Record<string, string> = {
     Accept: "text/markdown",
@@ -117,8 +131,27 @@ export async function fetchViaJina(
     headers.Authorization = `Bearer ${config.jinaApiKey}`;
   }
 
-  const res = await fetchWithRetry(jinaUrl, { headers });
-  return res.text();
+  const controller = options.timeoutMs ? new AbortController() : null;
+  const timeout =
+    controller && options.timeoutMs
+      ? setTimeout(
+          () => controller.abort(`Jina reader timed out after ${options.timeoutMs}ms`),
+          options.timeoutMs,
+        )
+      : null;
+
+  try {
+    const res = await fetchWithRetry(jinaUrl, { headers, signal: controller?.signal });
+    return {
+      markdown: await res.text(),
+      usage: {
+        tokens: parseNumericHeader(res.headers, "x-usage-tokens"),
+        decompressedContentLength: parseNumericHeader(res.headers, "x-decompressed-content-length"),
+      },
+    };
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 export async function searchJobs(

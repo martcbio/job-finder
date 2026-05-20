@@ -34,10 +34,15 @@ FROM (
     j.title_normalized AS title,
     j.company_hint,
     j.canonical_url,
-    COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), '') AS description_text
+    CONCAT_WS(
+      E'\\n',
+      COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), ''),
+      COALESCE(string_agg(DISTINCT jp.markdown, E'\\n'), '')
+    ) AS description_text
   FROM job_search.jobs j
   LEFT JOIN job_search.job_observations jo ON jo.job_id = j.id
   LEFT JOIN job_search.search_results sr ON sr.id = jo.search_result_id
+  LEFT JOIN job_search.job_pages jp ON jp.job_id = j.id AND jp.status = 'success'
   WHERE j.category = 'unclassified'
   GROUP BY j.id
   ORDER BY j.last_seen_at DESC, j.id DESC

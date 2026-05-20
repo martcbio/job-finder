@@ -43,6 +43,7 @@ describe("classification SQL builders", () => {
     const sql = buildClassifiableJobsSql(20);
 
     expect(sql).toContain("WHERE j.category = 'unclassified'");
+    expect(sql).toContain("LEFT JOIN job_search.job_pages jp");
     expect(sql).toContain("LIMIT 20");
   });
 

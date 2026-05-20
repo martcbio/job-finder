@@ -27,6 +27,7 @@
     "jobs:classify": "bun scripts/classify-jobs.ts",
     "jobs:export": "bun scripts/export-jobs.ts",
     "jobs:ingest-pages": "bun scripts/ingest-job-pages.ts",
+    "jobs:review": "bun scripts/review-job.ts",
     "search": "bun scripts/search-only.ts",
     "search:db": "bun scripts/search-db.ts",
     "scrape": "bun src/index.ts",

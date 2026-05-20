@@ -39,6 +39,11 @@ describe("renderJobsMarkdown", () => {
       company_hint: "Acme",
       canonical_url: "https://jobs.example.com/42",
       review_state: "new",
+      category: "agentic_engineer",
+      rag_focus: "yes",
+      enterprise_focus: "no",
+      classification_confidence: "0.7400",
+      classification_reason: "matched agent language",
       first_seen_at: "2026-05-20T01:00:00.000Z",
       last_seen_at: "2026-05-20T02:00:00.000Z",
       observations: 2,
@@ -54,6 +59,8 @@ describe("renderJobsMarkdown", () => {
 
     expect(markdown).toContain("Filters: limit=5, state=new, run_id=3");
     expect(markdown).toContain("1. [Agentic Engineer \\[RAG\\]](https://jobs.example.com/42)");
+    expect(markdown).toContain("Classification: agentic_engineer / rag=yes / enterprise=no");
+    expect(markdown).toContain("Confidence: 0.7400");
     expect(markdown).toContain("Sources: Greenhouse, Lever");
     expect(markdown).toContain("Observations: 2");
     expect(markdown).toContain("Snippet: Build agentic search systems. With retrieval.");

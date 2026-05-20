@@ -12,6 +12,11 @@ export interface JobExportRow {
   company_hint: string | null;
   canonical_url: string;
   review_state: string;
+  category: string;
+  rag_focus: string;
+  enterprise_focus: string;
+  classification_confidence: string | null;
+  classification_reason: string | null;
   first_seen_at: string;
   last_seen_at: string;
   observations: number;
@@ -44,6 +49,11 @@ FROM (
     j.company_hint,
     j.canonical_url,
     j.review_state,
+    j.category,
+    j.rag_focus,
+    j.enterprise_focus,
+    j.classification_confidence,
+    j.classification_reason,
     j.first_seen_at,
     j.last_seen_at,
     COUNT(DISTINCT jo.id)::int AS observations,
@@ -85,6 +95,12 @@ export function renderJobsMarkdown(
     lines.push(`${index + 1}. [${escapeMarkdown(row.title)}](${row.canonical_url})`);
     lines.push(`   Company: ${row.company_hint ?? "Unknown"}`);
     lines.push(`   State: ${row.review_state}`);
+    lines.push(
+      `   Classification: ${row.category} / rag=${row.rag_focus} / enterprise=${row.enterprise_focus}`,
+    );
+    if (row.classification_confidence !== null) {
+      lines.push(`   Confidence: ${row.classification_confidence}`);
+    }
     lines.push(
       `   Sources: ${row.source_labels.length > 0 ? row.source_labels.join(", ") : "Unknown"}`,
     );

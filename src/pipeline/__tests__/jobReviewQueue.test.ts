@@ -52,6 +52,7 @@ describe("renderReviewQueueMarkdown", () => {
       ],
       duplicate_candidates: [
         {
+          candidate_id: "7",
           other_job_id: "41",
           other_title: "Agentic Engineer",
           other_company_hint: "Acme",
@@ -83,7 +84,7 @@ describe("renderReviewQueueMarkdown", () => {
     );
     expect(markdown).toContain("Job ID: 42");
     expect(markdown).toContain("rag_enterprise@page(0.7600)");
-    expect(markdown).toContain("Duplicate candidates: #41 Agentic Engineer");
+    expect(markdown).toContain("Duplicate candidates: candidate 7: #41 Agentic Engineer");
     expect(markdown).toContain(
       'Latest event: new -> ready_for_review by agent reasons=classified note="Looks plausible"',
     );

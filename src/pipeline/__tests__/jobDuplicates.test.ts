@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildDuplicateCandidateJobsSql,
+  buildReviewDuplicateCandidateSql,
   buildUpsertDuplicateCandidateSql,
   findDuplicateCandidates,
+  isDuplicateCandidateState,
 } from "../jobDuplicates";
 
 describe("findDuplicateCandidates", () => {
@@ -60,6 +62,12 @@ describe("findDuplicateCandidates", () => {
 });
 
 describe("duplicate SQL builders", () => {
+  test("accepts known duplicate candidate states", () => {
+    expect(isDuplicateCandidateState("suggested")).toBe(true);
+    expect(isDuplicateCandidateState("confirmed_same")).toBe(true);
+    expect(isDuplicateCandidateState("bogus")).toBe(false);
+  });
+
   test("builds candidate source query", () => {
     const sql = buildDuplicateCandidateJobsSql(50);
 
@@ -81,5 +89,26 @@ describe("duplicate SQL builders", () => {
     expect(sql).toContain("'9'");
     expect(sql).toContain("0.8123");
     expect(sql).toContain("WHERE job_search.duplicate_candidates.state = 'suggested'");
+  });
+
+  test("builds duplicate candidate review update with review event feedback", () => {
+    const sql = buildReviewDuplicateCandidateSql({
+      candidateId: "12",
+      state: "confirmed_distinct",
+      actor: "human",
+      reasonCodes: ["different_team"],
+      note: "Different job despite similar title",
+    });
+
+    expect(sql).toContain("FOR UPDATE");
+    expect(sql).toContain("WHERE id = '12'");
+    expect(sql).toContain("state = 'confirmed_distinct'");
+    expect(sql).toContain("reviewed_by = 'human'");
+    expect(sql).toContain("ARRAY['different_team']::text[]");
+    expect(sql).toContain("INSERT INTO job_search.review_events");
+    expect(sql).toContain(
+      "ARRAY['duplicate_candidate_review', 'confirmed_distinct', 'different_team']::text[]",
+    );
+    expect(sql).toContain("'Different job despite similar title'");
   });
 });

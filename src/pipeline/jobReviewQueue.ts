@@ -13,6 +13,7 @@ export interface ReviewQueueLabel {
 }
 
 export interface ReviewQueueDuplicate {
+  candidate_id: string;
   other_job_id: string;
   other_title: string;
   other_company_hint: string | null;
@@ -88,6 +89,7 @@ FROM (
       (
         SELECT json_agg(
           json_build_object(
+            'candidate_id', dc.id::text,
             'other_job_id', other_job.id::text,
             'other_title', other_job.title_normalized,
             'other_company_hint', other_job.company_hint,
@@ -201,7 +203,7 @@ function formatDuplicates(duplicates: ReviewQueueDuplicate[]): string {
   return duplicates
     .map(
       (duplicate) =>
-        `#${duplicate.other_job_id} ${duplicate.other_title} (${formatConfidence(duplicate.confidence)}; ${duplicate.reason})`,
+        `candidate ${duplicate.candidate_id}: #${duplicate.other_job_id} ${duplicate.other_title} (${formatConfidence(duplicate.confidence)}; ${duplicate.reason})`,
     )
     .join("; ");
 }

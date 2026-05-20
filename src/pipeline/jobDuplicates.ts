@@ -1,4 +1,5 @@
 import { quoteSqlLiteral } from "../db/config";
+import type { ReviewActor } from "./jobReview";
 
 export interface DuplicateJobRow {
   id: string;
@@ -13,6 +14,35 @@ export interface DuplicateCandidate {
   jobIdB: string;
   confidence: number;
   reason: string;
+}
+
+export const DUPLICATE_CANDIDATE_STATES = [
+  "suggested",
+  "confirmed_same",
+  "confirmed_distinct",
+  "ignored",
+] as const;
+
+export type DuplicateCandidateState = (typeof DUPLICATE_CANDIDATE_STATES)[number];
+
+export interface DuplicateCandidateReviewInput {
+  candidateId: string;
+  state: Exclude<DuplicateCandidateState, "suggested">;
+  actor: ReviewActor;
+  reasonCodes: string[];
+  note: string | null;
+}
+
+export interface DuplicateCandidateReviewRow {
+  id: string;
+  job_id_a: string;
+  job_id_b: string;
+  previous_state: DuplicateCandidateState;
+  state: DuplicateCandidateState;
+}
+
+export function isDuplicateCandidateState(value: string): value is DuplicateCandidateState {
+  return (DUPLICATE_CANDIDATE_STATES as readonly string[]).includes(value);
 }
 
 export function buildDuplicateCandidateJobsSql(limit: number): string {
@@ -53,6 +83,67 @@ DO UPDATE SET
   confidence = GREATEST(job_search.duplicate_candidates.confidence, EXCLUDED.confidence),
   reason = EXCLUDED.reason
 WHERE job_search.duplicate_candidates.state = 'suggested';`;
+}
+
+export function buildReviewDuplicateCandidateSql(input: DuplicateCandidateReviewInput): string {
+  return `WITH current_candidate AS (
+  SELECT id, job_id_a, job_id_b, state
+  FROM job_search.duplicate_candidates
+  WHERE id = ${quoteSqlLiteral(input.candidateId)}
+  FOR UPDATE
+),
+updated_candidate AS (
+  UPDATE job_search.duplicate_candidates dc
+  SET state = ${quoteSqlLiteral(input.state)},
+      reviewed_at = now(),
+      reviewed_by = ${quoteSqlLiteral(input.actor)},
+      review_reason_codes = ${textArrayLiteral(input.reasonCodes)},
+      review_note = ${nullableText(input.note)}
+  FROM current_candidate
+  WHERE dc.id = current_candidate.id
+  RETURNING
+    dc.id,
+    dc.job_id_a,
+    dc.job_id_b,
+    current_candidate.state AS previous_state,
+    dc.state
+),
+candidate_jobs AS (
+  SELECT j.id, j.review_state
+  FROM job_search.jobs j
+  JOIN updated_candidate uc ON j.id IN (uc.job_id_a, uc.job_id_b)
+),
+inserted_events AS (
+  INSERT INTO job_search.review_events (
+    job_id,
+    from_state,
+    to_state,
+    reason_codes,
+    note,
+    actor
+  )
+  SELECT
+    candidate_jobs.id,
+    candidate_jobs.review_state,
+    candidate_jobs.review_state,
+    ${textArrayLiteral(["duplicate_candidate_review", input.state, ...input.reasonCodes])},
+    ${nullableText(input.note)},
+    ${quoteSqlLiteral(input.actor)}
+  FROM candidate_jobs
+)
+SELECT COALESCE(
+  (
+    SELECT json_build_object(
+      'id', id::text,
+      'job_id_a', job_id_a::text,
+      'job_id_b', job_id_b::text,
+      'previous_state', previous_state,
+      'state', state
+    )
+    FROM updated_candidate
+  ),
+  'null'::json
+);`;
 }
 
 export function findDuplicateCandidates(
@@ -127,6 +218,15 @@ function orderJobIds(left: string, right: string): { jobIdA: string; jobIdB: str
       : { jobIdA: right, jobIdB: left };
   }
   return left < right ? { jobIdA: left, jobIdB: right } : { jobIdA: right, jobIdB: left };
+}
+
+function nullableText(value: string | null): string {
+  return value === null ? "NULL" : quoteSqlLiteral(value);
+}
+
+function textArrayLiteral(values: string[]): string {
+  if (values.length === 0) return "ARRAY[]::text[]";
+  return `ARRAY[${values.map((value) => quoteSqlLiteral(value)).join(", ")}]::text[]`;
 }
 
 function normalizeCompany(value: string | null): string {

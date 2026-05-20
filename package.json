@@ -23,6 +23,7 @@
   "scripts": {
     "db:check": "bun scripts/db-check.ts",
     "db:migrate": "bun scripts/db-migrate.ts",
+    "jobs:export": "bun scripts/export-jobs.ts",
     "search": "bun scripts/search-only.ts",
     "search:db": "bun scripts/search-db.ts",
     "scrape": "bun src/index.ts",

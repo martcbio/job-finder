@@ -23,6 +23,7 @@
   "scripts": {
     "cv:add-bullet": "bun scripts/cv-add-bullet.ts",
     "cv:draft": "bun scripts/cv-draft.ts",
+    "cv:review-draft": "bun scripts/cv-review-draft.ts",
     "db:check": "bun scripts/db-check.ts",
     "db:create": "bun scripts/db-create.ts",
     "db:migrate": "bun scripts/db-migrate.ts",

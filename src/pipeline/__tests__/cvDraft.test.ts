@@ -3,11 +3,19 @@ import {
   buildApprovedBulletInsertSql,
   buildCvDraftSourceSql,
   buildInsertCvDraftSql,
+  buildReviewCvDraftSql,
   type CvDraftJobRow,
+  isCvDraftStatus,
   renderCvDraftMarkdown,
 } from "../cvDraft";
 
 describe("CV draft SQL builders", () => {
+  test("accepts known CV draft statuses", () => {
+    expect(isCvDraftStatus("needs_human_review")).toBe(true);
+    expect(isCvDraftStatus("approved")).toBe(true);
+    expect(isCvDraftStatus("bogus")).toBe(false);
+  });
+
   test("builds source query for job labels and approved bullet blocks", () => {
     const sql = buildCvDraftSourceSql("42", 4);
 
@@ -47,6 +55,28 @@ describe("CV draft SQL builders", () => {
     expect(sql).toContain("'agentic_engineer'");
     expect(sql).toContain("'approved'");
     expect(sql).toContain("'Shipped reliable agent systems.'");
+  });
+
+  test("builds CV draft review update and linked review event", () => {
+    const sql = buildReviewCvDraftSql({
+      draftId: "9",
+      status: "approved",
+      actor: "human",
+      reasonCodes: ["accurate", "strong_match"],
+      note: "Ready to use",
+    });
+
+    expect(sql).toContain("FROM job_search.job_cv_drafts");
+    expect(sql).toContain("WHERE id = '9'");
+    expect(sql).toContain("SET status = 'approved'");
+    expect(sql).toContain("reviewed_by = 'human'");
+    expect(sql).toContain("ARRAY['accurate', 'strong_match']::text[]");
+    expect(sql).toContain("WHEN updated_draft.status = 'approved' THEN 'ready_to_apply'");
+    expect(sql).toContain("INSERT INTO job_search.review_events");
+    expect(sql).toContain(
+      "ARRAY['cv_draft_review', 'approved', 'accurate', 'strong_match']::text[]",
+    );
+    expect(sql).toContain("'Ready to use'");
   });
 });
 

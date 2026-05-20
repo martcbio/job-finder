@@ -1,4 +1,5 @@
 import { quoteSqlLiteral } from "../db/config";
+import type { ReviewActor } from "./jobReview";
 
 export interface CvDraftJobRow {
   id: string;
@@ -33,6 +34,35 @@ export interface CvDraft {
   themeKeys: string[];
   bulletBlockIds: string[];
   markdown: string;
+}
+
+export const CV_DRAFT_STATUSES = [
+  "needs_human_review",
+  "approved",
+  "rejected",
+  "superseded",
+] as const;
+
+export type CvDraftStatus = (typeof CV_DRAFT_STATUSES)[number];
+
+export interface CvDraftReviewInput {
+  draftId: string;
+  status: Exclude<CvDraftStatus, "needs_human_review">;
+  actor: ReviewActor;
+  reasonCodes: string[];
+  note: string | null;
+}
+
+export interface CvDraftReviewRow {
+  id: string;
+  job_id: string;
+  previous_status: CvDraftStatus;
+  status: CvDraftStatus;
+  event_id: string;
+}
+
+export function isCvDraftStatus(value: string): value is CvDraftStatus {
+  return (CV_DRAFT_STATUSES as readonly string[]).includes(value);
 }
 
 export function buildCvDraftSourceSql(jobId: string, maxBullets: number): string {
@@ -150,6 +180,79 @@ RETURNING json_build_object(
   'theme_key', theme_key,
   'title', title,
   'status', status
+);`;
+}
+
+export function buildReviewCvDraftSql(input: CvDraftReviewInput): string {
+  return `WITH current_draft AS (
+  SELECT id, job_id, status
+  FROM job_search.job_cv_drafts
+  WHERE id = ${quoteSqlLiteral(input.draftId)}
+  FOR UPDATE
+),
+updated_draft AS (
+  UPDATE job_search.job_cv_drafts jcd
+  SET status = ${quoteSqlLiteral(input.status)},
+      reviewed_at = now(),
+      reviewed_by = ${quoteSqlLiteral(input.actor)},
+      review_reason_codes = ${textArrayLiteral(input.reasonCodes)},
+      review_note = ${nullableText(input.note)}
+  FROM current_draft
+  WHERE jcd.id = current_draft.id
+  RETURNING
+    jcd.id,
+    jcd.job_id,
+    current_draft.status AS previous_status,
+    jcd.status
+),
+current_job AS (
+  SELECT j.id, j.review_state
+  FROM job_search.jobs j
+  JOIN updated_draft ud ON ud.job_id = j.id
+),
+updated_job AS (
+  UPDATE job_search.jobs j
+  SET review_state = CASE
+    WHEN updated_draft.status = 'approved' THEN 'ready_to_apply'
+    WHEN updated_draft.status = 'rejected' AND j.review_state = 'needs_cv_tailoring' THEN 'shortlisted'
+    ELSE j.review_state
+  END
+  FROM updated_draft
+  WHERE j.id = updated_draft.job_id
+  RETURNING j.id, j.review_state
+),
+inserted_event AS (
+  INSERT INTO job_search.review_events (
+    job_id,
+    from_state,
+    to_state,
+    reason_codes,
+    note,
+    actor
+  )
+  SELECT
+    current_job.id,
+    current_job.review_state,
+    updated_job.review_state,
+    ${textArrayLiteral(["cv_draft_review", input.status, ...input.reasonCodes])},
+    ${nullableText(input.note)},
+    ${quoteSqlLiteral(input.actor)}
+  FROM current_job
+  JOIN updated_job ON updated_job.id = current_job.id
+  RETURNING id
+)
+SELECT COALESCE(
+  (
+    SELECT json_build_object(
+      'id', updated_draft.id::text,
+      'job_id', updated_draft.job_id::text,
+      'previous_status', updated_draft.previous_status,
+      'status', updated_draft.status,
+      'event_id', inserted_event.id::text
+    )
+    FROM updated_draft, inserted_event
+  ),
+  'null'::json
 );`;
 }
 

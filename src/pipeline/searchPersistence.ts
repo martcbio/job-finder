@@ -1,6 +1,10 @@
 import { quoteSqlLiteral } from "../db/config";
 import { jsonbLiteral } from "../db/jsonSql";
 import { runPsql, runPsqlJson } from "../db/psql";
+import { parseAshbyUrl } from "../services/ats/ashby";
+import { parseGreenhouseUrl } from "../services/ats/greenhouse";
+import { parseLeverUrl } from "../services/ats/lever";
+import { parseWorkableUrl } from "../services/ats/workable";
 import type { SearchResultItem, SearchTarget } from "./searchTargets";
 
 export interface CreateSearchRunInput {
@@ -31,6 +35,13 @@ export interface PersistSearchResultInput {
   rank: number;
   sourceLabel: string;
   item: SearchResultItem;
+}
+
+export interface AtsIdentity {
+  source: "ashby" | "greenhouse" | "lever" | "workable";
+  org: string;
+  jobId: string;
+  canonicalKey: string;
 }
 
 interface IdRow {
@@ -93,6 +104,30 @@ export function companyHintFromUrl(
   } catch {
     return sourceLabel;
   }
+}
+
+export function atsIdentityFromUrl(rawUrl: string): AtsIdentity | null {
+  const greenhouse = parseGreenhouseUrl(rawUrl);
+  if (greenhouse) {
+    return atsIdentity("greenhouse", greenhouse.org, greenhouse.id);
+  }
+
+  const lever = parseLeverUrl(rawUrl);
+  if (lever) {
+    return atsIdentity("lever", lever.org, lever.id);
+  }
+
+  const ashby = parseAshbyUrl(rawUrl);
+  if (ashby) {
+    return atsIdentity("ashby", ashby.org, ashby.id);
+  }
+
+  const workable = parseWorkableUrl(rawUrl);
+  if (workable) {
+    return atsIdentity("workable", workable.slug, workable.shortcode);
+  }
+
+  return null;
 }
 
 export async function createSearchRun(input: CreateSearchRunInput): Promise<number> {
@@ -161,12 +196,17 @@ export async function completeSearchQuery(input: CompleteSearchQueryInput): Prom
 }
 
 export async function persistSearchResult(input: PersistSearchResultInput): Promise<void> {
+  await runPsql(buildPersistSearchResultSql(input));
+}
+
+export function buildPersistSearchResultSql(input: PersistSearchResultInput): string {
   const canonicalUrl = canonicalizeJobUrl(input.item.url);
+  const atsIdentity = atsIdentityFromUrl(input.item.url);
+  const canonicalKey = atsIdentity?.canonicalKey ?? canonicalUrl;
   const companyHint = companyHintFromUrl(input.sourceLabel, input.item.url, input.item.title);
   const normalizedTitle = normalizeTitle(input.item.title, input.sourceLabel);
 
-  await runPsql(
-    `WITH inserted_result AS (
+  return `WITH inserted_result AS (
        INSERT INTO job_search.search_results (
          query_id,
          rank,
@@ -174,7 +214,10 @@ export async function persistSearchResult(input: PersistSearchResultInput): Prom
          description_raw,
          url_raw,
          url_canonical,
-         company_hint
+         company_hint,
+         ats_source,
+         ats_org,
+         ats_job_id
        )
        VALUES (
          ${input.queryId},
@@ -183,33 +226,68 @@ export async function persistSearchResult(input: PersistSearchResultInput): Prom
          ${quoteSqlLiteral(input.item.description)},
          ${quoteSqlLiteral(input.item.url)},
          ${quoteSqlLiteral(canonicalUrl)},
-         ${nullableText(companyHint)}
+         ${nullableText(companyHint)},
+         ${nullableText(atsIdentity?.source ?? null)},
+         ${nullableText(atsIdentity?.org ?? null)},
+         ${nullableText(atsIdentity?.jobId ?? null)}
        )
        RETURNING id
      ),
-     upserted_job AS (
+     existing_job AS (
+       SELECT id
+       FROM job_search.jobs
+       WHERE canonical_key = ${quoteSqlLiteral(canonicalKey)}
+          OR (
+            ${nullableText(atsIdentity?.source ?? null)} IS NOT NULL
+            AND ats_source = ${nullableText(atsIdentity?.source ?? null)}
+            AND ats_org = ${nullableText(atsIdentity?.org ?? null)}
+            AND ats_job_id = ${nullableText(atsIdentity?.jobId ?? null)}
+          )
+       ORDER BY
+         CASE WHEN canonical_key = ${quoteSqlLiteral(canonicalKey)} THEN 0 ELSE 1 END,
+         id ASC
+       LIMIT 1
+     ),
+     updated_existing_job AS (
+       UPDATE job_search.jobs
+       SET last_seen_at = now(),
+           title_normalized = ${quoteSqlLiteral(normalizedTitle)},
+           company_hint = COALESCE(${nullableText(companyHint)}, job_search.jobs.company_hint),
+           ats_source = COALESCE(job_search.jobs.ats_source, ${nullableText(atsIdentity?.source ?? null)}),
+           ats_org = COALESCE(job_search.jobs.ats_org, ${nullableText(atsIdentity?.org ?? null)}),
+           ats_job_id = COALESCE(job_search.jobs.ats_job_id, ${nullableText(atsIdentity?.jobId ?? null)})
+       WHERE id IN (SELECT id FROM existing_job)
+       RETURNING id
+     ),
+     inserted_job AS (
        INSERT INTO job_search.jobs (
          canonical_key,
          canonical_url,
          title_normalized,
          company_hint,
+         ats_source,
+         ats_org,
+         ats_job_id,
          first_seen_at,
          last_seen_at
        )
-       VALUES (
-         ${quoteSqlLiteral(canonicalUrl)},
+       SELECT
+         ${quoteSqlLiteral(canonicalKey)},
          ${quoteSqlLiteral(canonicalUrl)},
          ${quoteSqlLiteral(normalizedTitle)},
          ${nullableText(companyHint)},
+         ${nullableText(atsIdentity?.source ?? null)},
+         ${nullableText(atsIdentity?.org ?? null)},
+         ${nullableText(atsIdentity?.jobId ?? null)},
          now(),
          now()
-       )
-       ON CONFLICT (canonical_key)
-       DO UPDATE SET
-         last_seen_at = now(),
-         title_normalized = EXCLUDED.title_normalized,
-         company_hint = COALESCE(EXCLUDED.company_hint, job_search.jobs.company_hint)
+       WHERE NOT EXISTS (SELECT 1 FROM updated_existing_job)
        RETURNING id
+     ),
+     upserted_job AS (
+       SELECT id FROM updated_existing_job
+       UNION ALL
+       SELECT id FROM inserted_job
      )
      INSERT INTO job_search.job_observations (
        job_id,
@@ -225,8 +303,7 @@ export async function persistSearchResult(input: PersistSearchResultInput): Prom
        ${quoteSqlLiteral(input.item.url)},
        ${nullableText(companyHint)}
      FROM upserted_job, inserted_result
-     ON CONFLICT (job_id, search_result_id) DO NOTHING;`,
-  );
+     ON CONFLICT (job_id, search_result_id) DO NOTHING;`;
 }
 
 export async function completeSearchRun(input: {
@@ -256,6 +333,15 @@ function nullableNumber(value: number | null): string {
 function normalizeTitle(title: string, fallback: string): string {
   const normalized = title.trim().replace(/\s+/g, " ");
   return normalized || fallback;
+}
+
+function atsIdentity(source: AtsIdentity["source"], org: string, jobId: string): AtsIdentity {
+  return {
+    source,
+    org,
+    jobId,
+    canonicalKey: `ats:${source}:${org.toLowerCase()}:${jobId.toLowerCase()}`,
+  };
 }
 
 function titleCaseSlug(value: string): string {

@@ -28,6 +28,7 @@
     "jobs:duplicates": "bun scripts/find-duplicate-candidates.ts",
     "jobs:export": "bun scripts/export-jobs.ts",
     "jobs:ingest-pages": "bun scripts/ingest-job-pages.ts",
+    "jobs:queue": "bun scripts/review-queue.ts",
     "jobs:review": "bun scripts/review-job.ts",
     "search": "bun scripts/search-only.ts",
     "search:db": "bun scripts/search-db.ts",

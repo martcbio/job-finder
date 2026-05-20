@@ -1,16 +1,7 @@
 import { SEARCH_DOMAINS, SEARCH_KEYWORDS } from "../src/config/search";
-import {
-  type BrianJobSite,
-  type BrianSiteSearchTarget,
-  buildBrianSiteSearchTarget,
-  resolveBrianJobSites,
-} from "../src/pipeline/brianSites";
-import {
-  type JinaSearchResult,
-  buildSearchQuery,
-  fetchJinaSearchWithUsage,
-  filterJobResults,
-} from "../src/pipeline/search";
+import { type BrianJobSite, resolveBrianJobSites } from "../src/pipeline/brianSites";
+import { fetchJinaSearchWithUsage } from "../src/pipeline/search";
+import { type SearchResultItem, buildSearchTargets } from "../src/pipeline/searchTargets";
 import {
   BRIAN_SEARCH_ENGINES,
   type BrianSearchEngine,
@@ -41,7 +32,7 @@ interface SearchOnlyResult {
   label: string;
   query: string | null;
   directUrl: string | null;
-  items: SearchOnlyItem[];
+  items: SearchResultItem[];
   urls: string[];
   usage: {
     tokens: number | null;
@@ -56,27 +47,6 @@ interface SearchLinkResult {
   engine: BrianSearchEngine | "direct";
   timeFilter: BrianTimeFilter;
   url: string;
-}
-
-type SearchTarget =
-  | {
-      kind: "search-query";
-      keyword: string;
-      label: string;
-      query: string;
-      filter: (results: JinaSearchResult[]) => SearchOnlyItem[];
-    }
-  | {
-      kind: "direct-url";
-      keyword: string;
-      label: string;
-      url: string;
-    };
-
-interface SearchOnlyItem {
-  title: string;
-  url: string;
-  description: string;
 }
 
 function splitList(value: string): string[] {
@@ -214,69 +184,6 @@ Options:
 Jina search is used only when --links and --dry-run are absent. Notion and OpenRouter are not loaded.`);
 }
 
-function filterResultsByTerms(results: JinaSearchResult[], terms: readonly string[]): SearchOnlyItem[] {
-  const normalizedTerms = terms.map((term) => term.toLowerCase());
-  const seen = new Set<string>();
-  const filtered: SearchOnlyItem[] = [];
-
-  for (const result of results) {
-    const url = result.url.replace(/[.,;:!?]+$/, "");
-    const normalizedUrl = url.toLowerCase();
-    if (normalizedTerms.some((term) => normalizedUrl.includes(term)) && !seen.has(url)) {
-      seen.add(url);
-      filtered.push({ ...result, url });
-    }
-  }
-
-  return filtered;
-}
-
-function buildTargets(options: SearchOnlyOptions): SearchTarget[] {
-  if (options.sites.length > 0) {
-    return options.keywords.flatMap((keyword) =>
-      options.sites.map((site) => {
-        const target = buildBrianSiteSearchTarget(site, {
-          keyword,
-          includeRemote: options.includeRemote,
-          location: options.location,
-          timeFilter: options.timeFilter,
-        });
-
-        return convertBrianTarget(keyword, target);
-      }),
-    );
-  }
-
-  return options.keywords.flatMap((keyword) =>
-    options.domains.map((domain) => ({
-      kind: "search-query" as const,
-      keyword,
-      label: domain,
-      query: buildSearchQuery(keyword, domain),
-      filter: (results: JinaSearchResult[]) => filterJobResults(results, domain),
-    })),
-  );
-}
-
-function convertBrianTarget(keyword: string, target: BrianSiteSearchTarget): SearchTarget {
-  if (target.kind === "direct-url") {
-    return {
-      kind: "direct-url",
-      keyword,
-      label: target.site.label,
-      url: target.url,
-    };
-  }
-
-  return {
-    kind: "search-query",
-    keyword,
-    label: target.site.label,
-    query: target.query,
-    filter: (results: JinaSearchResult[]) => filterResultsByTerms(results, target.filters),
-  };
-}
-
 async function run(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
@@ -285,7 +192,7 @@ async function run(): Promise<void> {
   }
 
   const options = parseOptions(args);
-  const targets = buildTargets(options);
+  const targets = buildSearchTargets(options);
   const selectedTargets = targets.slice(0, options.maxQueries);
 
   if (targets.length > selectedTargets.length) {
@@ -350,7 +257,7 @@ async function run(): Promise<void> {
 
   for (const target of selectedTargets) {
     if (options.dryRun) {
-      const items: SearchOnlyItem[] = [];
+      const items: SearchResultItem[] = [];
       const urls: string[] = [];
       const usage = { tokens: null, decompressedContentLength: null };
       results.push({

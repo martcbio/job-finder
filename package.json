@@ -24,6 +24,7 @@
     "db:check": "bun scripts/db-check.ts",
     "db:migrate": "bun scripts/db-migrate.ts",
     "search": "bun scripts/search-only.ts",
+    "search:db": "bun scripts/search-db.ts",
     "scrape": "bun src/index.ts",
     "reconcile": "bun src/index.ts --reconcile-only",
     "test": "bun test src/**/__tests__/",

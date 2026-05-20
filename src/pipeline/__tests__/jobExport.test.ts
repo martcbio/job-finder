@@ -6,6 +6,7 @@ describe("buildJobsExportSql", () => {
     const sql = buildJobsExportSql({ limit: 25, reviewState: null, runId: null });
 
     expect(sql).toContain("FROM job_search.jobs j");
+    expect(sql).toContain("FROM job_search.job_classification_labels jcl");
     expect(sql).toContain("ORDER BY j.last_seen_at DESC, j.id DESC");
     expect(sql).toContain("LIMIT 25");
     expect(sql).not.toContain("j.review_state =");
@@ -44,6 +45,20 @@ describe("renderJobsMarkdown", () => {
       enterprise_focus: "no",
       classification_confidence: "0.7400",
       classification_reason: "matched agent language",
+      classification_labels: [
+        {
+          label: "agentic_engineer",
+          source_stage: "page",
+          confidence: "0.7400",
+          reason: "matched agent language",
+        },
+        {
+          label: "developer_tools",
+          source_stage: "metadata",
+          confidence: "0.6800",
+          reason: "matched developer-tooling signal",
+        },
+      ],
       first_seen_at: "2026-05-20T01:00:00.000Z",
       last_seen_at: "2026-05-20T02:00:00.000Z",
       observations: 2,
@@ -60,6 +75,9 @@ describe("renderJobsMarkdown", () => {
     expect(markdown).toContain("Filters: limit=5, state=new, run_id=3");
     expect(markdown).toContain("1. [Agentic Engineer \\[RAG\\]](https://jobs.example.com/42)");
     expect(markdown).toContain("Classification: agentic_engineer / rag=yes / enterprise=no");
+    expect(markdown).toContain(
+      "Labels: agentic_engineer@page(0.7400), developer_tools@metadata(0.6800)",
+    );
     expect(markdown).toContain("Confidence: 0.7400");
     expect(markdown).toContain("Sources: Greenhouse, Lever");
     expect(markdown).toContain("Observations: 2");

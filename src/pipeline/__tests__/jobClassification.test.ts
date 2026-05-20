@@ -16,16 +16,20 @@ describe("classifyJobText", () => {
     expect(classification.category).toBe("agentic_architect");
     expect(classification.ragFocus).toBe("yes");
     expect(classification.confidence).toBeGreaterThan(0.75);
+    expect(classification.sourceStage).toBe("metadata");
+    expect(classification.labels.map((label) => label.label)).toContain("agentic_architect");
   });
 
   test("classifies FDE roles before generic agent roles", () => {
     const classification = classifyJobText({
       title: "Forward Deployed Engineer, AI Agents",
-      description: "Work with enterprise customers to ship agent workflows.",
+      description: "Work with enterprise customers to ship retrieval agent workflows.",
     });
 
     expect(classification.category).toBe("fde");
     expect(classification.enterpriseFocus).toBe("yes");
+    expect(classification.labels.map((label) => label.label)).toContain("fde");
+    expect(classification.labels.map((label) => label.label)).toContain("rag_enterprise");
   });
 
   test("classifies inference roles", () => {
@@ -35,6 +39,28 @@ describe("classifyJobText", () => {
     });
 
     expect(classification.category).toBe("inference_engineer");
+    expect(classification.labels.map((label) => label.label)).toContain("inference_engineer");
+  });
+
+  test("emits a broad multi-label set without forcing a single fit decision", () => {
+    const classification = classifyJobText({
+      title: "Founding AI Engineer, Developer Platform",
+      description:
+        "Build agentic LLM applications, SDKs, APIs, RAG workflows, and enterprise compliance features.",
+      hasPageSnapshot: true,
+    });
+
+    expect(classification.sourceStage).toBe("page");
+    expect(classification.category).toBe("agentic_engineer");
+    expect(classification.labels.map((label) => label.label)).toEqual(
+      expect.arrayContaining([
+        "agentic_engineer",
+        "founding_engineer",
+        "backend_product_engineering",
+        "developer_tools",
+        "rag_enterprise",
+      ]),
+    );
   });
 });
 
@@ -54,11 +80,22 @@ describe("classification SQL builders", () => {
       enterpriseFocus: "no",
       confidence: 0.742,
       reason: "agent's signal",
+      sourceStage: "metadata",
+      labels: [
+        {
+          label: "agentic_engineer",
+          confidence: 0.742,
+          reason: "agent's signal",
+        },
+      ],
     });
 
     expect(sql).toContain("WHERE id = '42'");
     expect(sql).toContain("category = 'agentic_engineer'");
     expect(sql).toContain("classification_confidence = 0.7420");
     expect(sql).toContain("classification_reason = 'agent''s signal'");
+    expect(sql).toContain("DELETE FROM job_search.job_classification_labels");
+    expect(sql).toContain("'agentic_engineer'");
+    expect(sql).toContain("'metadata'");
   });
 });

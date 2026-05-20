@@ -17,12 +17,20 @@ export interface JobExportRow {
   enterprise_focus: string;
   classification_confidence: string | null;
   classification_reason: string | null;
+  classification_labels: JobExportLabel[];
   first_seen_at: string;
   last_seen_at: string;
   observations: number;
   source_labels: string[];
   source_ids: string[];
   description_sample: string | null;
+}
+
+export interface JobExportLabel {
+  label: string;
+  source_stage: string;
+  confidence: string | number;
+  reason: string;
 }
 
 export interface RenderJobsMarkdownOptions {
@@ -54,6 +62,25 @@ FROM (
     j.enterprise_focus,
     j.classification_confidence,
     j.classification_reason,
+    COALESCE(
+      (
+        SELECT json_agg(
+          json_build_object(
+            'label', jcl.label,
+            'source_stage', jcl.source_stage,
+            'confidence', jcl.confidence,
+            'reason', jcl.reason
+          )
+          ORDER BY
+            CASE jcl.source_stage WHEN 'page' THEN 0 WHEN 'metadata' THEN 1 ELSE 2 END,
+            jcl.confidence DESC,
+            jcl.label
+        )
+        FROM job_search.job_classification_labels jcl
+        WHERE jcl.job_id = j.id
+      ),
+      '[]'::json
+    ) AS classification_labels,
     j.first_seen_at,
     j.last_seen_at,
     COUNT(DISTINCT jo.id)::int AS observations,
@@ -102,6 +129,9 @@ export function renderJobsMarkdown(
     lines.push(
       `   Classification: ${row.category} / rag=${row.rag_focus} / enterprise=${row.enterprise_focus}`,
     );
+    if (row.classification_labels.length > 0) {
+      lines.push(`   Labels: ${formatLabels(row.classification_labels)}`);
+    }
     if (row.classification_confidence !== null) {
       lines.push(`   Confidence: ${row.classification_confidence}`);
     }
@@ -134,4 +164,19 @@ function truncateOneLine(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function formatLabels(labels: JobExportLabel[]): string {
+  return labels
+    .map(
+      (label) =>
+        `${label.label}@${label.source_stage}${label.confidence ? `(${formatConfidence(label.confidence)})` : ""}`,
+    )
+    .join(", ");
+}
+
+function formatConfidence(confidence: string | number): string {
+  if (typeof confidence === "number") return confidence.toFixed(4);
+  const parsed = Number.parseFloat(confidence);
+  return Number.isFinite(parsed) ? parsed.toFixed(4) : confidence;
 }

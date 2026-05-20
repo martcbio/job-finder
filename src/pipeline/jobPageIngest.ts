@@ -66,6 +66,11 @@ export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestR
     decompressed_bytes = EXCLUDED.decompressed_bytes,
     error = EXCLUDED.error
   RETURNING job_id
+),
+deleted_page_labels AS (
+  DELETE FROM job_search.job_classification_labels
+  WHERE job_id IN (SELECT job_id FROM upserted_page)
+    AND source_stage = 'page'
 )
 UPDATE job_search.jobs
 SET page_ingest_status = ${quoteSqlLiteral(result.status)},

@@ -62,6 +62,7 @@ async function run(): Promise<void> {
     const classification = classifyJobText({
       title: row.title,
       description: row.description_text,
+      hasPageSnapshot: row.has_page_snapshot,
     });
     await runPsql(buildUpdateJobClassificationSql(row.id, classification));
     results.push({
@@ -80,7 +81,7 @@ async function run(): Promise<void> {
   console.log(`Classified ${results.length} job(s).`);
   for (const result of results) {
     console.log(
-      `${result.id}: ${result.category}, rag=${result.ragFocus}, enterprise=${result.enterpriseFocus}, confidence=${result.confidence.toFixed(2)} — ${result.title}`,
+      `${result.id}: ${result.category}, rag=${result.ragFocus}, enterprise=${result.enterpriseFocus}, labels=${result.labels.map((label) => label.label).join(",") || "none"}, confidence=${result.confidence.toFixed(2)} — ${result.title}`,
     );
   }
 }

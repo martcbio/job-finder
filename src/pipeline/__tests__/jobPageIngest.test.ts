@@ -26,6 +26,8 @@ describe("buildUpsertJobPageSql", () => {
     expect(sql).toContain("ON CONFLICT (job_id, source)");
     expect(sql).toContain("Title: Agentic Engineer");
     expect(sql).toContain("usage_tokens");
+    expect(sql).toContain("DELETE FROM job_search.job_classification_labels");
+    expect(sql).toContain("source_stage = 'page'");
     expect(sql).toContain("category = CASE WHEN category = 'unclassified'");
     expect(sql).toContain("classification_confidence = CASE WHEN category = 'unclassified'");
   });

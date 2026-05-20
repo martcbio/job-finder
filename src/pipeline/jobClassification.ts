@@ -9,6 +9,24 @@ export type JobCategory =
   | "other";
 
 export type FocusSignal = "yes" | "no" | "unknown";
+export type ClassificationStage = "metadata" | "page";
+export type JobClassificationLabel =
+  | "agentic_engineer"
+  | "agentic_architect"
+  | "rag_enterprise"
+  | "fde"
+  | "solutions_engineer"
+  | "inference_engineer"
+  | "ml_platform"
+  | "backend_product_engineering"
+  | "developer_tools"
+  | "data_engineering"
+  | "security_ai"
+  | "founding_engineer"
+  | "ai_product_manager"
+  | "non_engineering"
+  | "staffing_agency"
+  | "index_not_job";
 
 export interface ClassifiableJobRow {
   id: string;
@@ -16,6 +34,13 @@ export interface ClassifiableJobRow {
   company_hint: string | null;
   canonical_url: string;
   description_text: string;
+  has_page_snapshot: boolean;
+}
+
+export interface ClassificationLabelMatch {
+  label: JobClassificationLabel;
+  confidence: number;
+  reason: string;
 }
 
 export interface JobClassification {
@@ -24,6 +49,8 @@ export interface JobClassification {
   enterpriseFocus: FocusSignal;
   confidence: number;
   reason: string;
+  sourceStage: ClassificationStage;
+  labels: ClassificationLabelMatch[];
 }
 
 export function buildClassifiableJobsSql(limit: number): string {
@@ -34,6 +61,7 @@ FROM (
     j.title_normalized AS title,
     j.company_hint,
     j.canonical_url,
+    BOOL_OR(jp.id IS NOT NULL) AS has_page_snapshot,
     CONCAT_WS(
       E'\\n',
       COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), ''),
@@ -54,29 +82,94 @@ export function buildUpdateJobClassificationSql(
   jobId: string,
   classification: JobClassification,
 ): string {
-  return `UPDATE job_search.jobs
+  return `WITH updated_job AS (
+  UPDATE job_search.jobs
 SET category = ${quoteSqlLiteral(classification.category)},
     rag_focus = ${quoteSqlLiteral(classification.ragFocus)},
     enterprise_focus = ${quoteSqlLiteral(classification.enterpriseFocus)},
     classification_confidence = ${classification.confidence.toFixed(4)},
     classification_reason = ${quoteSqlLiteral(classification.reason)},
     classified_at = now()
-WHERE id = ${quoteSqlLiteral(jobId)};`;
+WHERE id = ${quoteSqlLiteral(jobId)}
+RETURNING id
+),
+deleted_old_labels AS (
+  DELETE FROM job_search.job_classification_labels
+  WHERE job_id IN (SELECT id FROM updated_job)
+    AND source_stage = ${quoteSqlLiteral(classification.sourceStage)}
+)
+${buildInsertLabelsSql(classification)};`;
 }
 
-export function classifyJobText(input: { title: string; description: string }): JobClassification {
+export function classifyJobText(input: {
+  title: string;
+  description: string;
+  hasPageSnapshot?: boolean;
+}): JobClassification {
   const haystack = `${input.title}\n${input.description}`.toLowerCase();
   const title = input.title.toLowerCase();
   const reasons: string[] = [];
+  const labels: ClassificationLabelMatch[] = [];
 
   let category: JobClassification["category"] = "other";
   let confidence = 0.52;
 
-  if (matches(haystack, ["forward deployed", "field engineer", "fde", "solutions engineer"])) {
+  if (matches(haystack, ["general application", "job board", "view all jobs", "browse jobs"])) {
+    addLabel(labels, "index_not_job", 0.86, "matched index/general-application language");
+  }
+
+  if (
+    matches(haystack, [
+      "staffing agency",
+      "recruitment agency",
+      "talent marketplace",
+      "our client",
+      "for one of our clients",
+      "on behalf of",
+    ])
+  ) {
+    addLabel(labels, "staffing_agency", 0.82, "matched staffing/intermediary language");
+  }
+
+  if (matches(title, ["product manager", "product lead"]) && matches(haystack, [" ai", "llm"])) {
+    addLabel(labels, "ai_product_manager", 0.78, "matched AI product-management language");
+  } else if (
+    matches(title, ["account executive", "sales", "marketing", "recruiter", "designer"]) &&
+    !matches(title, ["sales engineer", "solutions engineer"])
+  ) {
+    addLabel(labels, "non_engineering", 0.74, "matched non-engineering title language");
+  }
+
+  if (matches(haystack, ["forward deployed", "field engineer", "fde"])) {
     category = "fde";
     confidence = 0.76;
     reasons.push("matched FDE/customer-facing engineering language");
-  } else if (
+    addLabel(labels, "fde", confidence, "matched forward-deployed engineering signal");
+  }
+
+  if (
+    matches(haystack, ["solutions engineer", "solution engineer", "sales engineer", "pre-sales"])
+  ) {
+    if (category === "other") {
+      category = "fde";
+      confidence = 0.72;
+      reasons.push("matched solutions-engineering language");
+    }
+    addLabel(labels, "solutions_engineer", 0.74, "matched solutions-engineering signal");
+  }
+
+  if (
+    matches(haystack, [
+      "founding engineer",
+      "founding ai engineer",
+      "founder engineer",
+      "first engineer",
+    ])
+  ) {
+    addLabel(labels, "founding_engineer", 0.78, "matched founding-engineer language");
+  }
+
+  if (
     matches(haystack, [
       "inference",
       "model serving",
@@ -88,24 +181,92 @@ export function classifyJobText(input: { title: string; description: string }): 
       "latency",
     ])
   ) {
-    category = "inference_engineer";
-    confidence = 0.78;
-    reasons.push("matched inference/model-serving language");
-  } else if (
+    if (category === "other") {
+      category = "inference_engineer";
+      confidence = 0.78;
+      reasons.push("matched inference/model-serving language");
+    }
+    addLabel(labels, "inference_engineer", 0.78, "matched inference/model-serving signal");
+  }
+
+  if (
+    matches(haystack, [
+      "ml platform",
+      "mlops",
+      "machine learning platform",
+      "model training",
+      "training pipeline",
+      "evaluation platform",
+      "eval platform",
+    ])
+  ) {
+    addLabel(labels, "ml_platform", 0.72, "matched ML platform/evaluation signal");
+  }
+
+  if (
     matches(title, ["architect"]) &&
     matches(haystack, ["agentic", " ai agent", " agents", "llm"])
   ) {
-    category = "agentic_architect";
-    confidence = 0.8;
-    reasons.push("matched architect title plus agent/LLM language");
+    if (category === "other") {
+      category = "agentic_architect";
+      confidence = 0.8;
+      reasons.push("matched architect title plus agent/LLM language");
+    }
+    addLabel(labels, "agentic_architect", 0.8, "matched agentic architect signal");
   } else if (
-    matches(haystack, ["agentic", " ai agent", " agents", "llm application", "ai engineer"])
+    matches(haystack, [
+      "agentic",
+      " ai agent",
+      " agents",
+      "llm application",
+      "ai engineer",
+      "ai-native",
+    ])
   ) {
-    category = "agentic_engineer";
-    confidence = 0.74;
-    reasons.push("matched agent/LLM application engineering language");
-  } else {
-    reasons.push("no strong target-category signal found");
+    if (category === "other") {
+      category = "agentic_engineer";
+      confidence = 0.74;
+      reasons.push("matched agent/LLM application engineering language");
+    }
+    addLabel(labels, "agentic_engineer", 0.74, "matched agent/LLM application signal");
+  }
+
+  if (matches(haystack, ["backend", "api", "distributed systems", "full stack", "full-stack"])) {
+    addLabel(
+      labels,
+      "backend_product_engineering",
+      0.62,
+      "matched backend/product engineering signal",
+    );
+  }
+
+  if (
+    matches(haystack, [
+      "developer tools",
+      "devtools",
+      "developer experience",
+      "sdk",
+      "api platform",
+      "cli",
+    ])
+  ) {
+    addLabel(labels, "developer_tools", 0.68, "matched developer-tooling signal");
+  }
+
+  if (
+    matches(haystack, [
+      "data engineer",
+      "data pipeline",
+      "etl",
+      "warehouse",
+      "analytics engineering",
+    ])
+  ) {
+    addLabel(labels, "data_engineering", 0.7, "matched data-engineering signal");
+  }
+
+  if (matches(haystack, ["security", "compliance"]) && matches(haystack, [" ai", "llm", "agent"])) {
+    addLabel(labels, "security_ai", 0.68, "matched security plus AI/LLM signal");
   }
 
   const ragFocus = classifyFocus(haystack, [
@@ -131,6 +292,11 @@ export function classifyJobText(input: { title: string; description: string }): 
     "internal tools",
   ]);
   if (enterpriseFocus === "yes") reasons.push("matched enterprise/productization signal");
+  if (ragFocus === "yes" && enterpriseFocus === "yes") {
+    addLabel(labels, "rag_enterprise", 0.76, "matched RAG and enterprise/productization signals");
+  }
+
+  if (reasons.length === 0) reasons.push("no strong target-category signal found");
 
   return {
     category,
@@ -138,7 +304,55 @@ export function classifyJobText(input: { title: string; description: string }): 
     enterpriseFocus,
     confidence,
     reason: reasons.join("; "),
+    sourceStage: input.hasPageSnapshot ? "page" : "metadata",
+    labels: labels.sort((left, right) => right.confidence - left.confidence),
   };
+}
+
+function buildInsertLabelsSql(classification: JobClassification): string {
+  if (classification.labels.length === 0) {
+    return "SELECT 0 WHERE false";
+  }
+
+  const values = classification.labels
+    .map(
+      (label) => `(
+    (SELECT id FROM updated_job),
+    ${quoteSqlLiteral(label.label)},
+    ${quoteSqlLiteral(classification.sourceStage)},
+    ${label.confidence.toFixed(4)},
+    ${quoteSqlLiteral(label.reason)}
+  )`,
+    )
+    .join(",\n");
+
+  return `INSERT INTO job_search.job_classification_labels (
+  job_id,
+  label,
+  source_stage,
+  confidence,
+  reason
+)
+VALUES
+${values};`;
+}
+
+function addLabel(
+  labels: ClassificationLabelMatch[],
+  label: JobClassificationLabel,
+  confidence: number,
+  reason: string,
+): void {
+  const existing = labels.find((candidate) => candidate.label === label);
+  if (!existing) {
+    labels.push({ label, confidence, reason });
+    return;
+  }
+
+  if (confidence > existing.confidence) {
+    existing.confidence = confidence;
+    existing.reason = reason;
+  }
 }
 
 function classifyFocus(haystack: string, needles: string[]): FocusSignal {

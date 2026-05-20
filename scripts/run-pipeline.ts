@@ -8,6 +8,15 @@ import {
   shellQuoteArgs,
 } from "../src/pipeline/pipelinePlan";
 import {
+  type PipelineRunRow,
+  type PipelineStepStartRow,
+  buildCompletePipelineRunSql,
+  buildCompletePipelineRunStepSql,
+  buildCreatePipelineRunSql,
+  buildInsertPipelineRunStepsSql,
+  buildStartPipelineRunStepSql,
+} from "../src/pipeline/pipelineRun";
+import {
   type SavedSweepRow,
   buildGetSavedSweepSql,
   savedSweepToPipelineOptions,
@@ -17,6 +26,7 @@ import { type BrianTimeFilter, isBrianTimeFilter } from "../src/pipeline/searchE
 interface RunPipelineOptions extends PipelinePlanOptions {
   dryRun: boolean;
   json: boolean;
+  sweepName: string | null;
 }
 
 interface RuntimeOptions {
@@ -129,6 +139,7 @@ async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
       ...savedSweepToPipelineOptions(row, runtime.skipSteps),
       dryRun: runtime.dryRun,
       json: runtime.json,
+      sweepName: runtime.sweepName,
     };
   }
 
@@ -154,6 +165,7 @@ async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
     skipSteps: runtime.skipSteps,
     dryRun: runtime.dryRun,
     json: runtime.json,
+    sweepName: null,
   };
 }
 
@@ -187,7 +199,7 @@ Options:
 Steps: db_check, search, ingest_pages, classify, duplicates, queue.`);
 }
 
-async function runStep(step: PipelineStep): Promise<void> {
+async function runStep(step: PipelineStep): Promise<number> {
   console.error(`\n==> ${step.name}: ${step.description}`);
   console.error(shellQuoteArgs(step.command));
 
@@ -197,9 +209,73 @@ async function runStep(step: PipelineStep): Promise<void> {
     stdin: "inherit",
   });
   const exitCode = await proc.exited;
-  if (exitCode !== 0) {
-    throw new Error(`Pipeline step ${step.name} failed with exit code ${exitCode}`);
+  return exitCode;
+}
+
+async function createAuditedRun(
+  options: RunPipelineOptions,
+  plan: PipelineStep[],
+  args: string[],
+): Promise<PipelineRunRow> {
+  const runRow = await runPsqlJson<PipelineRunRow>(
+    buildCreatePipelineRunSql({
+      sweepName: options.sweepName,
+      commandArgs: args,
+    }),
+  );
+  await runPsqlJson(buildInsertPipelineRunStepsSql(runRow.id, plan));
+  return runRow;
+}
+
+async function executeAuditedPlan(runId: string, plan: PipelineStep[]): Promise<void> {
+  for (const [index, step] of plan.entries()) {
+    const position = index + 1;
+    const startedAt = Date.now();
+    await runPsqlJson<PipelineStepStartRow>(buildStartPipelineRunStepSql(runId, position));
+
+    const exitCode = await runStep(step);
+    const durationMs = Date.now() - startedAt;
+    if (exitCode !== 0) {
+      const message = `Pipeline step ${step.name} failed with exit code ${exitCode}`;
+      await runPsqlJson(
+        buildCompletePipelineRunStepSql({
+          runId,
+          position,
+          status: "failed",
+          durationMs,
+          exitCode,
+          error: message,
+        }),
+      );
+      await runPsqlJson(
+        buildCompletePipelineRunSql({
+          runId,
+          status: "failed",
+          errorSummary: message,
+        }),
+      );
+      throw new Error(message);
+    }
+
+    await runPsqlJson(
+      buildCompletePipelineRunStepSql({
+        runId,
+        position,
+        status: "completed",
+        durationMs,
+        exitCode,
+        error: null,
+      }),
+    );
   }
+
+  await runPsqlJson(
+    buildCompletePipelineRunSql({
+      runId,
+      status: "completed",
+      errorSummary: null,
+    }),
+  );
 }
 
 async function run(): Promise<void> {
@@ -231,9 +307,10 @@ async function run(): Promise<void> {
     return;
   }
 
-  for (const step of plan) {
-    await runStep(step);
-  }
+  const runRow = await createAuditedRun(options, plan, args);
+  console.error(`Pipeline run ${runRow.id} started.`);
+  await executeAuditedPlan(runRow.id, plan);
+  console.error(`Pipeline run ${runRow.id} completed.`);
 }
 
 run().catch((err) => {

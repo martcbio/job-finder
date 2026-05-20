@@ -5,12 +5,15 @@ import {
   buildPendingPageIngestSql,
   buildUpsertJobPageSql,
 } from "../src/pipeline/jobPageIngest";
+import { fetchHttpPageMarkdown } from "../src/pipeline/httpPageExtract";
 import { fetchJinaReaderWithUsage } from "../src/pipeline/search";
 import { fetchAtsData, formatAtsBlock } from "../src/services/ats";
 
 interface IngestPagesOptions {
   limit: number;
   timeoutMs: number;
+  httpTimeoutMs: number;
+  httpMinTextLength: number;
   json: boolean;
 }
 
@@ -35,6 +38,8 @@ function parseOptions(args: string[]): IngestPagesOptions {
   return {
     limit: readNumberFlag(args, "--limit", 25),
     timeoutMs: readNumberFlag(args, "--timeout-ms", 45000),
+    httpTimeoutMs: readNumberFlag(args, "--http-timeout-ms", 15000),
+    httpMinTextLength: readNumberFlag(args, "--http-min-text-length", 500),
     json: args.includes("--json"),
   };
 }
@@ -47,9 +52,11 @@ function printUsage(): void {
 Options:
   --limit       Maximum jobs to ingest. Defaults to 25.
   --timeout-ms  Per-page Jina Reader timeout. Defaults to 45000.
+  --http-timeout-ms       Plain HTTP extraction timeout. Defaults to 15000.
+  --http-min-text-length  Minimum readable chars for HTTP success. Defaults to 500.
   --json        Print machine-readable ingest summary.
 
-Requires DATABASE_URL, JINA_API_KEY, and applied job_search migrations.`);
+Requires DATABASE_URL and applied job_search migrations. JINA_API_KEY is required only when ATS and plain HTTP extraction fail and Jina Reader fallback is needed.`);
 }
 
 function errorStatus(message: string): "timeout" | "error" {
@@ -64,10 +71,6 @@ async function run(): Promise<void> {
   }
 
   const options = parseOptions(args);
-  const jinaApiKey = process.env.JINA_API_KEY ?? "";
-  if (!jinaApiKey) {
-    throw new Error("JINA_API_KEY is required for page ingestion");
-  }
 
   const rows = await runPsqlJson<PageIngestJobRow[]>(buildPendingPageIngestSql(options.limit));
   const results = [];
@@ -75,6 +78,33 @@ async function run(): Promise<void> {
 
   for (const row of rows) {
     const atsCaptured = await captureAtsMetadata(row);
+    if (atsCaptured) {
+      results.push({ id: row.id, status: "success", source: "ats_api", tokens: null });
+      continue;
+    }
+
+    const httpCaptured = await captureHttpExtract(row, options);
+    if (httpCaptured) {
+      results.push({ id: row.id, status: "success", source: "http_extract", tokens: null });
+      continue;
+    }
+
+    const jinaApiKey = process.env.JINA_API_KEY ?? "";
+    if (!jinaApiKey) {
+      const message = "JINA_API_KEY is required for Jina Reader fallback after ATS and HTTP extraction failed";
+      await runPsql(
+        buildInsertPageIngestAttemptSql(row.id, {
+          source: "jina_reader",
+          status: "skipped",
+          durationMs: null,
+          usageTokens: null,
+          metadata: { reason: "missing_jina_api_key" },
+          error: message,
+        }),
+      );
+      throw new Error(message);
+    }
+
     try {
       const startedAt = Date.now();
       const call = await fetchJinaReaderWithUsage(
@@ -104,7 +134,7 @@ async function run(): Promise<void> {
         }),
       );
       if (call.usage.tokens !== null) totalReportedTokens += call.usage.tokens;
-      results.push({ id: row.id, status: "success", atsCaptured, tokens: call.usage.tokens });
+      results.push({ id: row.id, status: "success", source: "jina_reader", tokens: call.usage.tokens });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const status = errorStatus(message);
@@ -128,7 +158,7 @@ async function run(): Promise<void> {
           error: message,
         }),
       );
-      results.push({ id: row.id, status, atsCaptured, error: message });
+      results.push({ id: row.id, status, source: "jina_reader", error: message });
     }
   }
 
@@ -182,6 +212,55 @@ async function captureAtsMetadata(row: PageIngestJobRow): Promise<boolean> {
   );
 
   return true;
+}
+
+async function captureHttpExtract(row: PageIngestJobRow, options: IngestPagesOptions): Promise<boolean> {
+  const startedAt = Date.now();
+  try {
+    const result = await fetchHttpPageMarkdown(row.canonical_url, {
+      timeoutMs: options.httpTimeoutMs,
+      minTextLength: options.httpMinTextLength,
+    });
+    const durationMs = Date.now() - startedAt;
+    await runPsql(
+      buildUpsertJobPageSql(row, {
+        source: "http_extract",
+        status: "success",
+        markdown: result.markdown,
+        usageTokens: null,
+        decompressedBytes: result.byteLength,
+        error: null,
+      }),
+    );
+    await runPsql(
+      buildInsertPageIngestAttemptSql(row.id, {
+        source: "http_extract",
+        status: "success",
+        durationMs,
+        usageTokens: null,
+        metadata: {
+          status: result.status,
+          contentType: result.contentType,
+          byteLength: result.byteLength,
+        },
+        error: null,
+      }),
+    );
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await runPsql(
+      buildInsertPageIngestAttemptSql(row.id, {
+        source: "http_extract",
+        status: errorStatus(message),
+        durationMs: Date.now() - startedAt,
+        usageTokens: null,
+        metadata: {},
+        error: message,
+      }),
+    );
+    return false;
+  }
 }
 
 run().catch((err) => {

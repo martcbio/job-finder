@@ -2,8 +2,8 @@ import { quoteSqlLiteral } from "../db/config";
 import { jsonbLiteral } from "../db/jsonSql";
 import { extractTitle } from "./scrape";
 
-export type PageIngestSource = "jina_reader" | "ats_api";
-export type PageIngestAttemptSource = PageIngestSource | "http_extract" | "browser";
+export type PageIngestSource = "jina_reader" | "ats_api" | "http_extract";
+export type PageIngestAttemptSource = PageIngestSource | "browser";
 export type PageIngestStatus = "success" | "error" | "timeout";
 export type PageIngestAttemptStatus = PageIngestStatus | "skipped";
 
@@ -47,8 +47,7 @@ FROM (
 
 export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestResult): string {
   const source = result.source ?? "jina_reader";
-  const titleRaw =
-    source === "jina_reader" && result.markdown ? extractTitle(result.markdown) : null;
+  const titleRaw = result.markdown ? extractTitle(result.markdown) : null;
 
   return `WITH upserted_page AS (
   INSERT INTO job_search.job_pages (

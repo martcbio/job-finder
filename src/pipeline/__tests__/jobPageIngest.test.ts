@@ -54,6 +54,24 @@ describe("buildUpsertJobPageSql", () => {
     expect(sql).toContain("## ATS Structured Data");
     expect(sql).toContain("NULL");
   });
+
+  test("upserts plain HTTP extraction as a first-class page source", () => {
+    const sql = buildUpsertJobPageSql(
+      { id: "42", title: "Engineer", canonical_url: "https://example.com/job" },
+      {
+        source: "http_extract",
+        status: "success",
+        markdown: "Title: Engineer\n\nBuild useful systems.",
+        usageTokens: null,
+        decompressedBytes: 2048,
+        error: null,
+      },
+    );
+
+    expect(sql).toContain("'http_extract'");
+    expect(sql).toContain("Title: Engineer");
+    expect(sql).toContain("2048");
+  });
 });
 
 describe("buildInsertPageIngestAttemptSql", () => {

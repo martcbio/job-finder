@@ -26,6 +26,7 @@
     "cv:review-draft": "bun scripts/cv-review-draft.ts",
     "applications:list": "bun scripts/list-applications.ts",
     "applications:record": "bun scripts/record-application.ts",
+    "api": "bun scripts/api.ts",
     "db:check": "bun scripts/db-check.ts",
     "db:create": "bun scripts/db-create.ts",
     "db:migrate": "bun scripts/db-migrate.ts",

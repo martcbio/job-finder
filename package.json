@@ -21,6 +21,7 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
+    "search": "bun scripts/search-only.ts",
     "scrape": "bun src/index.ts",
     "reconcile": "bun src/index.ts --reconcile-only",
     "test": "bun test src/**/__tests__/",

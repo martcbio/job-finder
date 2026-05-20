@@ -22,6 +22,7 @@
   "type": "module",
   "scripts": {
     "db:check": "bun scripts/db-check.ts",
+    "db:create": "bun scripts/db-create.ts",
     "db:migrate": "bun scripts/db-migrate.ts",
     "jobs:export": "bun scripts/export-jobs.ts",
     "search": "bun scripts/search-only.ts",

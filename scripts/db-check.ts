@@ -22,11 +22,11 @@ async function run(): Promise<void> {
   );
 
   const schemaExists = await runPsqlJson<boolean>(
-    `SELECT EXISTS (
+    `SELECT to_json(EXISTS (
        SELECT 1
        FROM information_schema.schemata
        WHERE schema_name = ${quoteSqlLiteral(JOB_SEARCH_SCHEMA)}
-     )::json;`,
+     ));`,
     { setSearchPath: false },
   );
 
@@ -53,4 +53,3 @@ run().catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });
-

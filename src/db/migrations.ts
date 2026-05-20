@@ -67,7 +67,7 @@ export async function loadMigrations(migrationsDir = MIGRATIONS_DIR): Promise<Mi
 
 export async function getAppliedMigrations(): Promise<AppliedMigration[]> {
   const exists = await runPsqlJson<boolean>(
-    `SELECT (to_regclass(${quoteSqlLiteral(`${JOB_SEARCH_SCHEMA}.schema_migrations`)}) IS NOT NULL)::json;`,
+    `SELECT to_json(to_regclass(${quoteSqlLiteral(`${JOB_SEARCH_SCHEMA}.schema_migrations`)}) IS NOT NULL);`,
     { setSearchPath: false },
   );
   if (!exists) return [];

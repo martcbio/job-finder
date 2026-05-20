@@ -1,7 +1,7 @@
 {
   "name": "jobfinder",
   "version": "2026.05.02.1",
-  "description": "Automated job search and enrichment pipeline. Searches job boards, evaluates listings with an LLM, and stores qualified jobs in Notion.",
+  "description": "Local Postgres-backed job search pipeline with Brian-style source fanout, review queues, and CV/application support.",
   "license": "MIT",
   "repository": {
     "type": "git",

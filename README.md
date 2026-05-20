@@ -1,241 +1,135 @@
 # jobfinder
 
-Automated job search and enrichment pipeline. Searches job boards (Ashby, Lever, Greenhouse, Workable), evaluates listings with an LLM via OpenRouter, and stores qualified jobs in Notion. Fork it and customize the search profile to match your own job search criteria.
+Local, Postgres-backed job-search pipeline for Brian-style source fanout.
+
+The current fork uses Jina Search for discovery, stores runs/results/jobs in a schema-isolated local Postgres database, ingests job pages with cheaper structured paths before Jina Reader, classifies jobs into review categories, and keeps all application actions human-gated.
+
+Notion support still exists in legacy modules and can be brought back as an export/review integration later, but it is not the source of truth for the current pipeline.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) runtime installed
-- A [Notion integration](https://www.notion.so/my-integrations) with read/write access to your database — you'll need the **Integration Token** and **Database ID**
-- A [Jina AI](https://jina.ai) API key — used for searching and scraping job pages
-- An [OpenRouter](https://openrouter.ai) API key — used for evaluating, enriching, and deduplicating jobs via LLM (model configurable via `LLM_MODEL` env var, defaults to `google/gemini-2.5-flash`)
+- Bun
+- Local Postgres
+- `JINA_API_KEY` for search-query discovery and Jina Reader fallback
 
-## Notion Database Setup
+No Docker is required.
 
-Create a new Notion database and add it to your integration's connections. The database needs these properties (the preflight check will tell you if anything is missing):
+## Database Setup
 
-| Property | Type |
-|----------|------|
-| `Job Title` | Title |
-| `Company` | Text |
-| `URL` | URL |
-| `Source` | Select |
-| `Keywords` | Multi-select |
-| `Date Scraped` | Date |
-| `Date Posted` | Date |
-| `Location` | Text |
-| `Status` | Select |
-| `Application Date` | Date |
-
-Status options (`To Review`, `Applied`, `Skipped`, `Rejected`, `Company Applied`, `Company Blocked`, `Archived`) are created automatically on first run.
-
-## Customize Your Profile
-
-Edit the files in `src/config/` to match your job search. There are three things to configure:
-
-**`SEARCH_KEYWORDS`** — the search terms that get combined with each job board domain. For example, if you're looking for Python backend roles:
-
-```ts
-export const SEARCH_KEYWORDS = [
-  "senior python backend engineer",
-  "senior django developer",
-  "senior fastapi developer",
-  "lead backend engineer python",
-];
-```
-
-**`EVALUATION_PROFILES`** (OR logic) — role-matching criteria. The evaluator acts as a binary gatekeeper (not a scorer), so write clear rules for what should pass and what should fail. You can define multiple profiles — a job passes if **any** profile accepts it:
-
-```ts
-export const EVALUATION_PROFILES: EvaluationProfile[] = [
-  {
-    name: "python-backend",
-    prompt: `You evaluate job listings for a senior Python backend engineer based in the USA.
-
-A job PASSES if ALL of these are true:
-1. US-based or remote-friendly to US timezones.
-2. Senior or lead level (or unspecified).
-3. Backend engineering involving Python (Django, FastAPI, Flask).
-
-A job FAILS if ANY of these are true:
-- Restricted to non-US locations
-- Junior or internship level
-- Non-engineering role
-- No Python involvement`,
-  },
-];
-```
-
-**`EVALUATION_FILTERS`** (AND logic, optional) — hard gate criteria that **all** must pass before profiles are checked. Filters run first; if any filter fails, the job is rejected immediately without running profile evaluations (saving API calls). Leave the array empty to skip filters entirely:
-
-```ts
-export const EVALUATION_FILTERS: EvaluationFilter[] = [
-  {
-    name: "location-gate",
-    prompt: `You evaluate whether a job listing is available to someone based in the USA.
-A job PASSES if it is remote-friendly to US timezones or based in the US.
-A job FAILS if it explicitly requires a non-US location or timezone.`,
-  },
-];
-```
-
-You can combine everything in a single profile prompt (fewer API calls) or split into separate filters and profiles for modularity.
-
-## Forking for Personal Use
-
-This repo is configured for a specific job search (senior backend/fullstack, crypto, fintech, AI engineering, remote from Romania). If you fork it, you'll need to customize:
-
-1. **`src/config/search.ts`** — replace search keywords with terms relevant to your target roles
-2. **`src/config/evaluation.ts`** — rewrite the evaluation profiles and filters to match your criteria (seniority, stack, domain, location)
-3. **`src/pipeline/__integration__/fixtures/`** — delete the existing fixtures entirely, then build your own by adding real job listings you've liked/disliked. The integration tests use threshold-based accuracy, so they'll adapt as you add fixtures
-4. Run the integration tests (`bun test src/pipeline/__integration__/`) to see how well your prompts perform, then refine iteratively
-
-The evaluation prompts are the core of the system — expect to iterate on them as you encounter edge cases. The test infrastructure is designed for this: add fixtures from real jobs, run the tests, see what's misclassified, and tighten your prompts.
-
-## Local Setup
+The job-search schema is isolated under `job_search` in a local `jobs` database.
 
 ```bash
 bun install
-cp .env.example .env  # fill in your API keys
-bun run scrape
+bun run db:create
+export DATABASE_URL=postgres://mcb@localhost:5432/jobs
+bun run db:migrate
+bun run db:check
 ```
 
-## Deploy to Railway (Cron Job)
+`db:migrate` applies plain SQL migrations and records checksums in `job_search.schema_migrations`. `db:check` verifies the effective connection, schema, server version, applied migration count, and pending migration count.
 
-1. Create a new project on [railway.app](https://railway.app) and connect your GitHub repo
-2. Railway auto-detects the `Dockerfile` and builds from it
-3. In the service's **Variables** tab, add:
-   - `NOTION_TOKEN`
-   - `NOTION_DATABASE_ID`
-   - `JINA_API_KEY`
-   - `OPENROUTER_API_KEY`
-   - `LLM_MODEL` (optional, defaults to `google/gemini-2.5-flash`)
-4. In **Settings**, change the service type to **Cron Job**
-5. Set the cron schedule to `0 8 */2 * *` (every 2 days at 8 AM UTC)
-6. Increase the job timeout to **45 minutes** (the scraper can take 10-30+ min depending on results)
+More setup detail lives in [docs/local-postgres.md](docs/local-postgres.md).
 
-> **Note:** Avoid modifying the Notion database while the cron job is running. The scraper caches the database state at startup and concurrent edits can cause pagination errors.
+## Common Commands
 
-## Architecture
-
-```mermaid
-flowchart TD
-    Start([bun run scrape]) --> Preflight[Preflight checks\nValidate Notion schema]
-    Preflight --> PreReconcile[Pre-reconcile\nSync job statuses]
-    PreReconcile --> Cache[Build Notion cache\nURLs, blocked companies,\nrecent apps, titles by company]
-    Cache --> Search
-
-    subgraph Search [Phase 1: Search]
-        direction TB
-        Keywords[keywords x domains\n= search queries] --> JinaSearch
-        JinaSearch[Jina Search API\nsite:domain keyword]
-        JinaSearch --> Dedup1[Filter & deduplicate URLs]
-    end
-
-    Search --> Process
-
-    subgraph Process [Phase 2: Process URLs]
-        direction TB
-        P1[URL dedup\nSkip if in cache or seen this run]
-        P1 --> P2[Scrape via Jina Reader\nPage → markdown]
-        P2 --> P3[Evaluate with LLM\nfilters first, then profiles]
-        P3 -->|Filter or all profiles fail| Rejected[Insert as Rejected]
-        P3 -->|Filters pass + profile match| P4[Enrich with LLM\nNormalize title, company,\nlocation, description]
-        P4 --> P5[Fuzzy dedup with LLM\nCompare against existing titles]
-        P5 -->|Duplicate| Skip1[Skip]
-        P5 -->|Unique| P6{Company\nchecks}
-        P6 -->|Blocked| Archive[Insert as Archived]
-        P6 -->|Recently applied| CompApp[Insert as Company Applied]
-        P6 -->|Clear| Insert[Insert as To Review]
-    end
-
-    Process --> PostReconcile[Post-reconcile\nSync job statuses]
-    PostReconcile --> Summary([Print summary stats])
-
-    JinaSearch -.-> Jina[(Jina AI\ns.jina.ai / r.jina.ai)]
-    P2 -.-> Jina
-    P3 -.-> LLM[(LLM via OpenRouter)]
-    P4 -.-> LLM
-    P5 -.-> LLM
-    Insert -.-> Notion[(Notion DB)]
-    Rejected -.-> Notion
-    Archive -.-> Notion
-    CompApp -.-> Notion
-    Cache -.-> Notion
-
-    style Jina fill:#e8f4f8,stroke:#0891b2
-    style LLM fill:#fef3c7,stroke:#d97706
-    style Notion fill:#f3e8ff,stroke:#9333ea
-    style Rejected fill:#fee2e2,stroke:#dc2626
-    style Skip1 fill:#f3f4f6,stroke:#6b7280
-    style Archive fill:#f3f4f6,stroke:#6b7280
-    style Insert fill:#dcfce7,stroke:#16a34a
-    style CompApp fill:#fef9c3,stroke:#ca8a04
-```
-
-Each external service call is wrapped in a resilience stack: **semaphore** (concurrency limit) → **circuit breaker** (5 failures → 30s cooldown) → **retry** (3 attempts, exponential backoff on 429/5xx).
-
-| Service | Concurrency | Rate limit |
-|---------|-------------|------------|
-| Jina Search | 5 parallel | — |
-| Jina Reader | 8 parallel | — |
-| LLM (OpenRouter) | 10 parallel | — |
-| Notion | 3 parallel | 3 req/s (token bucket) |
-
-## How Search Works
-
-Each run generates search queries by combining your **keywords** from `config/search.ts` with **job board domains** (Ashby, Lever, Greenhouse, Workable).
-
-The query format is `site:{domain} {keyword}` — for example:
-
-```
-site:jobs.ashbyhq.com senior python backend engineer
-site:jobs.lever.co senior django developer
-```
-
-These queries hit the [Jina Search API](https://s.jina.ai) which returns indexed job listing URLs. Results are filtered to keep only valid job page URLs and deduplicated across all queries before moving to Phase 2.
-
-## How URL Processing Works
-
-Each URL goes through a multi-stage pipeline:
-
-1. **Dedup** — skip immediately if the URL exists in the Notion cache (fetched at startup) or was already seen in this run
-2. **Scrape** — the [Jina Reader API](https://r.jina.ai) fetches the page and converts it to clean markdown (title, company, description, dates)
-3. **Evaluate** — LLM via OpenRouter runs evaluation in two phases. First, AND filters run in parallel — if any filter fails, the job is rejected immediately (saving API calls). Then, OR profiles run in parallel — the job passes if any profile accepts it. If all profiles reject, the job is inserted as "Rejected" and processing stops
-4. **Enrich** — LLM via OpenRouter normalizes the raw scraped data: cleans the title (removes company/location suffixes), proper-cases the company name, normalizes the location (e.g. `Remote - US/EU` → `Remote (US/EU)`), and rewrites the description as concise markdown
-5. **Fuzzy dedup** — if the company already has jobs in the cache, LLM via OpenRouter compares the new title against existing ones to catch duplicates that differ only in abbreviations, reordering, or trivial additions
-6. **Company checks** — skip if the company is marked "Company Blocked", or insert as "Company Applied" if the user recently applied there (within 6 months)
-7. **Insert** — write to Notion with status "To Review"
-
-Jobs inserted during a run are immediately added to the local cache so they're visible for dedup within the same run.
-
-## Job Statuses
-
-| Status | Set by | Meaning |
-|--------|--------|---------|
-| `To Review` | System | New job, needs human review |
-| `Applied` | User/System | Applied to this job (auto-set if Application Date is filled) |
-| `Skipped` | User | Job isn't a fit, but company is fine |
-| `Rejected` | System | LLM evaluation rejected this job |
-| `Company Applied` | System | Another job at this company was applied to recently |
-| `Company Blocked` | User | Company is not a fit (e.g., doesn't hire remote) |
-| `Archived` | System/User | Done with this listing |
-
-## Reconciliation
-
-Reconciliation is an idempotent 4-pass process that keeps job statuses consistent with the current state of the Notion database. It runs **both before and after scraping** — before to clean up stale state from manual edits between runs, and after to propagate statuses for newly inserted jobs.
-
-The goal is to keep the Notion board accurate without manual status management. The user only needs to fill in Application Date or set Company Blocked — everything else propagates automatically.
-
-**Pass 0 — Auto-mark Applied**: Any job with an Application Date filled but status other than "Applied" gets corrected. This means you just need to fill in the date — the status updates itself.
-
-**Pass 1 — Unstale Company Applied**: Jobs marked "Company Applied" within the last 30 days are checked against the 6-month application lookback window. If the original application is now older than 6 months, the job is moved back to "To Review" so it gets a fresh look.
-
-**Pass 2 — Propagate Company Applied**: Finds all companies where the user has an Application Date within the last 6 months, then marks any "To Review" jobs from those companies as "Company Applied". This prevents reviewing jobs at companies you've already applied to recently.
-
-**Pass 3 — Archive blocked companies**: Finds all companies with at least one "Company Blocked" job, then archives any "To Review" jobs from those companies. Once you block a company, all future scraped jobs from them are automatically archived.
-
-## Testing
+Run a DB-backed search across selected Brian sources:
 
 ```bash
-bun test
+DATABASE_URL=postgres://mcb@localhost:5432/jobs \
+  bun run search:db -- -k "Agentic" --site greenhouse --site lever --limit 5
 ```
+
+Save and rerun a repeatable sweep:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs \
+  bun run sweeps:save -- --name daily-agentic -k "Agentic" --site greenhouse --site lever
+
+DATABASE_URL=postgres://mcb@localhost:5432/jobs \
+  bun run pipeline:run -- --sweep daily-agentic
+```
+
+Inspect source quality and token usage:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run source:health
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run pipeline:history
+```
+
+Review jobs and record human decisions:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:queue -- --limit 25
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:review -- --job-id 42 --state shortlisted --reason strong_match
+```
+
+Generate and review CV/application support:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:add-bullet -- --theme agentic_engineer --text "..."
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:draft -- --job-id 42
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:review-draft -- --draft-id 1 --status approved
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run applications:record -- --job-id 42 --status waiting
+```
+
+Export a durable Markdown proof/review artifact:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs \
+  bun run jobs:export -- --limit 25 --output docs/job-search-export.md
+```
+
+## Pipeline Shape
+
+The main dry-runnable pipeline is:
+
+1. `db_check` validates local Postgres and pending migrations.
+2. `search` fans out over Brian-style sources and persists every query/result/error.
+3. `ingest_pages` captures richer page text.
+4. `classify` writes category/focus labels and advances untouched jobs to `ready_for_review`.
+5. `duplicates` records possible duplicate relationships without suppressing jobs.
+6. `queue` prints the human review queue.
+
+Use `bun run pipeline:run -- --dry-run ...` to inspect commands before executing them, and `--skip <step>` to run a partial pipeline.
+
+## Ingestion Cost Control
+
+Discovery uses Jina Search when a source is a search query. Direct-link sources such as Remote Rocketship are stored as direct observations and do not require Jina.
+
+Full-page ingestion uses this order:
+
+1. Native ATS API clients where available: Lever, Ashby, Greenhouse, Workable.
+2. Plain HTTP fetch plus readable HTML/text extraction.
+3. Jina Reader fallback, with reported token usage recorded.
+4. Browser automation is intentionally deferred as a last resort.
+
+Timeouts and failed calls are persisted as first-class attempts. Unknown token usage is recorded as unknown, not zero.
+
+## Data Model
+
+Core data lives under the `job_search` schema:
+
+- `search_runs`, `search_queries`, `search_results`
+- `jobs`, `job_observations`, `job_pages`
+- `job_classification_labels`
+- `duplicate_candidates`
+- `review_events`
+- `cv_bullet_blocks`, `job_cv_drafts`
+- `job_applications`
+- `saved_sweeps`, `pipeline_runs`, `pipeline_run_steps`
+
+Exact canonical URL dedupe is supported, and common ATS-native identities are persisted for Greenhouse, Lever, Ashby, and Workable so URL-shape changes can still point at the same advertised posting. Fuzzy/cross-source matches become reviewable duplicate candidates rather than automatic suppressions.
+
+## Human Gates
+
+The system can classify, draft, and recommend, but it does not apply to jobs or send externally visible messages. Review states and review events are stored locally so the pipeline can improve from structured feedback without pretending to be trusted too early.
+
+## Tests
+
+```bash
+bun run lint
+bun run typecheck
+bun test src/**/__tests__/
+```
+
+Integration fixtures for evaluation behavior are under `src/pipeline/__integration__/`.

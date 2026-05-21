@@ -30,6 +30,24 @@ bun run db:check
 
 More setup detail lives in [docs/local-postgres.md](docs/local-postgres.md).
 
+## Frontend/API Handoff
+
+For a frontend-oriented agent, start with [AGENTS.md](AGENTS.md), then
+[docs/frontend-agent-handoff.md](docs/frontend-agent-handoff.md), then
+[docs/api.md](docs/api.md).
+
+Run the local JSON API with:
+
+```bash
+export DATABASE_URL=postgres://mcb@localhost:5432/jobs
+bun run api
+```
+
+The API is the supported boundary for UI work. It uses Postgres-backed domain
+modules and does not require Notion credentials. Legacy Notion-first scripts and
+`src/index.ts` remain available as reference/integration code, but new UI work
+should not depend on them.
+
 ## Common Commands
 
 Run a DB-backed search across selected Brian sources:
@@ -66,7 +84,7 @@ DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:review -- --job-id 
 Generate and review CV/application support:
 
 ```bash
-DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:add-bullet -- --theme agentic_engineer --text "..."
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:add-bullet -- --theme agentic_engineer --title "Agent systems" --bullet "..." --evidence "..."
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:draft -- --job-id 42
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run cv:review-draft -- --draft-id 1 --status approved
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run applications:record -- --job-id 42 --status waiting

@@ -28,8 +28,8 @@ export const SOURCE_LANES: readonly SourceLaneSpec[] = [
   {
     id: "jobspy",
     label: "JobSpy aggregators",
-    status: "planned",
-    description: "Old-repo aggregator lane for broad job board discovery without the old UI.",
+    status: "implemented",
+    description: "Import normalized JobSpy broad-board snapshots without the old UI.",
     outputKind: "normalized_jobs",
   },
   {

@@ -153,6 +153,7 @@ async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
     sites: sites.length > 0 ? sites : ["greenhouse", "lever", "ashby"],
     timeFilter: parseTimeFilter(readStringFlag(args, "--time")),
     sourceLanes: parseSourceLaneIds(readRepeatedFlag(args, ["--lane"])),
+    jobspyFile: readStringFlag(args, "--jobspy-file"),
     includeRemote: !args.includes("--exclude-remote"),
     location: readStringFlag(args, "--location"),
     maxQueries: readNumberFlag(args, "--max-queries", 12),
@@ -184,6 +185,7 @@ Options:
   -s, --site               source ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
   --time                   source-style time filter. Defaults to 24hours.
   --lane                   Source lane. Repeatable. Defaults to source_search.
+  --jobspy-file            JobSpy normalized JSON snapshot when --lane jobspy is selected.
   --location               Optional location text for search queries.
   --exclude-remote         Do not append remote to search queries.
   --max-queries            Search target cap. Defaults to 12.
@@ -199,7 +201,7 @@ Options:
   --dry-run                Print planned commands without executing them.
   --json                   Print machine-readable plan in dry-run mode.
 
-Steps: db_check, search, ingest_pages, classify, duplicates, queue.`);
+Steps: db_check, search, import_normalized, ingest_pages, classify, duplicates, queue.`);
 }
 
 async function runStep(step: PipelineStep): Promise<number> {

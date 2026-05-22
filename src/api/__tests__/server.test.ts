@@ -212,6 +212,7 @@ describe("job-finder API", () => {
           keywords: ["Agentic"],
           sites: ["greenhouse"],
           sourceLanes: ["source_search", "jobspy"],
+          jobspyFile: "/data/jobspy.json",
         }),
       }),
     );
@@ -221,7 +222,7 @@ describe("job-finder API", () => {
     expect(planResponse.status).toBe(200);
     expect(planData.started).toBe(false);
     expect(planData.plan).toBeArray();
-    expect(JSON.stringify(planData.plan)).toContain("JobSpy aggregators");
+    expect(JSON.stringify(planData.plan)).toContain("jobs:import-normalized");
 
     const executeResponse = await handler(
       request("/api/pipeline-runs", {

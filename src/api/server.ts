@@ -87,6 +87,7 @@ interface PipelineRunRequest {
   sites?: string[];
   timeFilter?: string;
   sourceLanes?: string[];
+  jobspyFile?: string;
   includeRemote?: boolean;
   location?: string | null;
   maxQueries?: number;
@@ -528,6 +529,7 @@ async function pipelineOptionsFromBody(
     sites: nonEmptyStringArray(body.sites, "sites", ["greenhouse", "lever", "ashby"]),
     timeFilter: optionalTimeFilter(body.timeFilter, "24hours"),
     sourceLanes: parseApiSourceLaneIds(body.sourceLanes),
+    jobspyFile: nullableString(body.jobspyFile, "jobspyFile"),
     includeRemote: body.includeRemote ?? true,
     location: nullableString(body.location, "location"),
     maxQueries: positiveIntValue(body.maxQueries, "maxQueries", 12, 500),
@@ -551,6 +553,7 @@ function pipelineCommandFromRequest(body: PipelineRunRequest): string[] {
     for (const keyword of body.keywords ?? ["Agentic"]) command.push("--keyword", keyword);
     for (const site of body.sites ?? ["greenhouse", "lever", "ashby"]) command.push("--site", site);
     for (const lane of body.sourceLanes ?? []) command.push("--lane", lane);
+    if (body.jobspyFile) command.push("--jobspy-file", body.jobspyFile);
     if (body.timeFilter) command.push("--time", body.timeFilter);
     if (body.includeRemote === false) command.push("--exclude-remote");
     if (body.location) command.push("--location", body.location);

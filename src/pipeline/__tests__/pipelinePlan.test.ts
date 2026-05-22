@@ -87,20 +87,46 @@ describe("pipeline plan", () => {
   test("annotates planned source lanes without executing them", () => {
     const plan = buildPipelinePlan(
       options({
-        sourceLanes: ["source_search", "jobspy", "jobserve"],
+        sourceLanes: ["source_search", "jobserve"],
       }),
     );
     const search = plan.find((step) => step.name === "search");
 
     expect(search?.description).toContain("Source search");
-    expect(search?.description).toContain("JobSpy aggregators");
     expect(search?.description).toContain("JobServe");
     expect(search?.command[0]).toBe("bun");
-    expect(search?.command).not.toContain("jobspy");
+    expect(search?.command).not.toContain("jobserve");
+  });
+
+  test("adds normalized import step for JobSpy snapshots", () => {
+    const plan = buildPipelinePlan(
+      options({
+        sourceLanes: ["jobspy"],
+        jobspyFile: "/data/jobspy.json",
+      }),
+    );
+
+    expect(plan.map((step) => step.name)).toEqual([
+      "db_check",
+      "import_normalized",
+      "ingest_pages",
+      "classify",
+      "duplicates",
+      "queue",
+    ]);
+    expect(plan[1]?.command).toContain("jobs:import-normalized");
+    expect(plan[1]?.command).toContain("--file");
+    expect(plan[1]?.command).toContain("/data/jobspy.json");
+  });
+
+  test("fails loudly when JobSpy is selected without a snapshot file", () => {
+    expect(() => buildPipelinePlan(options({ sourceLanes: ["jobspy"] }))).toThrow(
+      "JobSpy source lane requires --jobspy-file",
+    );
   });
 
   test("fails loudly when only planned source lanes are selected", () => {
-    expect(() => buildPipelinePlan(options({ sourceLanes: ["jobspy"] }))).toThrow(
+    expect(() => buildPipelinePlan(options({ sourceLanes: ["jobserve"] }))).toThrow(
       "No implemented source lanes selected",
     );
   });

@@ -8,10 +8,14 @@ import {
 } from "../sourceLanes";
 
 describe("source lanes", () => {
-  test("keeps source_search as the only implemented default lane", () => {
+  test("keeps source_search as the default lane and marks JobSpy import executable", () => {
     expect(parseSourceLaneIds([])).toEqual(["source_search"]);
     expect(sourceLaneById("source_search").status).toBe("implemented");
-    expect(implementedSourceLaneIds(["source_search", "jobspy"])).toEqual(["source_search"]);
+    expect(sourceLaneById("jobspy").status).toBe("implemented");
+    expect(implementedSourceLaneIds(["source_search", "jobspy"])).toEqual([
+      "source_search",
+      "jobspy",
+    ]);
   });
 
   test("tracks planned old-repo lanes explicitly", () => {

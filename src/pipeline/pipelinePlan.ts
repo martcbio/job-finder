@@ -9,6 +9,7 @@ import {
 export const PIPELINE_STEPS = [
   "db_check",
   "search",
+  "import_normalized",
   "ingest_pages",
   "classify",
   "duplicates",
@@ -34,6 +35,7 @@ export interface PipelinePlanOptions {
   queueLimit: number;
   skipSteps: PipelineStepName[];
   sourceLanes?: SourceLaneId[];
+  jobspyFile?: string | null;
 }
 
 export interface PipelineStep {
@@ -55,17 +57,36 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
     );
   }
 
+  const hasSourceSearch = sourceLanes.includes("source_search");
+  const hasJobspy = sourceLanes.includes("jobspy");
+  if (hasJobspy && !options.jobspyFile) {
+    throw new Error("JobSpy source lane requires --jobspy-file");
+  }
+
   const steps: PipelineStep[] = [
     {
       name: "db_check",
       description: "Verify local Postgres schema and pending migrations.",
       command: ["bun", "run", "db:check"],
     },
-    {
-      name: "search",
-      description: buildSearchDescription(sourceLanes),
-      command: buildSearchCommand(options),
-    },
+    ...(hasSourceSearch
+      ? [
+          {
+            name: "search" as const,
+            description: buildSearchDescription(sourceLanes.filter((lane) => lane !== "jobspy")),
+            command: buildSearchCommand(options),
+          },
+        ]
+      : []),
+    ...(hasJobspy
+      ? [
+          {
+            name: "import_normalized" as const,
+            description: "Import normalized JobSpy jobs and full text from a JSON snapshot.",
+            command: buildJobspyImportCommand(options),
+          },
+        ]
+      : []),
     {
       name: "ingest_pages",
       description: "Ingest full job pages using ATS metadata first, then Jina Reader.",
@@ -112,6 +133,24 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
 
 export function shellQuoteArgs(args: string[]): string {
   return args.map(shellQuoteArg).join(" ");
+}
+
+function buildJobspyImportCommand(options: PipelinePlanOptions): string[] {
+  if (!options.jobspyFile) throw new Error("JobSpy source lane requires --jobspy-file");
+  return [
+    "bun",
+    "run",
+    "jobs:import-normalized",
+    "--",
+    "--source",
+    "jobspy",
+    "--file",
+    options.jobspyFile,
+    "--keyword",
+    options.keywords.join(", "),
+    "--timeout-ms",
+    String(options.searchTimeoutMs),
+  ];
 }
 
 function buildSearchCommand(options: PipelinePlanOptions): string[] {

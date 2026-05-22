@@ -35,8 +35,8 @@ export const SOURCE_LANES: readonly SourceLaneSpec[] = [
   {
     id: "jobserve",
     label: "JobServe",
-    status: "planned",
-    description: "Old-repo UK/contract-market lane for additional non-US opportunities.",
+    status: "implemented",
+    description: "Import normalized JobServe UK/contract-market snapshots without the old UI.",
     outputKind: "normalized_jobs",
   },
 ] as const;

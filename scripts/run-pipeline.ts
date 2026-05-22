@@ -154,6 +154,7 @@ async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
     timeFilter: parseTimeFilter(readStringFlag(args, "--time")),
     sourceLanes: parseSourceLaneIds(readRepeatedFlag(args, ["--lane"])),
     jobspyFile: readStringFlag(args, "--jobspy-file"),
+    jobserveFile: readStringFlag(args, "--jobserve-file"),
     includeRemote: !args.includes("--exclude-remote"),
     location: readStringFlag(args, "--location"),
     maxQueries: readNumberFlag(args, "--max-queries", 12),
@@ -186,6 +187,7 @@ Options:
   --time                   source-style time filter. Defaults to 24hours.
   --lane                   Source lane. Repeatable. Defaults to source_search.
   --jobspy-file            JobSpy normalized JSON snapshot when --lane jobspy is selected.
+  --jobserve-file          JobServe JSON snapshot when --lane jobserve is selected.
   --location               Optional location text for search queries.
   --exclude-remote         Do not append remote to search queries.
   --max-queries            Search target cap. Defaults to 12.

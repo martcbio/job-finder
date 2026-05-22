@@ -36,6 +36,7 @@ export interface PipelinePlanOptions {
   skipSteps: PipelineStepName[];
   sourceLanes?: SourceLaneId[];
   jobspyFile?: string | null;
+  jobserveFile?: string | null;
 }
 
 export interface PipelineStep {
@@ -59,8 +60,12 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
 
   const hasSourceSearch = sourceLanes.includes("source_search");
   const hasJobspy = sourceLanes.includes("jobspy");
+  const hasJobserve = sourceLanes.includes("jobserve");
   if (hasJobspy && !options.jobspyFile) {
     throw new Error("JobSpy source lane requires --jobspy-file");
+  }
+  if (hasJobserve && !options.jobserveFile) {
+    throw new Error("JobServe source lane requires --jobserve-file");
   }
 
   const steps: PipelineStep[] = [
@@ -83,7 +88,28 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
           {
             name: "import_normalized" as const,
             description: "Import normalized JobSpy jobs and full text from a JSON snapshot.",
-            command: buildJobspyImportCommand(options),
+            command: buildNormalizedImportCommand({
+              sourceId: "jobspy",
+              file: options.jobspyFile,
+              keywords: options.keywords,
+              timeoutMs: options.searchTimeoutMs,
+              requiredFileMessage: "JobSpy source lane requires --jobspy-file",
+            }),
+          },
+        ]
+      : []),
+    ...(hasJobserve
+      ? [
+          {
+            name: "import_normalized" as const,
+            description: "Import normalized JobServe jobs and full text from a JSON snapshot.",
+            command: buildNormalizedImportCommand({
+              sourceId: "jobserve",
+              file: options.jobserveFile,
+              keywords: options.keywords,
+              timeoutMs: options.searchTimeoutMs,
+              requiredFileMessage: "JobServe source lane requires --jobserve-file",
+            }),
           },
         ]
       : []),
@@ -135,21 +161,27 @@ export function shellQuoteArgs(args: string[]): string {
   return args.map(shellQuoteArg).join(" ");
 }
 
-function buildJobspyImportCommand(options: PipelinePlanOptions): string[] {
-  if (!options.jobspyFile) throw new Error("JobSpy source lane requires --jobspy-file");
+function buildNormalizedImportCommand(input: {
+  sourceId: string;
+  file: string | null | undefined;
+  keywords: readonly string[];
+  timeoutMs: number;
+  requiredFileMessage: string;
+}): string[] {
+  if (!input.file) throw new Error(input.requiredFileMessage);
   return [
     "bun",
     "run",
     "jobs:import-normalized",
     "--",
     "--source",
-    "jobspy",
+    input.sourceId,
     "--file",
-    options.jobspyFile,
+    input.file,
     "--keyword",
-    options.keywords.join(", "),
+    input.keywords.join(", "),
     "--timeout-ms",
-    String(options.searchTimeoutMs),
+    String(input.timeoutMs),
   ];
 }
 

@@ -202,6 +202,7 @@ export function normalizedJobMarkdown(job: NormalizedJobInput): string {
     job.location ? `- Location: ${job.location}` : null,
     job.employmentType ? `- Employment type: ${job.employmentType}` : null,
     job.compensation ? `- Compensation: ${job.compensation}` : null,
+    ...rawMetadataLines(job.raw),
     "",
     job.description.trim(),
   ].filter((line): line is string => line !== null);
@@ -322,6 +323,43 @@ function sourceLabel(sourceId: string): string {
   if (sourceId === "jobspy") return "JobSpy";
   if (sourceId === "jobserve") return "JobServe";
   return sourceId;
+}
+
+function rawMetadataLines(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const record = raw as Record<string, unknown>;
+  return [
+    metadataLine("Posted date", textValue(record.posted_date)),
+    metadataLine("Duration", textValue(record.duration)),
+    metadataLine("Reference", textValue(record.reference)),
+    metadataLine("JobServe ID", textValue(record.job_id)),
+    metadataLine("Apply URL", textValue(record.apply_url)),
+    metadataLine("Detail URL", textValue(record.detail_fetch_url)),
+    booleanMetadataLine("Outside IR35", record.outside_ir35),
+    booleanMetadataLine("Inside IR35", record.inside_ir35),
+    booleanMetadataLine("Remote signal", record.remote_signal),
+    arrayMetadataLine("Priority notes", record.priority_notes),
+  ].filter((line): line is string => line !== null);
+}
+
+function metadataLine(label: string, value: string): string | null {
+  return value ? `- ${label}: ${value}` : null;
+}
+
+function booleanMetadataLine(label: string, value: unknown): string | null {
+  return typeof value === "boolean" ? `- ${label}: ${value ? "yes" : "no"}` : null;
+}
+
+function arrayMetadataLine(label: string, value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const items = value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  return items.length > 0 ? `- ${label}: ${items.join(", ")}` : null;
+}
+
+function textValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
 }
 
 function displayTitle(job: NormalizedJobInput): string {

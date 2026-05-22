@@ -84,18 +84,22 @@ describe("pipeline plan", () => {
     expect(search?.command).toContain("Europe");
   });
 
-  test("annotates planned source lanes without executing them", () => {
+  test("runs source search alongside JobServe normalized import when both lanes are selected", () => {
     const plan = buildPipelinePlan(
       options({
         sourceLanes: ["source_search", "jobserve"],
+        jobserveFile: "/data/jobserve.json",
       }),
     );
     const search = plan.find((step) => step.name === "search");
+    const imports = plan.filter((step) => step.name === "import_normalized");
 
     expect(search?.description).toContain("Source search");
-    expect(search?.description).toContain("JobServe");
     expect(search?.command[0]).toBe("bun");
     expect(search?.command).not.toContain("jobserve");
+    expect(imports).toHaveLength(1);
+    expect(imports[0]?.command).toContain("jobserve");
+    expect(imports[0]?.command).toContain("/data/jobserve.json");
   });
 
   test("adds normalized import step for JobSpy snapshots", () => {
@@ -125,9 +129,9 @@ describe("pipeline plan", () => {
     );
   });
 
-  test("fails loudly when only planned source lanes are selected", () => {
+  test("fails loudly when JobServe is selected without a snapshot file", () => {
     expect(() => buildPipelinePlan(options({ sourceLanes: ["jobserve"] }))).toThrow(
-      "No implemented source lanes selected",
+      "JobServe source lane requires --jobserve-file",
     );
   });
 

@@ -92,7 +92,7 @@ async function run(): Promise<void> {
 
   const result = await ingestNormalizedJobs({
     sourceId: options.sourceId,
-    sourceLabel: options.sourceId === "jobspy" ? "JobSpy" : options.sourceId,
+    sourceLabel: sourceLabel(options.sourceId),
     keyword: options.keyword,
     jobs,
     timeoutMs: options.timeoutMs,
@@ -107,6 +107,12 @@ async function run(): Promise<void> {
   }
 
   if (result.jobsPersisted === 0) process.exitCode = 1;
+}
+
+function sourceLabel(sourceId: string): string {
+  if (sourceId === "jobspy") return "JobSpy";
+  if (sourceId === "jobserve") return "JobServe";
+  return sourceId;
 }
 
 run().catch((err) => {

@@ -78,6 +78,45 @@ describe("normalized job ingest", () => {
     expect(markdown).toContain("Ship AI systems");
   });
 
+  test("preserves JobServe contract metadata in rendered full text", () => {
+    const [job] = normalizeExternalJobPayload(
+      {
+        roles: [
+          {
+            title: "Forward Deployed AI Engineer",
+            employer_name: "Investigo",
+            url: "https://www.jobserve.com/gb/en/search-jobs-in-London/FORWARD-DEPLOYED-AI-ENGINEER-abc/",
+            summary_snippet: "Forward deployed AI engineer contract.",
+            job_type: "Contract",
+            rate: "£800 - 1k per day",
+            posted_date: "20/05/2026 13:29:08",
+            duration: "6 months",
+            reference: "JS123",
+            job_id: "ABC123",
+            apply_url: "https://www.jobserve.com/gb/en/WABC123.jsap",
+            detail_fetch_url: "https://www.jobserve.com/gb/en/WABC123.jsjob",
+            outside_ir35: true,
+            inside_ir35: false,
+            remote_signal: false,
+            priority_notes: ["contract", "outside_ir35"],
+          },
+        ],
+      },
+      "jobserve",
+    );
+
+    expect(job).toBeDefined();
+    if (!job) throw new Error("Expected normalized job");
+    expect(job.sourceLabel).toBe("JobServe");
+    const markdown = normalizedJobMarkdown(job);
+    expect(markdown).toContain("- Source: JobServe");
+    expect(markdown).toContain("- Compensation: £800 - 1k per day");
+    expect(markdown).toContain("- Posted date: 20/05/2026 13:29:08");
+    expect(markdown).toContain("- Outside IR35: yes");
+    expect(markdown).toContain("- Inside IR35: no");
+    expect(markdown).toContain("- Priority notes: contract, outside_ir35");
+  });
+
   test("fails loudly for malformed rows", () => {
     expect(() => normalizeExternalJobPayload({ roles: [{ title: "No URL" }] }, "jobspy")).toThrow(
       'Invalid jobspy job at index 0: External job "No URL" is missing a URL',

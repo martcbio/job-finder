@@ -116,6 +116,13 @@ export const JOB_SOURCE_SITES = [
     jobUrlPatterns: [/careerpuck\.com\/jobs?\//],
   },
   {
+    id: "linear-careers",
+    label: "Linear Careers",
+    site: "linear.app/careers",
+    filters: ["linear.app/careers"],
+    jobUrlPatterns: [/linear\.app\/careers\/[0-9a-f-]{16,}/],
+  },
+  {
     id: "teamtailor",
     label: "Teamtailor",
     site: "teamtailor.com",

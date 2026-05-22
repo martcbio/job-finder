@@ -9,7 +9,11 @@ describe("normalized job ingest", () => {
           {
             title: "Applied AI Engineer",
             company: "Taktile",
-            url: "https://example.com/jobs/1",
+            url: "https://uk.indeed.com/viewjob?jk=abc123",
+            raw_jobspy: {
+              job_url: "https://uk.indeed.com/viewjob?jk=abc123",
+              job_url_direct: "https://jobs.example.com/jobs/1",
+            },
             description: "Build reusable agentic products.",
             location: "London",
             job_type: "fulltime",
@@ -25,7 +29,29 @@ describe("normalized job ingest", () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]?.sourceLabel).toBe("JobSpy");
     expect(jobs[0]?.company).toBe("Taktile");
+    expect(jobs[0]?.url).toBe("https://jobs.example.com/jobs/1");
+    expect(jobs[0]?.sourceUrl).toBe("https://uk.indeed.com/viewjob?jk=abc123");
     expect(jobs[0]?.description).toContain("agentic");
+  });
+
+  test("falls back to Indeed when no direct URL is available", () => {
+    const [job] = normalizeExternalJobPayload(
+      {
+        roles: [
+          {
+            title: "Applied AI Engineer",
+            url: "https://uk.indeed.com/viewjob?jk=abc123",
+            raw_jobspy: {
+              job_url: "https://uk.indeed.com/viewjob?jk=abc123",
+            },
+          },
+        ],
+      },
+      "jobspy",
+    );
+
+    expect(job?.url).toBe("https://uk.indeed.com/viewjob?jk=abc123");
+    expect(job?.sourceUrl).toBeNull();
   });
 
   test("renders full text with source metadata", () => {
@@ -47,6 +73,7 @@ describe("normalized job ingest", () => {
     const markdown = normalizedJobMarkdown(job);
     expect(markdown).toContain("# Example AI - Forward Deployed Engineer");
     expect(markdown).toContain("- Source: JobSpy");
+    expect(markdown).toContain("- Job URL: https://example.com/jobs/2");
     expect(markdown).toContain("- Location: Singapore");
     expect(markdown).toContain("Ship AI systems");
   });

@@ -20,6 +20,7 @@ export interface NormalizedJobInput {
   title: string;
   company: string | null;
   url: string;
+  sourceUrl: string | null;
   description: string;
   location: string | null;
   employmentType: string | null;
@@ -153,7 +154,7 @@ export function normalizeExternalJob(
   sourceId: string,
 ): NormalizedJobInput {
   const title = firstText(raw, ["title", "job_title"]);
-  const url = firstText(raw, ["url", "job_url", "job_url_direct", "canonical_url"]);
+  const url = preferredJobUrl(raw);
   if (!title) throw new Error("External job is missing a title");
   if (!url) throw new Error(`External job "${title}" is missing a URL`);
 
@@ -165,6 +166,7 @@ export function normalizeExternalJob(
     title,
     company: nullableText(firstText(raw, ["company", "company_hint", "employer_name"])),
     url,
+    sourceUrl: sourceUrl(raw, url),
     description: firstText(raw, ["description", "summary_snippet", "description_raw"]),
     location: nullableText(firstText(raw, ["location"])),
     employmentType: nullableText(firstText(raw, ["job_type", "employment_type"])),
@@ -193,6 +195,8 @@ export function normalizedJobMarkdown(job: NormalizedJobInput): string {
     `# ${displayTitle(job)}`,
     "",
     `- Source: ${job.sourceLabel}`,
+    `- Job URL: ${job.url}`,
+    job.sourceUrl ? `- Source URL: ${job.sourceUrl}` : null,
     job.searchLabel ? `- Search: ${job.searchLabel}` : null,
     job.searchTerm ? `- Search term: ${job.searchTerm}` : null,
     job.location ? `- Location: ${job.location}` : null,
@@ -259,11 +263,55 @@ function requireRecord(value: unknown): Record<string, unknown> {
 
 function firstText(raw: Record<string, unknown>, keys: readonly string[]): string {
   for (const key of keys) {
-    const value = raw[key];
+    const value = valueAtPath(raw, key);
     if (typeof value === "string" && value.trim()) return value.trim();
     if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return "";
+}
+
+function preferredJobUrl(raw: Record<string, unknown>): string {
+  const candidates = [
+    firstText(raw, ["raw_jobspy.job_url_direct"]),
+    firstText(raw, ["job_url_direct"]),
+    firstText(raw, ["direct_url"]),
+    firstText(raw, ["canonical_url"]),
+    firstText(raw, ["url"]),
+    firstText(raw, ["raw_jobspy.job_url"]),
+    firstText(raw, ["job_url"]),
+    firstText(raw, ["permalink"]),
+  ].filter(Boolean);
+
+  return candidates.find((url) => !isIndeedUrl(url)) ?? candidates[0] ?? "";
+}
+
+function sourceUrl(raw: Record<string, unknown>, selectedUrl: string): string | null {
+  const candidates = [
+    firstText(raw, ["url"]),
+    firstText(raw, ["raw_jobspy.job_url"]),
+    firstText(raw, ["job_url"]),
+  ].filter(Boolean);
+  const originalUrl = candidates.find((url) => url !== selectedUrl);
+  return originalUrl ?? null;
+}
+
+function valueAtPath(raw: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let current: unknown = raw;
+  for (const part of parts) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function isIndeedUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+    return hostname === "indeed.com" || hostname.endsWith(".indeed.com");
+  } catch {
+    return false;
+  }
 }
 
 function nullableText(value: string): string | null {
@@ -282,6 +330,8 @@ function displayTitle(job: NormalizedJobInput): string {
 
 function resultDescription(job: NormalizedJobInput): string {
   return [
+    `Job URL: ${job.url}`,
+    job.sourceUrl ? `Source URL: ${job.sourceUrl}` : null,
     job.location ? `Location: ${job.location}` : null,
     job.employmentType ? `Employment type: ${job.employmentType}` : null,
     job.compensation ? `Compensation: ${job.compensation}` : null,

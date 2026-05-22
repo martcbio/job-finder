@@ -17,6 +17,7 @@ describe("Source registry", () => {
     expect(sites).toHaveLength(JOB_SOURCE_SITES.length);
     expect(new Set(ids).size).toBe(JOB_SOURCE_SITES.length);
     expect(ids).toContain("greenhouse");
+    expect(ids).toContain("linear-careers");
     expect(ids).toContain("workday");
     expect(ids).toContain("glassdoor");
     expect(ids).toContain("other-pages");
@@ -134,6 +135,43 @@ describe("Source registry", () => {
         },
       ]),
     ).toHaveLength(1);
+  });
+
+  test("recognizes Linear Careers job URLs without letting the careers index through", () => {
+    const targets = buildSearchTargets({
+      keywords: ["Agentic"],
+      domains: [],
+      sites: resolveJobSourceSites(["linear-careers"]),
+      timeFilter: "24hours",
+      includeRemote: true,
+      location: null,
+    });
+    const linear = targets.find((target) => target.sourceId === "linear-careers");
+    if (linear?.kind !== "search-query") {
+      throw new Error("Expected Linear Careers search-query target");
+    }
+
+    expect(linear.query).toContain('"Agentic" site:linear.app/careers');
+    expect(
+      linear.filter([
+        {
+          title: "We're hiring",
+          url: "https://linear.app/careers",
+          description: "Open roles",
+        },
+        {
+          title: "Senior / Staff Product Engineer, AI",
+          url: "https://linear.app/careers/069c4628-88d7-4e4d-b393-c996fc7f3076",
+          description: "Europe, North America",
+        },
+      ]),
+    ).toEqual([
+      {
+        title: "Senior / Staff Product Engineer, AI",
+        url: "https://linear.app/careers/069c4628-88d7-4e4d-b393-c996fc7f3076",
+        description: "Europe, North America",
+      },
+    ]);
   });
 
   test("filters obvious stale or ineligible search-result snippets before persistence", () => {

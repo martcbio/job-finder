@@ -5,7 +5,7 @@ repo to prototype or build a UI.
 
 ## What This System Is
 
-`job-finder` is a local job-search pipeline. It fans out across Brian-style job
+`job-finder` is a local job-search pipeline. It fans out across configured job
 sources, persists search evidence in local Postgres, ingests job pages, classifies
 jobs, keeps conservative duplicate candidates, and leaves human review in charge
 of applications.

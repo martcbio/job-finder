@@ -21,7 +21,7 @@ import {
   buildGetSavedSweepSql,
   savedSweepToPipelineOptions,
 } from "../src/pipeline/savedSweeps";
-import { type BrianTimeFilter, isBrianTimeFilter } from "../src/pipeline/searchEngines";
+import { type TimeFilter, isTimeFilter } from "../src/pipeline/searchEngines";
 
 interface RunPipelineOptions extends PipelinePlanOptions {
   dryRun: boolean;
@@ -96,9 +96,9 @@ function readFloatFlag(args: string[], name: string, fallback: number): number {
   return parsed;
 }
 
-function parseTimeFilter(value: string | null): BrianTimeFilter {
+function parseTimeFilter(value: string | null): TimeFilter {
   const timeFilter = value ?? "24hours";
-  if (!isBrianTimeFilter(timeFilter)) {
+  if (!isTimeFilter(timeFilter)) {
     throw new Error(`Unsupported time filter "${timeFilter}"`);
   }
   return timeFilter;
@@ -179,8 +179,8 @@ function printUsage(): void {
 Options:
   --sweep                  Saved sweep name from job_search.saved_sweeps.
   -k, --keyword            Search keyword. Repeatable. Defaults to Agentic.
-  -s, --site               Brian site ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
-  --time                   Brian-style time filter. Defaults to 24hours.
+  -s, --site               source ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
+  --time                   source-style time filter. Defaults to 24hours.
   --location               Optional location text for search queries.
   --exclude-remote         Do not append remote to search queries.
   --max-queries            Search target cap. Defaults to 12.

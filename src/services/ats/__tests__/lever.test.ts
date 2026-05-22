@@ -41,8 +41,9 @@ describe("fetchLeverJob", () => {
       jsonFetcher(yunoFixture),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "lever",
+      title: "Senior Platform Engineer — AI Agent Infrastructure",
       location: "Argentina",
       locations: [
         "Argentina",
@@ -64,6 +65,7 @@ describe("fetchLeverJob", () => {
       workplaceType: "Remote",
       country: "AR",
     });
+    expect(result?.descriptionPlain).toContain("AI agents at scale");
   });
 
   test("normalizes workplaceType case variants", async () => {
@@ -123,7 +125,7 @@ describe("fetchLeverJob", () => {
       "https://jobs.lever.co/x/y",
       jsonFetcher({ workplaceType: "remote", country: "US" }),
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "lever",
       location: "",
       locations: [],

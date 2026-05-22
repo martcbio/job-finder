@@ -69,10 +69,23 @@ export function atsStructuralFilter(data: AtsJobData | null): { pass: boolean; r
 
 export function formatAtsBlock(data: AtsJobData): string {
   const lines = [`## ATS Structured Data (from ${data.source} API)`];
+  if (data.title) lines.push(`- Title: ${data.title}`);
+  if (data.company) lines.push(`- Company: ${data.company}`);
   if (data.location) lines.push(`- Primary location: ${data.location}`);
   if (data.locations.length > 0) lines.push(`- All listed locations: ${data.locations.join(", ")}`);
   lines.push(`- Workplace type: ${data.workplaceType ?? "unspecified"}`);
   if (data.country) lines.push(`- Country (HQ): ${data.country}`);
   lines.push("---");
+  if (data.descriptionPlain?.trim()) {
+    lines.push("", "## ATS Job Description", "", data.descriptionPlain.trim());
+  }
   return lines.join("\n");
+}
+
+export function hasUsableAtsBody(data: AtsJobData): boolean {
+  const text = data.descriptionPlain?.trim() ?? "";
+  if (text.length < 700) return false;
+  return /\b(responsibilities|requirements|qualifications|what you.?ll do|about the role|about you)\b/i.test(
+    text,
+  );
 }

@@ -1,4 +1,5 @@
 import { quoteSqlLiteral } from "../db/config";
+import { screenJob } from "./jobScreening";
 
 export interface JobExportFilters {
   limit: number;
@@ -126,6 +127,14 @@ export function renderJobsMarkdown(
     lines.push(`${index + 1}. [${escapeMarkdown(row.title)}](${row.canonical_url})`);
     lines.push(`   Company: ${row.company_hint ?? "Unknown"}`);
     lines.push(`   State: ${row.review_state}`);
+    const screening = screenJob({
+      title: row.title,
+      companyHint: row.company_hint,
+      canonicalUrl: row.canonical_url,
+      markdown: row.description_sample,
+      labels: row.classification_labels,
+    });
+    lines.push(`   Screening: ${screening.summary}`);
     lines.push(
       `   Classification: ${row.category} / rag=${row.rag_focus} / enterprise=${row.enterprise_focus}`,
     );

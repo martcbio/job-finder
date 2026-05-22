@@ -11,10 +11,13 @@ export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface AtsJobData {
   source: AtsSource;
+  title?: string | null;
+  company?: string | null;
   location: string;
   locations: string[];
   workplaceType: WorkplaceType | null;
   country: string | null;
+  descriptionPlain?: string | null;
 }
 
 // All three ATS surfaces emit `null` for unset fields on at least some payloads
@@ -23,6 +26,7 @@ export interface AtsJobData {
 
 // Lever — https://api.lever.co/v0/postings/{org}/{id}?mode=json
 export const leverJobSchema = z.object({
+  text: z.string().nullish(),
   categories: z
     .object({
       location: z.string().nullish(),
@@ -34,6 +38,8 @@ export const leverJobSchema = z.object({
     .nullish(),
   workplaceType: z.string().nullish(),
   country: z.string().nullish(),
+  descriptionPlain: z.string().nullish(),
+  descriptionBodyPlain: z.string().nullish(),
 });
 
 export type LeverJob = z.infer<typeof leverJobSchema>;
@@ -41,6 +47,7 @@ export type LeverJob = z.infer<typeof leverJobSchema>;
 // Ashby — https://api.ashbyhq.com/posting-api/job-board/{org}
 export const ashbyJobSchema = z.object({
   id: z.string(),
+  title: z.string().nullish(),
   location: z.string().nullish(),
   secondaryLocations: z
     .array(
@@ -61,6 +68,7 @@ export const ashbyJobSchema = z.object({
         .nullish(),
     })
     .nullish(),
+  descriptionPlain: z.string().nullish(),
 });
 
 export const ashbyOrgResponseSchema = z.object({
@@ -74,6 +82,9 @@ export type AshbyOrgResponse = z.infer<typeof ashbyOrgResponseSchema>;
 // Greenhouse — https://boards-api.greenhouse.io/v1/boards/{org}/jobs/{id}
 export const greenhouseJobSchema = z.object({
   id: z.number(),
+  title: z.string().nullish(),
+  company_name: z.string().nullish(),
+  content: z.string().nullish(),
   location: z
     .object({
       name: z.string(),

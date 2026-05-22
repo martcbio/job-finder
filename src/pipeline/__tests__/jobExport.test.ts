@@ -74,6 +74,7 @@ describe("renderJobsMarkdown", () => {
 
     expect(markdown).toContain("Filters: limit=5, state=new, run_id=3");
     expect(markdown).toContain("1. [Agentic Engineer \\[RAG\\]](https://jobs.example.com/42)");
+    expect(markdown).toContain("Screening: high signal: no deterministic blocker found");
     expect(markdown).toContain("Classification: agentic_engineer / rag=yes / enterprise=no");
     expect(markdown).toContain(
       "Labels: agentic_engineer@page(0.7400), developer_tools@metadata(0.6800)",

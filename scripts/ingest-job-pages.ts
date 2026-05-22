@@ -3,14 +3,16 @@ import {
   type PageIngestJobRow,
   buildInsertPageIngestAttemptSql,
   buildPendingPageIngestSql,
+  buildSearchRunPageIngestSql,
   buildUpsertJobPageSql,
 } from "../src/pipeline/jobPageIngest";
 import { fetchHttpPageMarkdown } from "../src/pipeline/httpPageExtract";
 import { fetchJinaReaderWithUsage } from "../src/pipeline/search";
-import { fetchAtsData, formatAtsBlock } from "../src/services/ats";
+import { fetchAtsData, formatAtsBlock, hasUsableAtsBody } from "../src/services/ats";
 
 interface IngestPagesOptions {
   limit: number;
+  runId: number | null;
   timeoutMs: number;
   httpTimeoutMs: number;
   httpMinTextLength: number;
@@ -34,9 +36,27 @@ function readNumberFlag(args: string[], name: string, fallback: number): number 
   return parsed;
 }
 
+function readOptionalNumberFlag(args: string[], name: string): number | null {
+  const index = args.indexOf(name);
+  if (index === -1) return null;
+
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${name} requires a numeric value`);
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return parsed;
+}
+
 function parseOptions(args: string[]): IngestPagesOptions {
   return {
     limit: readNumberFlag(args, "--limit", 25),
+    runId: readOptionalNumberFlag(args, "--run-id"),
     timeoutMs: readNumberFlag(args, "--timeout-ms", 45000),
     httpTimeoutMs: readNumberFlag(args, "--http-timeout-ms", 15000),
     httpMinTextLength: readNumberFlag(args, "--http-min-text-length", 500),
@@ -51,6 +71,7 @@ function printUsage(): void {
 
 Options:
   --limit       Maximum jobs to ingest. Defaults to 25.
+  --run-id      Restrict ingestion to jobs observed in a specific search run.
   --timeout-ms  Per-page Jina Reader timeout. Defaults to 45000.
   --http-timeout-ms       Plain HTTP extraction timeout. Defaults to 15000.
   --http-min-text-length  Minimum readable chars for HTTP success. Defaults to 500.
@@ -72,13 +93,17 @@ async function run(): Promise<void> {
 
   const options = parseOptions(args);
 
-  const rows = await runPsqlJson<PageIngestJobRow[]>(buildPendingPageIngestSql(options.limit));
+  const rows = await runPsqlJson<PageIngestJobRow[]>(
+    options.runId === null
+      ? buildPendingPageIngestSql(options.limit)
+      : buildSearchRunPageIngestSql(options.runId, options.limit),
+  );
   const results = [];
   let totalReportedTokens = 0;
 
   for (const row of rows) {
-    const atsCaptured = await captureAtsMetadata(row);
-    if (atsCaptured) {
+    const atsCapture = await captureAtsMetadata(row);
+    if (atsCapture.stop) {
       results.push({ id: row.id, status: "success", source: "ats_api", tokens: null });
       continue;
     }
@@ -171,7 +196,7 @@ async function run(): Promise<void> {
   console.log(`Reported Jina tokens: ${totalReportedTokens}`);
 }
 
-async function captureAtsMetadata(row: PageIngestJobRow): Promise<boolean> {
+async function captureAtsMetadata(row: PageIngestJobRow): Promise<{ captured: boolean; stop: boolean }> {
   const startedAt = Date.now();
   const atsData = await fetchAtsData(row.canonical_url, { title: row.title });
   const durationMs = Date.now() - startedAt;
@@ -187,7 +212,7 @@ async function captureAtsMetadata(row: PageIngestJobRow): Promise<boolean> {
         error: null,
       }),
     );
-    return false;
+    return { captured: false, stop: false };
   }
 
   await runPsql(
@@ -211,7 +236,7 @@ async function captureAtsMetadata(row: PageIngestJobRow): Promise<boolean> {
     }),
   );
 
-  return true;
+  return { captured: true, stop: hasUsableAtsBody(atsData) };
 }
 
 async function captureHttpExtract(row: PageIngestJobRow, options: IngestPagesOptions): Promise<boolean> {

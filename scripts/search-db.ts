@@ -1,6 +1,11 @@
 import { SEARCH_DOMAINS, SEARCH_KEYWORDS } from "../src/config/search";
-import { resolveBrianJobSites } from "../src/pipeline/brianSites";
+import { resolveJobSourceSites } from "../src/pipeline/sourceSites";
 import { planMigrations } from "../src/db/migrations";
+import {
+  type DiscoveryProvider,
+  fetchDiscoveryWithUsage,
+  isDiscoveryProvider,
+} from "../src/pipeline/discovery";
 import {
   completeSearchQuery,
   completeSearchRun,
@@ -8,20 +13,20 @@ import {
   createSearchRun,
   persistSearchResult,
 } from "../src/pipeline/searchPersistence";
-import { fetchJinaSearchWithUsage } from "../src/pipeline/search";
 import { buildSearchTargets } from "../src/pipeline/searchTargets";
-import { type BrianTimeFilter, isBrianTimeFilter } from "../src/pipeline/searchEngines";
+import { type TimeFilter, isTimeFilter } from "../src/pipeline/searchEngines";
 
 interface SearchDbOptions {
   keywords: string[];
   domains: string[];
   siteValues: string[];
-  timeFilter: BrianTimeFilter;
+  timeFilter: TimeFilter;
   includeRemote: boolean;
   location: string | null;
   maxQueries: number;
   limitPerQuery: number;
   timeoutMs: number;
+  discoveryProvider: DiscoveryProvider;
   json: boolean;
 }
 
@@ -83,8 +88,12 @@ function parseOptions(args: string[]): SearchDbOptions {
   const domainArgs = readRepeatedFlag(args, ["--domain", "-d"]);
   const siteValues = readRepeatedFlag(args, ["--site", "-s"]);
   const timeFilterValue = readStringFlag(args, "--time") ?? "24hours";
-  if (!isBrianTimeFilter(timeFilterValue)) {
+  if (!isTimeFilter(timeFilterValue)) {
     throw new Error(`Unsupported time filter "${timeFilterValue}"`);
+  }
+  const discoveryProvider = readStringFlag(args, "--discovery") ?? "auto";
+  if (!isDiscoveryProvider(discoveryProvider)) {
+    throw new Error(`Unsupported discovery provider "${discoveryProvider}"`);
   }
 
   const defaultKeyword = SEARCH_KEYWORDS[0];
@@ -102,6 +111,7 @@ function parseOptions(args: string[]): SearchDbOptions {
     maxQueries: readNumberFlag(args, "--max-queries", 12),
     limitPerQuery: readNumberFlag(args, "--limit", 20),
     timeoutMs: readNumberFlag(args, "--timeout-ms", 45000),
+    discoveryProvider,
     json: args.includes("--json"),
   };
 }
@@ -114,16 +124,17 @@ function printUsage(): void {
 Options:
   -k, --keyword       Search keyword. Repeatable. Comma-separated values accepted.
   -d, --domain        Site domain. Repeatable. Comma-separated values accepted.
-  -s, --site          Brian site ID/label/site. Repeatable. Use "all" for Brian's full site list.
-  --time              Brian-style time filter. Defaults to 24hours.
-  --location          Optional location text to append to Brian-style site queries.
-  --exclude-remote    Do not append "remote" to Brian-style site queries.
+  -s, --site          source ID/label/site. Repeatable. Use "all" for the configured source list.
+  --time              source-style time filter. Defaults to 24hours.
+  --location          Optional location text to append to source-style site queries.
+  --exclude-remote    Do not append "remote" to source-style site queries.
   --max-queries       Query cap. Defaults to 12 to avoid accidental broad runs.
   --limit             Result cap per query. Defaults to 20.
-  --timeout-ms        Per-Jina-query timeout. Defaults to 45000.
+  --timeout-ms        Per-discovery-query timeout. Defaults to 45000.
+  --discovery         Discovery provider: auto, brave, or jina. Defaults to auto.
   --json              Print machine-readable run summary.
 
-Requires DATABASE_URL and applied job_search migrations. Jina is required only for search-query targets.`);
+Requires DATABASE_URL and applied job_search migrations. Auto discovery prefers BRAVE_API_KEY, then JINA_API_KEY.`);
 }
 
 async function assertMigrationsReady(): Promise<void> {
@@ -145,7 +156,7 @@ async function run(): Promise<void> {
   }
 
   const options = parseOptions(args);
-  const sites = resolveBrianJobSites(options.siteValues);
+  const sites = resolveJobSourceSites(options.siteValues);
   const targets = buildSearchTargets({
     keywords: options.keywords,
     domains: options.domains,
@@ -165,10 +176,20 @@ async function run(): Promise<void> {
 
   await assertMigrationsReady();
 
-  const needsJina = selectedTargets.some((target) => target.kind === "search-query");
-  const jinaApiKey = process.env.JINA_API_KEY ?? "";
-  if (needsJina && !jinaApiKey) {
-    throw new Error("JINA_API_KEY is required for search-query targets");
+  const needsDiscovery = selectedTargets.some((target) => target.kind === "search-query");
+  if (
+    needsDiscovery &&
+    options.discoveryProvider === "brave" &&
+    !(process.env.BRAVE_API_KEY ?? "")
+  ) {
+    throw new Error("BRAVE_API_KEY is required for Brave discovery");
+  }
+  if (
+    needsDiscovery &&
+    options.discoveryProvider === "jina" &&
+    !(process.env.JINA_API_KEY ?? "")
+  ) {
+    throw new Error("JINA_API_KEY is required for Jina Search discovery");
   }
 
   const runId = await createSearchRun({
@@ -208,10 +229,17 @@ async function run(): Promise<void> {
 
     try {
       console.error(`[${index + 1}/${selectedTargets.length}] Searching ${target.label}`);
-      const call = await fetchJinaSearchWithUsage(
+      const call = await fetchDiscoveryWithUsage(
         target.query,
-        { jinaApiKey },
-        { timeoutMs: options.timeoutMs },
+        {
+          braveApiKey: process.env.BRAVE_API_KEY ?? "",
+          jinaApiKey: process.env.JINA_API_KEY ?? "",
+        },
+        {
+          timeoutMs: options.timeoutMs,
+          provider: options.discoveryProvider,
+          count: options.limitPerQuery,
+        },
       );
       const items = target.filter(call.results).slice(0, options.limitPerQuery);
 
@@ -292,4 +320,3 @@ run().catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });
-

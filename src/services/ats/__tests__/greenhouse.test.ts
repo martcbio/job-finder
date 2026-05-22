@@ -54,13 +54,17 @@ describe("fetchGreenhouseJob", () => {
       jsonFetcher(openupFixture),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "greenhouse",
+      title: "Senior AI Engineer",
+      company: "OpenUp",
       location: "Amsterdam",
       locations: ["Amsterdam", "Amsterdam, North Holland, Netherlands"],
       workplaceType: null,
       country: "Netherlands",
     });
+    expect(result?.descriptionPlain).toContain("About the role");
+    expect(result?.descriptionPlain).toContain("multi-agent architectures");
   });
 
   test("workplaceType is always null (Greenhouse exposes no field)", async () => {

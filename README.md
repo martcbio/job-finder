@@ -1,6 +1,6 @@
 # jobfinder
 
-Local, Postgres-backed job-search pipeline for Brian-style source fanout.
+Local, Postgres-backed job-search pipeline for source fanout across ATS and career surfaces.
 
 The current fork uses Jina Search for discovery, stores runs/results/jobs in a schema-isolated local Postgres database, ingests job pages with cheaper structured paths before Jina Reader, classifies jobs into review categories, and keeps all application actions human-gated.
 
@@ -50,7 +50,7 @@ should not depend on them.
 
 ## Common Commands
 
-Run a DB-backed search across selected Brian sources:
+Run a DB-backed search across selected sources:
 
 ```bash
 DATABASE_URL=postgres://mcb@localhost:5432/jobs \
@@ -72,6 +72,15 @@ Inspect source quality and token usage:
 ```bash
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run source:health
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run pipeline:history
+```
+
+Run the explicit source coverage smoke. This is the command that tests
+the broad claim source-by-source and writes a report that separates confirmed,
+partial, blocked, and untested sources:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs \
+  bun run source:coverage -- --execute -k "Agentic" --time 24hours --limit-per-source 1
 ```
 
 Review jobs and record human decisions:
@@ -102,7 +111,7 @@ DATABASE_URL=postgres://mcb@localhost:5432/jobs \
 The main dry-runnable pipeline is:
 
 1. `db_check` validates local Postgres and pending migrations.
-2. `search` fans out over Brian-style sources and persists every query/result/error.
+2. `search` fans out over configured sources and persists every query/result/error.
 3. `ingest_pages` captures richer page text.
 4. `classify` writes category/focus labels and advances untouched jobs to `ready_for_review`.
 5. `duplicates` records possible duplicate relationships without suppressing jobs.

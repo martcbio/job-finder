@@ -5,6 +5,7 @@ import {
   detectAtsSource,
   fetchAtsData,
   formatAtsBlock,
+  hasUsableAtsBody,
 } from "..";
 import type { AtsJobData, Fetcher } from "../types";
 
@@ -104,18 +105,23 @@ describe("formatAtsBlock", () => {
   test("formats a complete Lever response", () => {
     const data: AtsJobData = {
       source: "lever",
+      title: "Senior Platform Engineer",
       location: "Argentina",
       locations: ["Argentina", "Europe", "Spain"],
       workplaceType: "Remote",
       country: "AR",
+      descriptionPlain:
+        "About the role\nBuild AI agents.\nResponsibilities\nOwn the platform.\nRequirements\nSenior engineering background.",
     };
     const block = formatAtsBlock(data);
     expect(block).toContain("## ATS Structured Data (from lever API)");
+    expect(block).toContain("- Title: Senior Platform Engineer");
     expect(block).toContain("- Primary location: Argentina");
     expect(block).toContain("- All listed locations: Argentina, Europe, Spain");
     expect(block).toContain("- Workplace type: Remote");
     expect(block).toContain("- Country (HQ): AR");
-    expect(block.endsWith("---")).toBe(true);
+    expect(block).toContain("## ATS Job Description");
+    expect(block).toContain("Responsibilities");
   });
 
   test("omits empty fields", () => {
@@ -145,6 +151,33 @@ describe("formatAtsBlock", () => {
     const block = formatAtsBlock(data);
     expect(block).not.toContain("primary location may be HQ");
     expect(block).not.toContain("not final eligibility");
+  });
+});
+
+describe("hasUsableAtsBody", () => {
+  test("accepts long ATS body text with job-description markers", () => {
+    expect(
+      hasUsableAtsBody({
+        source: "greenhouse",
+        location: "Remote",
+        locations: ["Remote"],
+        workplaceType: null,
+        country: null,
+        descriptionPlain: `${"Build production AI systems. ".repeat(40)}Responsibilities and requirements include owning agentic systems.`,
+      }),
+    ).toBe(true);
+  });
+
+  test("rejects metadata-only ATS data", () => {
+    expect(
+      hasUsableAtsBody({
+        source: "workable",
+        location: "Remote",
+        locations: ["Remote"],
+        workplaceType: "Remote",
+        country: null,
+      }),
+    ).toBe(false);
   });
 });
 

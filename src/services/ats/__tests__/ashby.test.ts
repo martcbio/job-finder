@@ -44,13 +44,15 @@ describe("fetchAshbyJob", () => {
       jsonFetcher(ledgerFixture),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "ashby",
+      title: "Tax Assistant Intern",
       location: "Paris, France",
       locations: ["Paris, France"],
       workplaceType: "OnSite",
       country: "France, Metropolitan",
     });
+    expect(result?.descriptionPlain).toContain("What you’ll be doing");
   });
 
   test("returns null when id is not found in org listing", async () => {
@@ -145,7 +147,7 @@ describe("fetchAshbyJob", () => {
       ],
     };
     const result = await fetchAshbyJob("https://jobs.ashbyhq.com/foo/job1", jsonFetcher(payload));
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "ashby",
       location: "Remote",
       locations: ["Remote"],

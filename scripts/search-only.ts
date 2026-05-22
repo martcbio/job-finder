@@ -1,22 +1,22 @@
 import { SEARCH_DOMAINS, SEARCH_KEYWORDS } from "../src/config/search";
-import { type BrianJobSite, resolveBrianJobSites } from "../src/pipeline/brianSites";
+import { type JobSourceSite, resolveJobSourceSites } from "../src/pipeline/sourceSites";
 import { fetchJinaSearchWithUsage } from "../src/pipeline/search";
 import { type SearchResultItem, buildSearchTargets } from "../src/pipeline/searchTargets";
 import {
-  BRIAN_SEARCH_ENGINES,
-  type BrianSearchEngine,
-  type BrianTimeFilter,
-  buildBrianSearchUrl,
-  isBrianSearchEngine,
-  isBrianTimeFilter,
+  SEARCH_ENGINES,
+  type SearchEngine,
+  type TimeFilter,
+  buildSearchEngineUrl,
+  isSearchEngine,
+  isTimeFilter,
 } from "../src/pipeline/searchEngines";
 
 interface SearchOnlyOptions {
   keywords: string[];
   domains: string[];
-  sites: BrianJobSite[];
-  engines: BrianSearchEngine[];
-  timeFilter: BrianTimeFilter;
+  sites: JobSourceSite[];
+  engines: SearchEngine[];
+  timeFilter: TimeFilter;
   includeRemote: boolean;
   location: string | null;
   maxQueries: number;
@@ -44,8 +44,8 @@ interface SearchLinkResult {
   keyword: string;
   label: string;
   query: string | null;
-  engine: BrianSearchEngine | "direct";
-  timeFilter: BrianTimeFilter;
+  engine: SearchEngine | "direct";
+  timeFilter: TimeFilter;
   url: string;
 }
 
@@ -102,16 +102,16 @@ function readStringFlag(args: string[], name: string): string | null {
   return value;
 }
 
-function parseEngines(args: string[]): BrianSearchEngine[] {
+function parseEngines(args: string[]): SearchEngine[] {
   const values = readRepeatedFlag(args, ["--engine", "-e"]);
   if (values.length === 0 || values.includes("all")) {
-    return [...BRIAN_SEARCH_ENGINES];
+    return [...SEARCH_ENGINES];
   }
 
-  const engines: BrianSearchEngine[] = [];
+  const engines: SearchEngine[] = [];
   for (const value of values) {
-    if (!isBrianSearchEngine(value)) {
-      throw new Error(`Unsupported engine "${value}". Supported engines: ${BRIAN_SEARCH_ENGINES.join(", ")}`);
+    if (!isSearchEngine(value)) {
+      throw new Error(`Unsupported engine "${value}". Supported engines: ${SEARCH_ENGINES.join(", ")}`);
     }
     engines.push(value);
   }
@@ -124,7 +124,7 @@ function parseOptions(args: string[]): SearchOnlyOptions {
   const domainArgs = readRepeatedFlag(args, ["--domain", "-d"]);
   const siteArgs = readRepeatedFlag(args, ["--site", "-s"]);
   const timeFilterValue = readStringFlag(args, "--time") ?? "24hours";
-  if (!isBrianTimeFilter(timeFilterValue)) {
+  if (!isTimeFilter(timeFilterValue)) {
     throw new Error(`Unsupported time filter "${timeFilterValue}"`);
   }
 
@@ -143,7 +143,7 @@ function parseOptions(args: string[]): SearchOnlyOptions {
   return {
     keywords: keywords.length > 0 ? keywords : [defaultKeyword],
     domains: domains.length > 0 ? domains : SEARCH_DOMAINS,
-    sites: resolveBrianJobSites(siteArgs),
+    sites: resolveJobSourceSites(siteArgs),
     engines: parseEngines(args),
     timeFilter: timeFilterValue,
     includeRemote: !args.includes("--exclude-remote"),
@@ -169,17 +169,17 @@ function printUsage(): void {
 Options:
   -k, --keyword       Search keyword. Repeatable. Comma-separated values accepted.
   -d, --domain        Site domain. Repeatable. Comma-separated values accepted.
-  -s, --site          Brian site ID/label/site. Repeatable. Use "all" for Brian's full site list.
-  -e, --engine        Brian-style link engine. Repeatable. Use "all" for all engines.
-  --time              Brian-style time filter. Defaults to 24hours.
-  --location          Optional location text to append to Brian-style site queries.
-  --exclude-remote    Do not append "remote" to Brian-style site queries.
+  -s, --site          source ID/label/site. Repeatable. Use "all" for the configured source list.
+  -e, --engine        source-style link engine. Repeatable. Use "all" for all engines.
+  --time              source-style time filter. Defaults to 24hours.
+  --location          Optional location text to append to source-style site queries.
+  --exclude-remote    Do not append "remote" to source-style site queries.
   --max-queries       Query cap. Defaults to 12 to avoid accidental broad runs.
   --limit             URL cap per query. Defaults to 20.
   --timeout-ms        Per-Jina-query timeout. Defaults to 45000.
   --json              Print machine-readable JSON.
   --dry-run           Print generated queries without calling Jina.
-  --links             Generate Brian-style outbound search links instead of calling Jina.
+  --links             Generate source-style outbound search links instead of calling Jina.
 
 Jina search is used only when --links and --dry-run are absent. Notion and OpenRouter are not loaded.`);
 }
@@ -222,7 +222,7 @@ async function run(): Promise<void> {
       }
 
       for (const engine of options.engines) {
-        const url = buildBrianSearchUrl(engine, target.query, options.timeFilter);
+        const url = buildSearchEngineUrl(engine, target.query, options.timeFilter);
         links.push({
           keyword: target.keyword,
           label: target.label,

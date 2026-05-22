@@ -115,6 +115,7 @@ export async function fetchWorkableJob(
 
   return {
     source: "workable",
+    title: job.title ?? null,
     location: primary,
     locations,
     workplaceType: normalizeWorkplaceType(job.workplace),

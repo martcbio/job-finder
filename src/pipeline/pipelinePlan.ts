@@ -46,7 +46,7 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
     },
     {
       name: "search",
-      description: "Run Brian-style source fanout and persist search results.",
+      description: "Run configured source fanout and persist search results.",
       command: buildSearchCommand(options),
     },
     {

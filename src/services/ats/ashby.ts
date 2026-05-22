@@ -106,9 +106,11 @@ export async function fetchAshbyJob(
 
   return {
     source: "ashby",
+    title: job.title ?? null,
     location: primary,
     locations,
     workplaceType: normalizeWorkplaceType(job.workplaceType),
     country: job.address?.postalAddress?.addressCountry ?? null,
+    descriptionPlain: job.descriptionPlain ?? null,
   };
 }

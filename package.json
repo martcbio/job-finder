@@ -1,7 +1,7 @@
 {
   "name": "jobfinder",
   "version": "2026.05.02.1",
-  "description": "Local Postgres-backed job search pipeline with Brian-style source fanout, review queues, and CV/application support.",
+  "description": "Local Postgres-backed job search pipeline with source fanout, review queues, and CV/application support.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,6 +27,8 @@
     "applications:list": "bun scripts/list-applications.ts",
     "applications:record": "bun scripts/record-application.ts",
     "api": "bun scripts/api.ts",
+    "source:availability": "bun scripts/source-availability.ts",
+    "source:coverage": "bun scripts/source-coverage.ts",
     "db:check": "bun scripts/db-check.ts",
     "db:create": "bun scripts/db-create.ts",
     "db:migrate": "bun scripts/db-migrate.ts",
@@ -42,6 +44,7 @@
     "search": "bun scripts/search-only.ts",
     "search:db": "bun scripts/search-db.ts",
     "source:health": "bun scripts/source-health.ts",
+    "source:sweep": "bun scripts/source-sweep.ts",
     "sweeps:list": "bun scripts/list-sweeps.ts",
     "sweeps:save": "bun scripts/save-sweep.ts",
     "scrape": "bun src/index.ts",

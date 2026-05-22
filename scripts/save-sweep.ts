@@ -1,6 +1,6 @@
 import { runPsqlJson } from "../src/db/psql";
 import { type SavedSweepInput, type SavedSweepRow, buildUpsertSavedSweepSql } from "../src/pipeline/savedSweeps";
-import { isBrianTimeFilter } from "../src/pipeline/searchEngines";
+import { isTimeFilter } from "../src/pipeline/searchEngines";
 
 function splitList(value: string): string[] {
   return value
@@ -71,7 +71,7 @@ function parseOptions(args: string[]): SavedSweepInput {
   const keywords = readRepeatedFlag(args, ["--keyword", "-k"]);
   const sites = readRepeatedFlag(args, ["--site", "-s"]);
   const timeFilter = readStringFlag(args, "--time") ?? "24hours";
-  if (!isBrianTimeFilter(timeFilter)) {
+  if (!isTimeFilter(timeFilter)) {
     throw new Error(`Unsupported time filter "${timeFilter}"`);
   }
 
@@ -103,8 +103,8 @@ function printUsage(): void {
 Options mirror pipeline:run search and per-stage caps.
   --name                   Saved sweep name.
   -k, --keyword            Search keyword. Repeatable. Defaults to Agentic.
-  -s, --site               Brian site ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
-  --time                   Brian-style time filter. Defaults to 24hours.
+  -s, --site               source ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
+  --time                   source-style time filter. Defaults to 24hours.
   --location               Optional location text for search queries.
   --exclude-remote         Do not append remote to search queries.
   --max-queries            Search target cap. Defaults to 12.

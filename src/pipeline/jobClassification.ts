@@ -78,6 +78,37 @@ FROM (
 ) classifiable_row;`;
 }
 
+export function buildClassifiableJobsForSearchRunSql(runId: number, limit: number): string {
+  return `SELECT COALESCE(json_agg(row_to_json(classifiable_row)), '[]'::json)
+FROM (
+  SELECT
+    j.id::text AS id,
+    j.title_normalized AS title,
+    j.company_hint,
+    j.canonical_url,
+    BOOL_OR(jp.id IS NOT NULL) AS has_page_snapshot,
+    CONCAT_WS(
+      E'\\n',
+      COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), ''),
+      COALESCE(string_agg(DISTINCT jp.markdown, E'\\n'), '')
+    ) AS description_text
+  FROM job_search.search_queries sq
+  JOIN job_search.search_runs search_run ON search_run.id = sq.run_id
+  JOIN job_search.search_results sr ON sr.query_id = sq.id
+  JOIN job_search.job_observations jo ON jo.search_result_id = sr.id
+  JOIN job_search.jobs j ON j.id = jo.job_id
+  LEFT JOIN job_search.job_pages jp
+    ON jp.job_id = j.id
+   AND jp.status = 'success'
+   AND jp.fetched_at >= search_run.started_at
+  WHERE sq.run_id = ${runId}
+    AND j.category = 'unclassified'
+  GROUP BY j.id
+  ORDER BY j.last_seen_at DESC, j.id DESC
+  LIMIT ${limit}
+) classifiable_row;`;
+}
+
 export function buildUpdateJobClassificationSql(
   jobId: string,
   classification: JobClassification,

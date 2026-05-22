@@ -45,6 +45,32 @@ FROM (
 ) page_job;`;
 }
 
+export function buildSearchRunPageIngestSql(runId: number, limit: number): string {
+  return `SELECT COALESCE(json_agg(row_to_json(page_job)), '[]'::json)
+FROM (
+  SELECT DISTINCT ON (j.id)
+    j.id::text AS id,
+    j.title_normalized AS title,
+    j.canonical_url
+  FROM job_search.search_queries sq
+  JOIN job_search.search_runs search_run ON search_run.id = sq.run_id
+  JOIN job_search.search_results sr ON sr.query_id = sq.id
+  JOIN job_search.job_observations jo ON jo.search_result_id = sr.id
+  JOIN job_search.jobs j ON j.id = jo.job_id
+  WHERE sq.run_id = ${runId}
+    AND NOT EXISTS (
+      SELECT 1
+      FROM job_search.job_pages jp
+      WHERE jp.job_id = j.id
+        AND jp.status = 'success'
+        AND jp.fetched_at >= search_run.started_at
+        AND NULLIF(BTRIM(COALESCE(jp.markdown, '')), '') IS NOT NULL
+    )
+  ORDER BY j.id, j.last_seen_at DESC
+  LIMIT ${limit}
+) page_job;`;
+}
+
 export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestResult): string {
   const source = result.source ?? "jina_reader";
   const titleRaw = result.markdown ? extractTitle(result.markdown) : null;

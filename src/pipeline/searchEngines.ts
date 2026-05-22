@@ -1,4 +1,4 @@
-export const BRIAN_SEARCH_ENGINES = [
+export const SEARCH_ENGINES = [
   "google",
   "duckduckgo",
   "bing",
@@ -9,9 +9,9 @@ export const BRIAN_SEARCH_ENGINES = [
   "startpage",
 ] as const;
 
-export type BrianSearchEngine = (typeof BRIAN_SEARCH_ENGINES)[number];
+export type SearchEngine = (typeof SEARCH_ENGINES)[number];
 
-export const BRIAN_TIME_FILTERS = [
+export const TIME_FILTERS = [
   "all",
   "1hour",
   "4hours",
@@ -28,21 +28,21 @@ export const BRIAN_TIME_FILTERS = [
   "older6months",
 ] as const;
 
-export type BrianTimeFilter = (typeof BRIAN_TIME_FILTERS)[number];
+export type TimeFilter = (typeof TIME_FILTERS)[number];
 
-export function isBrianSearchEngine(value: string): value is BrianSearchEngine {
-  return BRIAN_SEARCH_ENGINES.includes(value as BrianSearchEngine);
+export function isSearchEngine(value: string): value is SearchEngine {
+  return SEARCH_ENGINES.includes(value as SearchEngine);
 }
 
-export function isBrianTimeFilter(value: string): value is BrianTimeFilter {
-  return BRIAN_TIME_FILTERS.includes(value as BrianTimeFilter);
+export function isTimeFilter(value: string): value is TimeFilter {
+  return TIME_FILTERS.includes(value as TimeFilter);
 }
 
-function isOlderThanFilter(timeFilter: BrianTimeFilter): boolean {
+function isOlderThanFilter(timeFilter: TimeFilter): boolean {
   return ["older1month", "older3months", "older6months"].includes(timeFilter);
 }
 
-function getMonthsBackForOlderFilter(timeFilter: BrianTimeFilter): number | null {
+function getMonthsBackForOlderFilter(timeFilter: TimeFilter): number | null {
   switch (timeFilter) {
     case "older1month":
       return 1;
@@ -79,13 +79,13 @@ function getPastDateISO(monthsBack: number): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function addOlderThanQueryOperator(query: string, timeFilter: BrianTimeFilter): string {
+function addOlderThanQueryOperator(query: string, timeFilter: TimeFilter): string {
   const monthsBack = getMonthsBackForOlderFilter(timeFilter);
   if (!monthsBack) return query;
   return `${query} before:${getPastDateISO(monthsBack)}`;
 }
 
-function getGoogleTimeParam(timeFilter: BrianTimeFilter): string {
+function getGoogleTimeParam(timeFilter: TimeFilter): string {
   switch (timeFilter) {
     case "24hours":
       return "&tbs=qdr:d";
@@ -118,8 +118,8 @@ function getGoogleTimeParam(timeFilter: BrianTimeFilter): string {
   }
 }
 
-function getStartpageAfterDate(timeFilter: BrianTimeFilter): string {
-  const dayMap: Partial<Record<BrianTimeFilter, number>> = {
+function getStartpageAfterDate(timeFilter: TimeFilter): string {
+  const dayMap: Partial<Record<TimeFilter, number>> = {
     "24hours": 1,
     week: 7,
     month: 30,
@@ -132,10 +132,10 @@ function getStartpageAfterDate(timeFilter: BrianTimeFilter): string {
   return date.toISOString().slice(0, 10);
 }
 
-export function buildBrianSearchUrl(
-  engine: BrianSearchEngine,
+export function buildSearchEngineUrl(
+  engine: SearchEngine,
   query: string,
-  timeFilter: BrianTimeFilter,
+  timeFilter: TimeFilter,
 ): string {
   const queryWithOlderThan = addOlderThanQueryOperator(query, timeFilter);
 
@@ -143,7 +143,7 @@ export function buildBrianSearchUrl(
     case "google":
       return `https://www.google.com/search?q=${encodeURIComponent(query)}${getGoogleTimeParam(timeFilter)}`;
     case "duckduckgo": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "d",
         week: "w",
         month: "m",
@@ -154,7 +154,7 @@ export function buildBrianSearchUrl(
       return `https://duckduckgo.com/html/?q=${encodeURIComponent(queryWithOlderThan)}${dfParam}`;
     }
     case "bing": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "ez1",
         week: "ez2",
         month: "ez3",
@@ -164,7 +164,7 @@ export function buildBrianSearchUrl(
       return `https://www.bing.com/search?q=${encodeURIComponent(queryWithOlderThan)}${filterParam}`;
     }
     case "yahoo": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "d",
         week: "w",
         month: "m",
@@ -174,7 +174,7 @@ export function buildBrianSearchUrl(
       return `https://search.yahoo.com/search?p=${encodeURIComponent(queryWithOlderThan)}${filterParam}`;
     }
     case "kagi": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "1",
         week: "2",
         month: "3",
@@ -185,7 +185,7 @@ export function buildBrianSearchUrl(
       return `https://kagi.com/search?q=${encodeURIComponent(queryWithOlderThan)}${filterParam}`;
     }
     case "qwant": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "day",
         week: "week",
         month: "month",
@@ -195,7 +195,7 @@ export function buildBrianSearchUrl(
       return `https://www.qwant.com/?q=${encodeURIComponent(queryWithOlderThan)}&t=web${filterParam}`;
     }
     case "brave": {
-      const map: Partial<Record<BrianTimeFilter, string>> = {
+      const map: Partial<Record<TimeFilter, string>> = {
         "24hours": "pd",
         week: "pw",
         month: "pm",

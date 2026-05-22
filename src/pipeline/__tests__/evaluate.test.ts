@@ -57,6 +57,23 @@ describe("profile and filter types", () => {
     expect(Array.isArray(getEvaluationFilters())).toBe(true);
   });
 
+  test("location filter encodes current work-authorization preferences", () => {
+    const filters = getEvaluationFilters();
+    expect(filters.length).toBeGreaterThan(0);
+
+    const locationFilter = filters[0];
+    if (!locationFilter) throw new Error("Expected at least one evaluation filter");
+
+    expect(locationFilter.name).toBe("location-eligibility");
+    expect(locationFilter.prompt).toContain("US-remote is blocked");
+    expect(locationFilter.prompt).toContain("True EU remote is acceptable");
+    expect(locationFilter.prompt).toContain("Occasional business meetings");
+    expect(locationFilter.prompt).toContain("Switzerland is suspect");
+    expect(locationFilter.prompt).toContain("Singapore, UAE, London");
+    expect(locationFilter.prompt).toContain("Inside IR35");
+    expect(locationFilter.prompt).toContain("UK security clearance");
+  });
+
   test("profiles satisfy EvaluationCriteria", () => {
     for (const profile of EVALUATION_PROFILES) {
       const criteria: EvaluationCriteria = profile;

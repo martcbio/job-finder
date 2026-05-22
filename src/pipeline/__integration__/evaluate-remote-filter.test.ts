@@ -7,7 +7,7 @@ import { collectFixtures, loadFixture } from "./helpers";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY as string;
 const LLM_MODEL = process.env.LLM_MODEL ?? "google/gemini-2.5-flash";
 const remoteFilter = getEvaluationFilters().find(
-  (f) => f.name === "remote-europe-eligible",
+  (f) => f.name === "location-eligibility",
 ) as ReturnType<typeof getEvaluationFilters>[number];
 
 const FIXTURES_DIR = `${import.meta.dir}/fixtures/remote`;
@@ -17,7 +17,7 @@ type Result = { name: string; expected: boolean; actual: boolean; reason: string
 
 const results: Result[] = [];
 
-describe("remote-europe-eligible filter (integration)", () => {
+describe("location-eligibility filter (integration)", () => {
   for (const file of collectFixtures(`${FIXTURES_DIR}/pass`)) {
     const name = basename(file, ".md");
     test(`${name} → PASS`, async () => {

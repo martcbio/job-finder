@@ -4,9 +4,9 @@
 
 The current job-search workflow is too manual and too ephemeral.
 
-The user has a working search pattern inspired by Brian's Job Search: generate targeted search queries across many applicant tracking systems and job-board surfaces, then click through results manually. This finds better opportunities than browsing generic aggregators, but the process is tedious, hard to repeat, and hard to inspect after the fact.
+The user has a working search pattern: generate targeted search queries across many applicant tracking systems and job-board surfaces, then click through results manually. This finds better opportunities than browsing generic aggregators, but the process is tedious, hard to repeat, and hard to inspect after the fact.
 
-The current fork of `job-finder` proves that automated source fanout is feasible. It can generate Brian-style search links, call Jina Search, report token usage, and capture outward job result data such as title, URL, source, and description. A proof sweep captured three outward records from most Brian sources, but also showed real source-level differences: some sources are direct-link generators, some named ATS sources work well, and some broad or hostile sources time out or return poor results.
+The current fork of `job-finder` proves that automated source fanout is feasible. It can generate source-specific search links, call search providers, report token usage where applicable, and capture outward job result data such as title, URL, source, and description. A proof sweep captured outward records from most configured sources, but also showed real source-level differences: some sources are direct-link generators, some named ATS sources work well, and some broad or hostile sources time out or return poor results.
 
 The user wants to move beyond proof artifacts into a normalized, durable database-backed system. The system should ingest broadly, dedupe conservatively, classify jobs into useful opportunity categories, support human review until trust is established, and eventually assemble CV/application material from trusted bullet blocks based on job focus.
 
@@ -36,7 +36,7 @@ The system should optimize first for correctness and auditability, second for to
 
 ## User Stories
 
-1. As a job seeker, I want to run one command that fans out across Brian-style job sources, so that I do not need to manually click dozens of source checkboxes and search links.
+1. As a job seeker, I want to run one command that fans out across configured job sources, so that I do not need to manually click dozens of source checkboxes and search links.
 
 2. As a job seeker, I want every run to be saved in Postgres, so that I can inspect what happened after the command exits.
 
@@ -72,7 +72,7 @@ The system should optimize first for correctness and auditability, second for to
 
 18. As a developer, I want a migration command that is idempotent and non-destructive, so that I can safely apply pending migrations during iteration.
 
-19. As a developer, I want the DB-backed search runner to reuse the existing Brian fanout logic, so that source definitions do not drift between proof and production paths.
+19. As a developer, I want the DB-backed search runner to reuse the existing source fanout logic, so that source definitions do not drift between proof and production paths.
 
 20. As a developer, I want generated Markdown summaries to come from Postgres, so that reports reflect durable data rather than ad hoc JSON artifacts.
 
@@ -138,7 +138,7 @@ The system should optimize first for correctness and auditability, second for to
 
 ## Implementation Decisions
 
-- The current fork remains the implementation home. It has a clean imported baseline commit and a follow-up commit that adds the Notion-free Brian search fanout. The project can keep evolving locally; useful upstream changes can be copied in later.
+- The current fork remains the implementation home. It has a clean imported baseline commit and follow-up local work that adds Notion-free source fanout. The project can keep evolving locally; useful upstream changes can be copied in later.
 
 - Notion is secondary. The normalized Postgres database becomes the source of truth. Notion may later be used as an export, review, or synchronization target, but it should not gate the main ingestion pipeline.
 
@@ -164,7 +164,7 @@ The system should optimize first for correctness and auditability, second for to
 
 - The migration command creates or updates only the `job_search` schema and its owned tables. It must be idempotent and non-destructive.
 
-- The DB-backed search runner reuses the existing Brian source definitions, search engine URL builder, query construction, Jina Search wrapper, timeout handling, progress logging, and title-preserving result filtering.
+- The DB-backed search runner reuses the existing source definitions, search engine URL builder, query construction, search wrapper, timeout handling, progress logging, and title-preserving result filtering.
 
 - The first DB-backed runner should support manual saved sweeps. Scheduling is deferred until source-level cost and yield are understood.
 
@@ -196,6 +196,8 @@ The system should optimize first for correctness and auditability, second for to
 - The first review states should support at least: new, needs page ingest, needs classification, ready for review, shortlisted, needs CV tailoring, ready to apply, applied, waiting, rejected by us, rejected by company, stale, duplicate candidate, and not relevant.
 
 - Human review remains mandatory until the pipeline proves itself. Agents may prepare recommendations and drafts, but application/outreach behavior stays human-gated.
+
+- Location and authorization preferences are maintained in `docs/opportunity-criteria.md` and mirrored by the first evaluation filter. Current high-level rules: reject US-only remote and US-work-authorization roles; allow genuine EU remote plus occasional business meetings; treat Switzerland-only remote as suspect unless outside-Switzerland remote is explicit; reject UK security-clearance requirements; treat Inside IR35 as a strong negative unless the role is exceptional.
 
 - Review feedback should be structured from day one. Store shortlist/reject/maybe/duplicate/stale/bad-parse/wrong-category decisions, reason codes, and freeform notes.
 
@@ -387,11 +389,10 @@ job_search.review_events
 
 - The proof sweep showed that broad searches can be expensive. Completed calls across the proof and retries reported 671143 Jina tokens, not counting failed timeout calls where usage headers were unavailable.
 
-- The proof sweep captured three outward records for most named Brian sources, but ADP, Glassdoor, and Other Pages timed out, Dover returned no useful records, and LinkedIn/Remote Rocketship are direct-link sources rather than scrape-result sources.
+- The proof sweep captured outward records for most named sources, but ADP, Glassdoor, and Other Pages timed out, Dover returned no useful records, and LinkedIn/Remote Rocketship are direct-link sources rather than scrape-result sources.
 
 - Source failures are not a reason to remove sources yet. They are evidence that source-level health metrics and query-shape experimentation are needed.
 
 - The first DB-backed implementation should preserve the current search-only behavior while adding durable persistence. It should not attempt to solve classification, CV tailoring, scheduling, or Notion in the same pass.
 
 - The local branch currently has a clean history shape: one baseline import commit and one search-fanout commit. The PRD describes the next milestone on top of that local fork.
-

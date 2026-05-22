@@ -6,7 +6,7 @@ import { atsStructuralFilter } from "../../services/ats";
 import { evaluateSingle } from "../evaluate";
 import { collectFixtures, loadFixture, parseAtsBlockFromFixture } from "./helpers";
 
-// This suite tests the remote-europe-eligible filter against fixtures whose
+// This suite tests the location-eligibility filter against fixtures whose
 // reject/pass signal lives in the `## ATS Structured Data` block prepended by
 // `formatAtsBlock` (see services/ats/index.ts). The block carries
 // employer-set workplaceType + country + locations metadata, which is more
@@ -15,13 +15,10 @@ import { collectFixtures, loadFixture, parseAtsBlockFromFixture } from "./helper
 //   - treat workplaceType=OnSite as a hard reject regardless of body
 //   - treat workplaceType=Hybrid as reject UNLESS body explicitly contradicts
 //     ("100% remote with optional offices"-style language)
-//   - treat workplaceType=Remote + single non-EU country as reject when the
-//     body is silent about geo eligibility
-//   - PASS workplaceType=Remote when the locations include any EU country
-//   - PASS workplaceType=Remote + single non-EU country when the body
-//     explicitly says worldwide/global hiring
-//   - reject locations dominated by cheap-labor countries with minimal EU
-//     presence (probable budget signal)
+//   - reject US-only remote roles unless the body explicitly says worldwide/global hiring
+//   - PASS true EU remote roles, including occasional business meetings
+//   - treat Switzerland-only remote as suspect unless outside-Switzerland remote is explicit
+//   - reject regular hybrid/on-site roles unless the opportunity is exceptional enough
 //
 // Run only the location filter (not the full pipeline) so verdicts are
 // attributable to ATS-aware location handling, not coincidental rejects from
@@ -30,7 +27,7 @@ import { collectFixtures, loadFixture, parseAtsBlockFromFixture } from "./helper
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY as string;
 const LLM_MODEL = process.env.LLM_MODEL ?? "google/gemini-2.5-flash";
 const remoteFilter = getEvaluationFilters().find(
-  (f) => f.name === "remote-europe-eligible",
+  (f) => f.name === "location-eligibility",
 ) as ReturnType<typeof getEvaluationFilters>[number];
 
 const FIXTURES_DIR = `${import.meta.dir}/fixtures/evaluate`;
@@ -54,7 +51,7 @@ type Result = { name: string; expected: boolean; actual: boolean; reason: string
 
 const results: Result[] = [];
 
-describe("ATS-aware remote-europe-eligible filter (integration)", () => {
+describe("ATS-aware location-eligibility filter (integration)", () => {
   beforeAll(async () => {
     const passFiles = collectFixtures(`${FIXTURES_DIR}/pass/ats`).map((file) => ({
       file,

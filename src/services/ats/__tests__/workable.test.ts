@@ -52,8 +52,9 @@ describe("fetchWorkableJob", () => {
       jsonFetcher(v2aiFixture),
     );
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "workable",
+      title: "Full Stack AI Principal Engineer",
       location: "Sydney, Australia",
       locations: ["Sydney, Australia"],
       workplaceType: "Hybrid",
@@ -155,8 +156,9 @@ describe("fetchWorkableJob", () => {
         ],
       }),
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       source: "workable",
+      title: "T",
       location: "",
       locations: ["Berlin, Germany"],
       workplaceType: "Remote",

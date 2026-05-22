@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildClassifiableJobsForSearchRunSql,
   buildClassifiableJobsSql,
   buildUpdateJobClassificationSql,
   classifyJobText,
@@ -70,6 +71,19 @@ describe("classification SQL builders", () => {
 
     expect(sql).toContain("WHERE j.category = 'unclassified'");
     expect(sql).toContain("LEFT JOIN job_search.job_pages jp");
+    expect(sql).toContain("LIMIT 20");
+  });
+
+  test("builds run-scoped classifiable job query", () => {
+    const sql = buildClassifiableJobsForSearchRunSql(77, 20);
+
+    expect(sql).toContain("sq.run_id = 77");
+    expect(sql).toContain("JOIN job_search.search_runs search_run ON search_run.id = sq.run_id");
+    expect(sql).toContain("JOIN job_search.search_results sr ON sr.query_id = sq.id");
+    expect(sql).toContain("JOIN job_search.job_observations jo ON jo.search_result_id = sr.id");
+    expect(sql).toContain("jp.fetched_at >= search_run.started_at");
+    expect(sql).toContain("WHERE sq.run_id = 77");
+    expect(sql).toContain("j.category = 'unclassified'");
     expect(sql).toContain("LIMIT 20");
   });
 

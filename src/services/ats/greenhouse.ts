@@ -30,6 +30,41 @@ function extractCountry(officeLocation: string | null | undefined): string | nul
   return parts.length > 1 ? (parts[parts.length - 1] ?? null) : null;
 }
 
+function htmlToPlainText(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const decoded = decodeHtmlEntities(value);
+  return decodeHtmlEntities(
+    decoded
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<li\b[^>]*>/gi, "\n- ")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(h[1-6]|p|div|section|article|ul|ol)>/gi, "\n")
+      .replace(/<[^>]+>/g, " "),
+  )
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2F;/gi, "/")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 16)),
+    );
+}
+
 export async function fetchGreenhouseJob(
   url: string,
   fetcher: Fetcher = fetch,
@@ -77,9 +112,12 @@ export async function fetchGreenhouseJob(
 
   return {
     source: "greenhouse",
+    title: job.title ?? null,
+    company: job.company_name ?? null,
     location: primary,
     locations,
     workplaceType: null,
     country: extractCountry(job.offices?.[0]?.location),
+    descriptionPlain: htmlToPlainText(job.content),
   };
 }

@@ -75,9 +75,11 @@ export async function fetchLeverJob(
 
   return {
     source: "lever",
+    title: job.text ?? null,
     location: primary,
     locations,
     workplaceType: normalizeWorkplaceType(job.workplaceType),
     country: job.country ?? null,
+    descriptionPlain: job.descriptionPlain ?? job.descriptionBodyPlain ?? null,
   };
 }

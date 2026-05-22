@@ -54,7 +54,7 @@ import {
   type SavedSweepRow,
   savedSweepToPipelineOptions,
 } from "../pipeline/savedSweeps";
-import { type BrianTimeFilter, isBrianTimeFilter } from "../pipeline/searchEngines";
+import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 
 export type ApiQuery = <T>(sql: string) => Promise<T>;
@@ -916,12 +916,9 @@ function requiredDuplicateReviewState(
   return state;
 }
 
-function optionalTimeFilter(
-  value: string | null | undefined,
-  fallback: BrianTimeFilter,
-): BrianTimeFilter {
+function optionalTimeFilter(value: string | null | undefined, fallback: TimeFilter): TimeFilter {
   const timeFilter = value ?? fallback;
-  if (!isBrianTimeFilter(timeFilter)) {
+  if (!isTimeFilter(timeFilter)) {
     throw new ApiError(400, "invalid_time_filter", `Unsupported time filter "${timeFilter}"`);
   }
   return timeFilter;

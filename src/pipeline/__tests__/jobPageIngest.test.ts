@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   buildInsertPageIngestAttemptSql,
   buildPendingPageIngestSql,
+  buildSearchRunPageIngestSql,
   buildUpsertJobPageSql,
 } from "../jobPageIngest";
 
@@ -10,6 +11,21 @@ describe("buildPendingPageIngestSql", () => {
     const sql = buildPendingPageIngestSql(10);
 
     expect(sql).toContain("j.page_ingest_status IN ('pending', 'error', 'timeout')");
+    expect(sql).toContain("LIMIT 10");
+  });
+});
+
+describe("buildSearchRunPageIngestSql", () => {
+  test("selects only jobs from the target search run lacking current-run successful page text", () => {
+    const sql = buildSearchRunPageIngestSql(77, 10);
+
+    expect(sql).toContain("sq.run_id = 77");
+    expect(sql).toContain("JOIN job_search.search_runs search_run ON search_run.id = sq.run_id");
+    expect(sql).toContain("JOIN job_search.search_results sr ON sr.query_id = sq.id");
+    expect(sql).toContain("JOIN job_search.job_observations jo ON jo.search_result_id = sr.id");
+    expect(sql).toContain("NOT EXISTS");
+    expect(sql).toContain("jp.status = 'success'");
+    expect(sql).toContain("jp.fetched_at >= search_run.started_at");
     expect(sql).toContain("LIMIT 10");
   });
 });

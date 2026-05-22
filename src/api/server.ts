@@ -56,6 +56,7 @@ import {
 } from "../pipeline/savedSweeps";
 import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
+import { parseSourceLaneIds, SOURCE_LANES } from "../pipeline/sourceLanes";
 
 export type ApiQuery = <T>(sql: string) => Promise<T>;
 
@@ -85,6 +86,7 @@ interface PipelineRunRequest {
   keywords?: string[];
   sites?: string[];
   timeFilter?: string;
+  sourceLanes?: string[];
   includeRemote?: boolean;
   location?: string | null;
   maxQueries?: number;
@@ -525,6 +527,7 @@ async function pipelineOptionsFromBody(
     keywords: nonEmptyStringArray(body.keywords, "keywords", ["Agentic"]),
     sites: nonEmptyStringArray(body.sites, "sites", ["greenhouse", "lever", "ashby"]),
     timeFilter: optionalTimeFilter(body.timeFilter, "24hours"),
+    sourceLanes: parseApiSourceLaneIds(body.sourceLanes),
     includeRemote: body.includeRemote ?? true,
     location: nullableString(body.location, "location"),
     maxQueries: positiveIntValue(body.maxQueries, "maxQueries", 12, 500),
@@ -547,6 +550,7 @@ function pipelineCommandFromRequest(body: PipelineRunRequest): string[] {
   if (!body.sweepName) {
     for (const keyword of body.keywords ?? ["Agentic"]) command.push("--keyword", keyword);
     for (const site of body.sites ?? ["greenhouse", "lever", "ashby"]) command.push("--site", site);
+    for (const lane of body.sourceLanes ?? []) command.push("--lane", lane);
     if (body.timeFilter) command.push("--time", body.timeFilter);
     if (body.includeRemote === false) command.push("--exclude-remote");
     if (body.location) command.push("--location", body.location);
@@ -715,6 +719,7 @@ function buildMeta(env: NodeJS.ProcessEnv): unknown {
     pipeline: {
       runConfirmation: RUN_CONFIRMATION,
       executeDefault: false,
+      sourceLanes: SOURCE_LANES,
     },
     integrations: integrationStatus(env),
   };
@@ -933,6 +938,24 @@ function pipelineSteps(values: string[]): PipelineStepName[] {
     steps.push(value);
   }
   return [...new Set(steps)];
+}
+
+function parseApiSourceLaneIds(value: unknown): ReturnType<typeof parseSourceLaneIds> {
+  if (value === undefined || value === null) return parseSourceLaneIds([]);
+  if (!Array.isArray(value)) {
+    throw new ApiError(400, "invalid_field", "sourceLanes must be an array of strings");
+  }
+
+  try {
+    return parseSourceLaneIds(value.map((item) => requiredString(item, "sourceLanes")));
+  } catch (err) {
+    throw new ApiError(
+      400,
+      "invalid_source_lane",
+      err instanceof Error ? err.message : "Unsupported source lane",
+      { valid: SOURCE_LANES.map((lane) => lane.id) },
+    );
+  }
 }
 
 function positiveIntParam(

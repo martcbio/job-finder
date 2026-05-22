@@ -84,6 +84,27 @@ describe("pipeline plan", () => {
     expect(search?.command).toContain("Europe");
   });
 
+  test("annotates planned source lanes without executing them", () => {
+    const plan = buildPipelinePlan(
+      options({
+        sourceLanes: ["source_search", "jobspy", "jobserve"],
+      }),
+    );
+    const search = plan.find((step) => step.name === "search");
+
+    expect(search?.description).toContain("Source search");
+    expect(search?.description).toContain("JobSpy aggregators");
+    expect(search?.description).toContain("JobServe");
+    expect(search?.command[0]).toBe("bun");
+    expect(search?.command).not.toContain("jobspy");
+  });
+
+  test("fails loudly when only planned source lanes are selected", () => {
+    expect(() => buildPipelinePlan(options({ sourceLanes: ["jobspy"] }))).toThrow(
+      "No implemented source lanes selected",
+    );
+  });
+
   test("quotes commands for dry-run display", () => {
     expect(shellQuoteArgs(["bun", "run", "search:db", "--", "-k", "Agentic Engineer"])).toBe(
       "bun run search:db -- -k 'Agentic Engineer'",

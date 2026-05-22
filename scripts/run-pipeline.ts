@@ -22,6 +22,7 @@ import {
   savedSweepToPipelineOptions,
 } from "../src/pipeline/savedSweeps";
 import { type TimeFilter, isTimeFilter } from "../src/pipeline/searchEngines";
+import { parseSourceLaneIds } from "../src/pipeline/sourceLanes";
 
 interface RunPipelineOptions extends PipelinePlanOptions {
   dryRun: boolean;
@@ -151,6 +152,7 @@ async function parseOptions(args: string[]): Promise<RunPipelineOptions> {
     keywords: keywords.length > 0 ? keywords : [defaultKeyword],
     sites: sites.length > 0 ? sites : ["greenhouse", "lever", "ashby"],
     timeFilter: parseTimeFilter(readStringFlag(args, "--time")),
+    sourceLanes: parseSourceLaneIds(readRepeatedFlag(args, ["--lane"])),
     includeRemote: !args.includes("--exclude-remote"),
     location: readStringFlag(args, "--location"),
     maxQueries: readNumberFlag(args, "--max-queries", 12),
@@ -181,6 +183,7 @@ Options:
   -k, --keyword            Search keyword. Repeatable. Defaults to Agentic.
   -s, --site               source ID/label/site. Repeatable. Defaults to greenhouse, lever, ashby.
   --time                   source-style time filter. Defaults to 24hours.
+  --lane                   Source lane. Repeatable. Defaults to source_search.
   --location               Optional location text for search queries.
   --exclude-remote         Do not append remote to search queries.
   --max-queries            Search target cap. Defaults to 12.

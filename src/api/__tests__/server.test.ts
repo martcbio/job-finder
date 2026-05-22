@@ -38,11 +38,14 @@ describe("job-finder API", () => {
     const body = await json(response);
     const data = body.data as Record<string, unknown>;
     const integrations = data.integrations as Record<string, Record<string, unknown>>;
+    const pipeline = data.pipeline as Record<string, unknown>;
+    const sourceLanes = pipeline.sourceLanes as Array<Record<string, unknown>>;
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(data.reviewStates).toContain("ready_for_review");
     expect(data.applicationStatuses).toContain("waiting");
+    expect(sourceLanes.map((lane) => lane.id)).toContain("jobspy");
     expect(integrations.notion?.mode).toBe("optional");
     expect(integrations.notion?.requiredForApiStartup).toBe(false);
     expect(integrations.notion?.configured).toBe(false);
@@ -208,7 +211,7 @@ describe("job-finder API", () => {
         body: JSON.stringify({
           keywords: ["Agentic"],
           sites: ["greenhouse"],
-          skipSteps: ["search"],
+          sourceLanes: ["source_search", "jobspy"],
         }),
       }),
     );
@@ -218,6 +221,7 @@ describe("job-finder API", () => {
     expect(planResponse.status).toBe(200);
     expect(planData.started).toBe(false);
     expect(planData.plan).toBeArray();
+    expect(JSON.stringify(planData.plan)).toContain("JobSpy aggregators");
 
     const executeResponse = await handler(
       request("/api/pipeline-runs", {

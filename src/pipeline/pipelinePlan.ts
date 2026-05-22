@@ -1,3 +1,11 @@
+import {
+  DEFAULT_SOURCE_LANES,
+  implementedSourceLaneIds,
+  plannedSourceLaneIds,
+  type SourceLaneId,
+  sourceLaneById,
+} from "./sourceLanes";
+
 export const PIPELINE_STEPS = [
   "db_check",
   "search",
@@ -25,6 +33,7 @@ export interface PipelinePlanOptions {
   duplicateThreshold: number;
   queueLimit: number;
   skipSteps: PipelineStepName[];
+  sourceLanes?: SourceLaneId[];
 }
 
 export interface PipelineStep {
@@ -38,6 +47,14 @@ export function isPipelineStepName(value: string): value is PipelineStepName {
 }
 
 export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] {
+  const sourceLanes = options.sourceLanes ?? [...DEFAULT_SOURCE_LANES];
+  const implementedLanes = implementedSourceLaneIds(sourceLanes);
+  if (implementedLanes.length === 0) {
+    throw new Error(
+      `No implemented source lanes selected. Implemented lanes: ${DEFAULT_SOURCE_LANES.join(", ")}.`,
+    );
+  }
+
   const steps: PipelineStep[] = [
     {
       name: "db_check",
@@ -46,7 +63,7 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
     },
     {
       name: "search",
-      description: "Run configured source fanout and persist search results.",
+      description: buildSearchDescription(sourceLanes),
       command: buildSearchCommand(options),
     },
     {
@@ -122,6 +139,21 @@ function buildSearchCommand(options: PipelinePlanOptions): string[] {
   }
 
   return command;
+}
+
+function buildSearchDescription(sourceLanes: readonly SourceLaneId[]): string {
+  const implemented = implementedSourceLaneIds(sourceLanes)
+    .map((lane) => sourceLaneById(lane).label)
+    .join(", ");
+  const planned = plannedSourceLaneIds(sourceLanes).map((lane) => sourceLaneById(lane).label);
+
+  if (planned.length === 0) {
+    return `Run ${implemented} and persist search results.`;
+  }
+
+  return `Run ${implemented} and persist search results. Planned lanes requested but not yet executable: ${planned.join(
+    ", ",
+  )}.`;
 }
 
 function shellQuoteArg(arg: string): string {

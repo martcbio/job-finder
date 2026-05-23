@@ -63,6 +63,57 @@ describe("classifyJobText", () => {
       ]),
     );
   });
+
+  test("classifies AI automation engineering as an agentic adjacent role", () => {
+    const classification = classifyJobText({
+      title: "AI Automation Engineer",
+      description:
+        "Build internal platform automations with agentic workflows, Workato, APIs, and process automation for business teams.",
+    });
+
+    expect(classification.category).toBe("agentic_engineer");
+    expect(classification.labels.map((label) => label.label)).toEqual(
+      expect.arrayContaining([
+        "business_automation_ai",
+        "internal_ai_tooling",
+        "backend_product_engineering",
+      ]),
+    );
+  });
+
+  test("keeps AI enablement and workplace roles visible as labels", () => {
+    const classification = classifyJobText({
+      title: "Software Engineer - AI Enablement and Workplace Technology",
+      description:
+        "Own internal AI tools, employee productivity AI, Gemini Enterprise rollout, Microsoft Copilot adoption, and developer acceleration.",
+    });
+
+    expect(classification.labels.map((label) => label.label)).toEqual(
+      expect.arrayContaining([
+        "ai_enablement",
+        "internal_ai_tooling",
+        "workplace_ai",
+        "ai_adoption_transformation",
+      ]),
+    );
+  });
+
+  test("captures AI operations and transformation roles without requiring a fit decision", () => {
+    const classification = classifyJobText({
+      title: "AI Operations Lead",
+      description:
+        "Lead AI operations, internal AI transformation, workflow automation, change management, and business automation across teams.",
+    });
+
+    expect(classification.category).toBe("other");
+    expect(classification.labels.map((label) => label.label)).toEqual(
+      expect.arrayContaining([
+        "ai_operations",
+        "business_automation_ai",
+        "ai_adoption_transformation",
+      ]),
+    );
+  });
 });
 
 describe("classification SQL builders", () => {

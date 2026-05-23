@@ -222,6 +222,9 @@ const DEFAULT_JOBSERVE_QUERIES = [
   "langchain",
   "forward deployed engineer",
   "inference engineer",
+  "ai enablement",
+  "ai automation",
+  "internal ai",
 ];
 
 export const DEFAULT_FAST_REFRESH_OPTIONS: FastRefreshOptions = {

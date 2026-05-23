@@ -242,6 +242,12 @@ Examples:
 - `solutions_engineer`
 - `security_ai`
 - `backend_product_engineering`
+- `ai_enablement`
+- `internal_ai_tooling`
+- `business_automation_ai`
+- `ai_operations`
+- `workplace_ai`
+- `ai_adoption_transformation`
 
 Ranking answers: should this be looked at now?
 

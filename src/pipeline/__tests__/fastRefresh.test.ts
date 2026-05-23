@@ -66,11 +66,21 @@ function baseRow(overrides: Partial<FastRefreshJobRow> = {}): FastRefreshJobRow 
 
 describe("fast refresh contract helpers", () => {
   test("normalizes defaults while preserving explicit JobServe queries", () => {
+    const defaults = normalizeFastRefreshOptions();
     const options = normalizeFastRefreshOptions({
       limit: 5,
       jobserveQueries: ["agentic", "rag"],
     });
 
+    expect(defaults.jobserveQueries).toEqual([
+      "agentic",
+      "langchain",
+      "forward deployed engineer",
+      "inference engineer",
+      "ai enablement",
+      "ai automation",
+      "internal ai",
+    ]);
     expect(options.limit).toBe(5);
     expect(options.sourceIds).toEqual(["jobserve", "linear-careers"]);
     expect(options.jobserveQueries).toEqual(["agentic", "rag"]);

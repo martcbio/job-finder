@@ -20,6 +20,12 @@ export type JobClassificationLabel =
   | "ml_platform"
   | "backend_product_engineering"
   | "developer_tools"
+  | "ai_enablement"
+  | "internal_ai_tooling"
+  | "business_automation_ai"
+  | "ai_operations"
+  | "workplace_ai"
+  | "ai_adoption_transformation"
   | "data_engineering"
   | "security_ai"
   | "founding_engineer"
@@ -172,6 +178,8 @@ export function classifyJobText(input: {
   const title = input.title.toLowerCase();
   const reasons: string[] = [];
   const labels: ClassificationLabelMatch[] = [];
+  const hasAiSignal =
+    /\b(?:ai|genai|llm|artificial intelligence|agentic|copilot|gemini enterprise)\b/.test(haystack);
 
   let category: JobClassification["category"] = "other";
   let confidence = 0.52;
@@ -193,7 +201,7 @@ export function classifyJobText(input: {
     addLabel(labels, "staffing_agency", 0.82, "matched staffing/intermediary language");
   }
 
-  if (matches(title, ["product manager", "product lead"]) && matches(haystack, [" ai", "llm"])) {
+  if (matches(title, ["product manager", "product lead"]) && hasAiSignal) {
     addLabel(labels, "ai_product_manager", 0.78, "matched AI product-management language");
   } else if (
     matches(title, ["account executive", "sales", "marketing", "recruiter", "designer"]) &&
@@ -266,6 +274,108 @@ export function classifyJobText(input: {
   }
 
   if (
+    matches(haystack, [
+      "ai enablement",
+      "artificial intelligence enablement",
+      "ai-enabled enablement",
+      "ai workforce enablement",
+      "ai tools and adoption",
+      "ai tool adoption",
+    ])
+  ) {
+    addLabel(labels, "ai_enablement", 0.74, "matched AI enablement/adoption signal");
+  }
+
+  if (
+    hasAiSignal &&
+    matches(haystack, [
+      "internal ai",
+      "internal ai tooling",
+      "internal ai tools",
+      "internal tools",
+      "internal products",
+      "internal platform",
+      "internal applications",
+      "developer acceleration",
+      "employee productivity",
+      "productivity ai",
+    ])
+  ) {
+    addLabel(labels, "internal_ai_tooling", 0.73, "matched internal AI/tooling signal");
+  }
+
+  if (
+    hasAiSignal &&
+    matches(haystack, [
+      "ai automation",
+      "business automation",
+      "workflow automation",
+      "process automation",
+      "agentic workflow",
+      "agentic workflows",
+      "workato",
+      "zapier",
+      "make.com",
+      "n8n",
+    ])
+  ) {
+    if (category === "other" && matches(title, ["engineer", "developer", "builder"])) {
+      category = "agentic_engineer";
+      confidence = 0.71;
+      reasons.push("matched AI automation engineering language");
+    }
+    addLabel(labels, "business_automation_ai", 0.72, "matched AI/business automation signal");
+  }
+
+  if (
+    matches(haystack, [
+      "ai operations",
+      "ai ops",
+      "operations ai",
+      "ai operations lead",
+      "ai operations engineer",
+      "ai operations specialist",
+    ])
+  ) {
+    addLabel(labels, "ai_operations", 0.7, "matched AI operations signal");
+  }
+
+  if (
+    hasAiSignal &&
+    matches(haystack, [
+      "workplace technology",
+      "workplace ai",
+      "productivity ai",
+      "gemini enterprise",
+      "microsoft copilot",
+      "copilot adoption",
+      "collaboration tools",
+    ])
+  ) {
+    addLabel(labels, "workplace_ai", 0.7, "matched workplace/productivity AI signal");
+  }
+
+  if (
+    matches(haystack, [
+      "ai adoption",
+      "ai transformation",
+      "internal ai transformation",
+      "copilot adoption",
+      "gemini enterprise rollout",
+      "business transformation",
+      "ai strategy",
+      "change management",
+    ])
+  ) {
+    addLabel(
+      labels,
+      "ai_adoption_transformation",
+      0.68,
+      "matched AI adoption/transformation signal",
+    );
+  }
+
+  if (
     matches(title, ["architect"]) &&
     matches(haystack, ["agentic", " ai agent", " agents", "llm"])
   ) {
@@ -327,7 +437,7 @@ export function classifyJobText(input: {
     addLabel(labels, "data_engineering", 0.7, "matched data-engineering signal");
   }
 
-  if (matches(haystack, ["security", "compliance"]) && matches(haystack, [" ai", "llm", "agent"])) {
+  if (matches(haystack, ["security", "compliance"]) && hasAiSignal) {
     addLabel(labels, "security_ai", 0.68, "matched security plus AI/LLM signal");
   }
 

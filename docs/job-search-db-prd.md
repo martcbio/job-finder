@@ -84,7 +84,7 @@ The system should optimize first for correctness and auditability, second for to
 
 24. As a job seeker, I want classification labels separated from fit decisions, so that category discovery does not prematurely hide jobs.
 
-25. As a job seeker, I want initial categories for agentic engineer, agentic architect, RAG enterprise, FDE, inference engineer, ML platform, backend product engineering, developer tools, data engineering, security AI, founding engineer, AI product manager, non-engineering, staffing/agency, and index/not-job patterns, so that the review queue reflects the kinds of roles I care about.
+25. As a job seeker, I want initial categories for agentic engineer, agentic architect, RAG enterprise, FDE, inference engineer, ML platform, backend product engineering, developer tools, internal AI tooling, AI enablement, AI operations, AI/business automation, workplace AI, AI adoption/transformation, data engineering, security AI, founding engineer, AI product manager, non-engineering, staffing/agency, and index/not-job patterns, so that the review queue reflects the kinds of roles I care about.
 
 26. As a job seeker, I want human review to remain mandatory until the pipeline is trusted, so that automation does not apply or discard too aggressively.
 
@@ -209,7 +209,7 @@ The system should optimize first for correctness and auditability, second for to
 
 - Classification labels are multi-label and non-destructive. Fit/review assessment is separate from category labels.
 
-- Initial classification labels include agentic engineer, agentic architect, RAG enterprise, FDE, solutions engineer, inference engineer, ML platform, backend product engineer, developer tools, data engineer, security AI, founding engineer, AI product manager, non-engineering, staffing/agency, and index/not-job.
+- Initial classification labels include agentic engineer, agentic architect, RAG enterprise, FDE, solutions engineer, inference engineer, ML platform, backend product engineer, developer tools, internal AI tooling, AI enablement, AI operations, AI/business automation, workplace AI, AI adoption/transformation, data engineer, security AI, founding engineer, AI product manager, non-engineering, staffing/agency, and index/not-job.
 
 - Full-page ingestion is deferred until after durable search persistence.
 
@@ -227,7 +227,7 @@ The system should optimize first for correctness and auditability, second for to
 
 - CV tailoring is deferred until classification and review foundations exist, but the chosen unit is reusable CV bullet blocks rather than whole generated CVs.
 
-- CV bullet blocks should be keyed by themes such as agentic engineer, agentic architect, RAG enterprise, FDE, inference engineer, platform/backend, and developer tools.
+- CV bullet blocks should be keyed by themes such as agentic engineer, agentic architect, RAG enterprise, FDE, inference engineer, platform/backend, developer tools, internal AI tooling, AI enablement, and AI/business automation.
 
 - Application drafts should compose trusted bullet blocks and remain human-reviewed.
 

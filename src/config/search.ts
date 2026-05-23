@@ -37,6 +37,15 @@ export const SEARCH_KEYWORDS = [
   "senior engineer vector database",
   "senior engineer prompt engineering",
   "senior engineer AI platform",
+  "applied AI engineer",
+  "AI automation engineer",
+  "AI enablement engineer",
+  "internal AI tooling",
+  "AI operations engineer",
+  "AI workflow systems",
+  "business automation AI",
+  "workplace AI engineer",
+  "AI adoption engineer",
 ];
 
 export const SEARCH_DOMAINS = [

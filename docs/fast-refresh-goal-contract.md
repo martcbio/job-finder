@@ -45,6 +45,7 @@ Each job returned by the API should expose:
   - fetch/error metadata when blocked
 - `classification`
   - category labels such as agentic engineer, architect, RAG-heavy, FDE, inference, other
+  - internal-AI adjacent labels such as enablement, internal tooling, business automation, AI operations, workplace AI, and adoption/transformation
   - confidence/reasoning metadata where available
   - evolving labels should be supported without schema churn
 - `eligibility`

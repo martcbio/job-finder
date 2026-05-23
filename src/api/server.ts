@@ -11,12 +11,15 @@ import {
 } from "../pipeline/cvDraft";
 import {
   buildFastRefreshRunSql,
+  buildLatestFastRefreshRunSql,
   buildLatestJobRowsSql,
   type FastRefreshJobRow,
   type FastRefreshOptions,
   type FastRefreshResult,
   jobRowToSummary,
+  listFastRefreshSources,
   runFastRefresh,
+  SOURCE_ATTEMPT_STATUSES,
 } from "../pipeline/fastRefresh";
 import {
   APPLICATION_STATUSES,
@@ -226,6 +229,17 @@ async function handleApiRequest(
     });
   }
 
+  if (route.method === "GET" && route.path === "/api/sources") {
+    return jsonResponse({
+      ok: true,
+      data: {
+        fastRefresh: uniqueFastRefreshSources(),
+        sourceLanes: SOURCE_LANES,
+        attemptStatuses: SOURCE_ATTEMPT_STATUSES,
+      },
+    });
+  }
+
   if (route.method === "GET" && route.path === "/api/jobs") {
     const rows = await context.query<JobExportRow[]>(
       buildJobsExportSql({
@@ -246,7 +260,10 @@ async function handleApiRequest(
     return jsonResponse({ ok: true, data: rows.map((row) => jobRowToSummary(row)) });
   }
 
-  if (route.method === "GET" && route.path === "/api/jobs/queue") {
+  if (
+    route.method === "GET" &&
+    (route.path === "/api/jobs/queue" || route.path === "/api/review-queue")
+  ) {
     const rows = await context.query<ReviewQueueRow[]>(
       buildReviewQueueSql({
         limit: positiveIntParam(route.search, "limit", 25, 250),
@@ -262,11 +279,36 @@ async function handleApiRequest(
     return jsonResponse({ ok: true, data: result });
   }
 
+  const sourceRefreshMatch = matchPath(route.path, "/api/refresh/source/:sourceId");
+  if (route.method === "POST" && sourceRefreshMatch) {
+    const body = await readJsonObject(request);
+    const sourceId = fastRefreshSourceId(pathParam(sourceRefreshMatch, "sourceId"));
+    const result = await context.fastRefresh({
+      ...fastRefreshOptionsFromBody(body),
+      sourceIds: [sourceId],
+    });
+    return jsonResponse({ ok: true, data: result });
+  }
+
+  if (route.method === "GET" && route.path === "/api/runs/latest") {
+    const row = await context.query(buildLatestFastRefreshRunSql());
+    if (row === null) throw new ApiError(404, "run_not_found", "No refresh runs found");
+    return jsonResponse({ ok: true, data: row });
+  }
+
   const runDetailMatch = matchPath(route.path, "/api/runs/:runId");
   if (route.method === "GET" && runDetailMatch) {
     const runId = pathParam(runDetailMatch, "runId");
     const row = await context.query(buildFastRefreshRunSql(runId));
     if (row === null) throw new ApiError(404, "run_not_found", `No run found with id ${runId}`);
+    return jsonResponse({ ok: true, data: row });
+  }
+
+  const jobFullTextMatch = matchPath(route.path, "/api/jobs/:jobId/full-text");
+  if (route.method === "GET" && jobFullTextMatch) {
+    const jobId = pathParam(jobFullTextMatch, "jobId");
+    const row = await context.query<JobFullTextRow | null>(buildJobFullTextSql(jobId));
+    if (row === null) throw new ApiError(404, "job_not_found", `No job found with id ${jobId}`);
     return jsonResponse({ ok: true, data: row });
   }
 
@@ -713,6 +755,70 @@ function buildJobDetailSql(jobId: string): string {
 );`;
 }
 
+function buildJobFullTextSql(jobId: string): string {
+  return `SELECT COALESCE(
+  (
+    SELECT row_to_json(full_text)
+    FROM (
+      SELECT
+        j.id::text AS "jobId",
+        j.title_normalized AS title,
+        j.company_hint AS company,
+        j.canonical_url AS "canonicalUrl",
+        j.review_state AS "reviewState",
+        latest_page.id::text AS "pageId",
+        latest_page.status,
+        latest_page.fetched_at::text AS "fetchedAt",
+        latest_page.source AS "fetchSource",
+        latest_page.source_url AS "sourceUrl",
+        latest_page.title_raw AS "rawTitle",
+        latest_page.markdown,
+        latest_page.usage_tokens::bigint AS "usageTokens",
+        latest_page.decompressed_bytes::bigint AS "decompressedBytes",
+        latest_page.error,
+        latest_observation.source_id AS "sourceId",
+        latest_observation.source_label AS "sourceLabel",
+        latest_observation.observed_url AS "observedUrl"
+      FROM job_search.jobs j
+      LEFT JOIN LATERAL (
+        SELECT
+          jp.id,
+          jp.source,
+          jp.status,
+          jp.fetched_at,
+          jp.source_url,
+          jp.title_raw,
+          jp.markdown,
+          jp.usage_tokens,
+          jp.decompressed_bytes,
+          jp.error
+        FROM job_search.job_pages jp
+        WHERE jp.job_id = j.id
+        ORDER BY
+          CASE WHEN jp.status = 'success' THEN 0 ELSE 1 END,
+          jp.fetched_at DESC,
+          jp.id DESC
+        LIMIT 1
+      ) latest_page ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          sq.source_id,
+          sq.source_label,
+          jo.observed_url
+        FROM job_search.job_observations jo
+        JOIN job_search.search_results sr ON sr.id = jo.search_result_id
+        JOIN job_search.search_queries sq ON sq.id = sr.query_id
+        WHERE jo.job_id = j.id
+        ORDER BY jo.observed_at DESC, jo.id DESC
+        LIMIT 1
+      ) latest_observation ON true
+      WHERE j.id = ${quoteSqlLiteral(jobId)}
+    ) full_text
+  ),
+  'null'::json
+);`;
+}
+
 function savedSweepInputFromBody(body: Record<string, unknown>): SavedSweepInput {
   return {
     name: requiredString(body.name, "name"),
@@ -737,6 +843,10 @@ function savedSweepInputFromBody(body: Record<string, unknown>): SavedSweepInput
 function fastRefreshOptionsFromBody(body: Record<string, unknown>): Partial<FastRefreshOptions> {
   return {
     limit: positiveIntValue(body.limit, "limit", 20, 250),
+    sourceIds:
+      body.sourceIds === undefined
+        ? undefined
+        : nonEmptyStringArray(body.sourceIds, "sourceIds", []).map(fastRefreshSourceId),
     jobserveQueries:
       body.jobserveQueries === undefined
         ? undefined
@@ -752,6 +862,26 @@ function fastRefreshOptionsFromBody(body: Record<string, unknown>): Partial<Fast
     timeoutMs: positiveIntValue(body.timeoutMs, "timeoutMs", 20000, 300000),
     classifyLimit: positiveIntValue(body.classifyLimit, "classifyLimit", 250, 5000),
   };
+}
+
+function uniqueFastRefreshSources(): ReturnType<typeof listFastRefreshSources> {
+  const sources = new Map<string, ReturnType<typeof listFastRefreshSources>[number]>();
+  for (const source of listFastRefreshSources()) {
+    if (!sources.has(source.id)) sources.set(source.id, source);
+  }
+  return [...sources.values()];
+}
+
+function fastRefreshSourceId(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  const sourceId = normalized === "linear" ? "linear-careers" : normalized;
+  const valid = new Set(uniqueFastRefreshSources().map((source) => source.id));
+  if (!valid.has(sourceId)) {
+    throw new ApiError(400, "invalid_source", `Unsupported refresh source "${value}"`, {
+      valid: [...valid],
+    });
+  }
+  return sourceId;
 }
 
 function jobDetailToSummary(row: JobDetailRow): ReturnType<typeof jobRowToSummary> {
@@ -1220,4 +1350,25 @@ interface JobDetailRow {
   observations: unknown[];
   pages: unknown[];
   review_events: unknown[];
+}
+
+interface JobFullTextRow {
+  jobId: string;
+  title: string;
+  company: string | null;
+  canonicalUrl: string;
+  reviewState: string;
+  pageId: string | null;
+  status: string | null;
+  fetchedAt: string | null;
+  fetchSource: string | null;
+  sourceUrl: string | null;
+  rawTitle: string | null;
+  markdown: string | null;
+  usageTokens: number | null;
+  decompressedBytes: number | null;
+  error: string | null;
+  sourceId: string | null;
+  sourceLabel: string | null;
+  observedUrl: string | null;
 }

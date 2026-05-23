@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildFastRefreshSourceAdapters,
   buildFastRefreshRunSql,
+  buildFastRefreshSourceAdapters,
+  buildLatestFastRefreshRunSql,
   buildLatestJobRowsSql,
-  jobRowToSummary,
-  normalizeFastRefreshOptions,
   type FastRefreshJobRow,
+  jobRowToSummary,
+  listFastRefreshSources,
+  normalizeFastRefreshOptions,
+  SOURCE_ATTEMPT_STATUSES,
+  sourceAttemptStatus,
 } from "../fastRefresh";
 
 function baseRow(overrides: Partial<FastRefreshJobRow> = {}): FastRefreshJobRow {
@@ -68,12 +72,14 @@ describe("fast refresh contract helpers", () => {
     });
 
     expect(options.limit).toBe(5);
+    expect(options.sourceIds).toEqual(["jobserve", "linear-careers"]);
     expect(options.jobserveQueries).toEqual(["agentic", "rag"]);
     expect(options.jobserveMaxPages).toBe(3);
   });
 
   test("builds concrete source adapters for JobServe queries and Linear Careers", () => {
     const adapters = buildFastRefreshSourceAdapters({
+      sourceIds: ["jobserve", "linear-careers"],
       jobserveQueries: ["agentic", "rag"],
       jobserveMaxPages: 2,
     });
@@ -89,6 +95,56 @@ describe("fast refresh contract helpers", () => {
       "linear-careers",
     ]);
     expect(adapters[0]?.discover).toBeFunction();
+  });
+
+  test("source adapter descriptors are stable enough for UI and source-scoped refresh", () => {
+    const sources = listFastRefreshSources({
+      sourceIds: ["jobserve", "linear-careers"],
+      jobserveQueries: ["agentic"],
+      jobserveMaxPages: 1,
+    });
+
+    expect(sources).toEqual([
+      {
+        id: "jobserve",
+        label: "JobServe",
+        kind: "recruiter",
+        quality: "medium",
+        defaultKeyword: "agentic",
+        defaultIncluded: true,
+        supportsSourceScopedRefresh: true,
+      },
+      {
+        id: "linear-careers",
+        label: "Linear Careers",
+        kind: "direct_employer",
+        quality: "high",
+        defaultKeyword: "linear-careers",
+        defaultIncluded: true,
+        supportsSourceScopedRefresh: true,
+      },
+    ]);
+  });
+
+  test("maps detailed source outcomes to the API attempt status vocabulary", () => {
+    expect(SOURCE_ATTEMPT_STATUSES).toEqual([
+      "success",
+      "zero_results",
+      "partial",
+      "blocked",
+      "timeout",
+      "parser_error",
+      "rate_limited",
+      "auth_required",
+    ]);
+    expect(sourceAttemptStatus("success", 2)).toBe("success");
+    expect(sourceAttemptStatus("zero_results", 0)).toBe("zero_results");
+    expect(sourceAttemptStatus("http_error", 1)).toBe("partial");
+    expect(sourceAttemptStatus("blocked_captcha", 0)).toBe("blocked");
+    expect(sourceAttemptStatus("timeout", 0)).toBe("timeout");
+    expect(sourceAttemptStatus("parse_error", 0)).toBe("parser_error");
+    expect(sourceAttemptStatus("http_error", 0, ["HTTP 429 rate limited"])).toBe("rate_limited");
+    expect(sourceAttemptStatus("blocked_auth", 0)).toBe("auth_required");
   });
 
   test("maps DB rows to UI-facing summaries with links, classification, eligibility, and dedupe", () => {
@@ -151,5 +207,13 @@ describe("fast refresh contract helpers", () => {
     expect(sql).toContain("http_error");
     expect(sql).toContain("jinaReaderTokens");
     expect(sql).toContain("WHERE sr.id = '99'");
+  });
+
+  test("builds latest run detail SQL for the refresh run alias", () => {
+    const sql = buildLatestFastRefreshRunSql();
+
+    expect(sql).toContain("latest_sr.id");
+    expect(sql).toContain("ORDER BY latest_sr.started_at DESC");
+    expect(sql).not.toContain("sourceAttemptStatusFromQueryStatus");
   });
 });

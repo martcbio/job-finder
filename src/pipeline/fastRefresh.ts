@@ -42,11 +42,38 @@ export type SourceOutcome =
   | "http_error"
   | "not_implemented";
 
+export type SourceAttemptStatus =
+  | "success"
+  | "zero_results"
+  | "partial"
+  | "blocked"
+  | "timeout"
+  | "parser_error"
+  | "rate_limited"
+  | "auth_required";
+
+export const SOURCE_ATTEMPT_STATUSES: SourceAttemptStatus[] = [
+  "success",
+  "zero_results",
+  "partial",
+  "blocked",
+  "timeout",
+  "parser_error",
+  "rate_limited",
+  "auth_required",
+];
+
 export interface SourceAdapter {
   id: string;
   label: string;
   kind: SourceKind;
   quality: SourceQuality;
+}
+
+export interface SourceAdapterDescriptor extends SourceAdapter {
+  defaultKeyword: string;
+  defaultIncluded: boolean;
+  supportsSourceScopedRefresh: boolean;
 }
 
 export interface SourceDiscoveryInput {
@@ -74,6 +101,7 @@ export interface FastRefreshSourceAdapter extends SourceAdapter {
 
 export interface FastRefreshOptions {
   limit: number;
+  sourceIds: string[];
   jobserveQueries: string[];
   jobserveMaxPages: number;
   jobserveImportLimitPerQuery: number;
@@ -87,6 +115,7 @@ export interface FastRefreshSourceSummary {
   keyword: string;
   runId: number | null;
   outcome: SourceOutcome;
+  status: SourceAttemptStatus;
   discovered: number;
   imported: number;
   fullText: {
@@ -193,7 +222,8 @@ export interface FastRefreshRunDetail {
     id: string;
     label: string;
     outcome: SourceOutcome;
-    status: string;
+    status: SourceAttemptStatus;
+    queryStatus: string;
     query: string | null;
     directUrl: string | null;
     startedAt: string;
@@ -254,6 +284,7 @@ const DEFAULT_JOBSERVE_QUERIES = [
 
 export const DEFAULT_FAST_REFRESH_OPTIONS: FastRefreshOptions = {
   limit: 20,
+  sourceIds: ["jobserve", "linear-careers"],
   jobserveQueries: DEFAULT_JOBSERVE_QUERIES,
   jobserveMaxPages: 3,
   jobserveImportLimitPerQuery: 8,
@@ -298,23 +329,29 @@ export async function runFastRefresh(
   const jobserveRunIds = sources
     .filter((source) => source.source.id === "jobserve")
     .flatMap((source) => (source.runId === null ? [] : [source.runId]));
-  const jobserveRows = await runPsqlJson<FastRefreshJobRow[]>(
-    buildLatestJobRowsSql({
-      limit: 1000,
-      runIds: jobserveRunIds,
-      sourceIds: ["jobserve"],
-    }),
-  );
+  const jobserveRows =
+    jobserveRunIds.length > 0
+      ? await runPsqlJson<FastRefreshJobRow[]>(
+          buildLatestJobRowsSql({
+            limit: 1000,
+            runIds: jobserveRunIds,
+            sourceIds: ["jobserve"],
+          }),
+        )
+      : [];
   const rankedJobServe = rankJobServeContracts(jobserveRows.map(jobRowToJobServeContract), {
     limit: options.limit,
   });
-  const directRows = await runPsqlJson<FastRefreshJobRow[]>(
-    buildLatestJobRowsSql({
-      limit: options.limit,
-      runIds,
-      sourceIds: ["linear-careers"],
-    }),
-  );
+  const directRows =
+    runIds.length > 0 && options.sourceIds.includes("linear-careers")
+      ? await runPsqlJson<FastRefreshJobRow[]>(
+          buildLatestJobRowsSql({
+            limit: options.limit,
+            runIds,
+            sourceIds: ["linear-careers"],
+          }),
+        )
+      : [];
   const rankedIds = [...rankedJobServe.map((row) => row.id), ...directRows.map((row) => row.id)];
   const rows = mergeJobRows(jobserveRows, directRows);
   const rankedById = new Map(rankedJobServe.map((row) => [row.id, row]));
@@ -344,6 +381,10 @@ export function normalizeFastRefreshOptions(
   return {
     ...DEFAULT_FAST_REFRESH_OPTIONS,
     ...input,
+    sourceIds:
+      input.sourceIds && input.sourceIds.length > 0
+        ? [...new Set(input.sourceIds.map(normalizeSourceId))]
+        : DEFAULT_FAST_REFRESH_OPTIONS.sourceIds,
     jobserveQueries:
       input.jobserveQueries && input.jobserveQueries.length > 0
         ? input.jobserveQueries
@@ -464,6 +505,21 @@ FROM (
 }
 
 export function buildFastRefreshRunSql(runId: string): string {
+  return buildFastRefreshRunSqlWhere(`sr.id = ${quoteSqlLiteral(runId)}`);
+}
+
+export function buildLatestFastRefreshRunSql(): string {
+  return buildFastRefreshRunSqlWhere(
+    `sr.id = (
+          SELECT latest_sr.id
+          FROM job_search.search_runs latest_sr
+          ORDER BY latest_sr.started_at DESC, latest_sr.id DESC
+          LIMIT 1
+        )`,
+  );
+}
+
+function buildFastRefreshRunSqlWhere(whereSql: string): string {
   return `SELECT COALESCE(
   (
     SELECT row_to_json(run_row)
@@ -495,11 +551,12 @@ export function buildFastRefreshRunSql(runId: string): string {
             SELECT json_agg(row_to_json(source_row) ORDER BY source_row."startedAt", source_row.id)
             FROM (
               SELECT
-                sq.source_id AS id,
-                sq.source_label AS label,
-                sourceOutcomeFromQueryStatus(sq.status, sq.error) AS outcome,
-                sq.status,
-                sq.query,
+	                sq.source_id AS id,
+	                sq.source_label AS label,
+	                sourceOutcomeFromQueryStatus(sq.status, sq.error) AS outcome,
+	                sourceAttemptStatusFromQueryStatus(sq.status, sq.error) AS status,
+	                sq.status AS "queryStatus",
+	                sq.query,
                 sq.direct_url AS "directUrl",
                 sq.started_at::text AS "startedAt",
                 sq.finished_at::text AS "finishedAt",
@@ -520,22 +577,36 @@ export function buildFastRefreshRunSql(runId: string): string {
           '[]'::json
         ) AS sources
       FROM job_search.search_runs sr
-      WHERE sr.id = ${quoteSqlLiteral(runId)}
-    ) run_row
-  ),
-  'null'::json
-);`.replace(
-    "sourceOutcomeFromQueryStatus(sq.status, sq.error)",
-    `CASE
+	      WHERE ${whereSql}
+	    ) run_row
+	  ),
+	  'null'::json
+	);`
+    .replace(
+      "sourceOutcomeFromQueryStatus(sq.status, sq.error)",
+      `CASE
       WHEN sq.status = 'success' THEN 'success'
       WHEN sq.status = 'direct' THEN 'success'
       WHEN sq.status = 'timeout' THEN 'timeout'
       WHEN sq.error ILIKE '%captcha%' THEN 'blocked_captcha'
       WHEN sq.error ILIKE '%auth%' OR sq.error ILIKE '%401%' OR sq.error ILIKE '%403%' THEN 'blocked_auth'
       WHEN sq.status = 'error' THEN 'http_error'
-      ELSE 'not_implemented'
+	      ELSE 'not_implemented'
+	    END`,
+    )
+    .replace(
+      "sourceAttemptStatusFromQueryStatus(sq.status, sq.error)",
+      `CASE
+      WHEN sq.status = 'success' OR sq.status = 'direct' THEN 'success'
+      WHEN sq.status = 'timeout' THEN 'timeout'
+      WHEN sq.error ILIKE '%rate%' OR sq.error ILIKE '%429%' THEN 'rate_limited'
+      WHEN sq.error ILIKE '%auth%' OR sq.error ILIKE '%401%' OR sq.error ILIKE '%403%' THEN 'auth_required'
+      WHEN sq.error ILIKE '%captcha%' THEN 'blocked'
+      WHEN sq.error ILIKE '%parse%' THEN 'parser_error'
+      WHEN sq.status = 'error' THEN 'partial'
+      ELSE 'partial'
     END`,
-  );
+    );
 }
 
 export function jobRowToSummary(
@@ -681,14 +752,35 @@ async function assertMigrationsReady(): Promise<void> {
 }
 
 export function buildFastRefreshSourceAdapters(
-  options: Pick<FastRefreshOptions, "jobserveQueries" | "jobserveMaxPages">,
+  options: Pick<FastRefreshOptions, "sourceIds" | "jobserveQueries" | "jobserveMaxPages">,
 ): FastRefreshSourceAdapter[] {
+  const sourceIds = new Set(options.sourceIds.map(normalizeSourceId));
   return [
-    ...options.jobserveQueries.map((query) =>
-      jobServeSourceAdapter(query, options.jobserveMaxPages),
-    ),
-    linearCareersSourceAdapter(),
+    ...(sourceIds.has("jobserve")
+      ? options.jobserveQueries.map((query) =>
+          jobServeSourceAdapter(query, options.jobserveMaxPages),
+        )
+      : []),
+    ...(sourceIds.has("linear-careers") ? [linearCareersSourceAdapter()] : []),
   ];
+}
+
+export function listFastRefreshSources(
+  options: Pick<
+    FastRefreshOptions,
+    "sourceIds" | "jobserveQueries" | "jobserveMaxPages"
+  > = DEFAULT_FAST_REFRESH_OPTIONS,
+): SourceAdapterDescriptor[] {
+  const defaultIds = new Set(DEFAULT_FAST_REFRESH_OPTIONS.sourceIds);
+  return buildFastRefreshSourceAdapters(options).map((adapter) => ({
+    id: adapter.id,
+    label: adapter.label,
+    kind: adapter.kind,
+    quality: adapter.quality,
+    defaultKeyword: adapter.defaultKeyword,
+    defaultIncluded: defaultIds.has(adapter.id),
+    supportsSourceScopedRefresh: true,
+  }));
 }
 
 async function ingestSourceAdapter(
@@ -888,6 +980,7 @@ function sourceSummary(input: {
     keyword: input.keyword,
     runId: input.runId,
     outcome: input.outcome,
+    status: sourceAttemptStatus(input.outcome, input.imported, input.errors ?? []),
     discovered: input.discovered,
     imported: input.imported,
     fullText: {
@@ -1088,6 +1181,28 @@ function aggregateCosts(rows: FastRefreshSourceSummary[]): FastRefreshCosts {
   );
 }
 
+export function sourceAttemptStatus(
+  outcome: SourceOutcome,
+  imported: number,
+  errors: readonly string[] = [],
+): SourceAttemptStatus {
+  const errorText = errors.join("\n");
+  if (/rate|429/i.test(errorText)) return "rate_limited";
+  if (/401|403|auth/i.test(errorText) || outcome === "blocked_auth") return "auth_required";
+  if (outcome === "success") return imported > 0 || errors.length === 0 ? "success" : "partial";
+  if (outcome === "zero_results") return "zero_results";
+  if (outcome === "timeout") return "timeout";
+  if (outcome === "parse_error") return "parser_error";
+  if (
+    outcome === "blocked_captcha" ||
+    outcome === "blocked_robots_or_waf" ||
+    outcome === "redirect_only"
+  ) {
+    return "blocked";
+  }
+  return "partial";
+}
+
 function addNullable(left: number | null, right: number | null): number | null {
   if (left === null || right === null) return null;
   return left + right;
@@ -1124,6 +1239,12 @@ function outcomeFromError(err: unknown): SourceOutcome {
   if (/401|403|auth/i.test(message)) return "blocked_auth";
   if (/parse|could not find|could not parse/i.test(message)) return "parse_error";
   return "http_error";
+}
+
+function normalizeSourceId(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "linear") return "linear-careers";
+  return normalized;
 }
 
 function sourceIdFromUrl(url: string): string {

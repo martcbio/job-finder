@@ -47,8 +47,10 @@ function readNumberFlag(args: string[], name: string, fallback: number): number 
 
 function parseOptions(args: string[]): CliOptions {
   const queries = readRepeatedFlag(args, ["--jobserve-query", "-q"]);
+  const sources = readRepeatedFlag(args, ["--source", "--source-id"]);
   return {
     limit: readNumberFlag(args, "--limit", DEFAULT_FAST_REFRESH_OPTIONS.limit),
+    sourceIds: sources.length > 0 ? sources : DEFAULT_FAST_REFRESH_OPTIONS.sourceIds,
     jobserveQueries: queries.length > 0 ? queries : DEFAULT_FAST_REFRESH_OPTIONS.jobserveQueries,
     jobserveMaxPages: readNumberFlag(
       args,
@@ -77,6 +79,7 @@ function printUsage(): void {
   bun run jobserve:refresh-contracts -- -q agentic -q langchain --jobserve-max-pages 3
 
 Options:
+  --source                Source id to run. Repeatable. Defaults to jobserve and linear-careers.
   -q, --jobserve-query    JobServe query. Repeatable. Defaults to agentic/langchain/FDE/inference.
   --jobserve-max-pages    JobServe classic pages per query. Defaults to 3.
   --jobserve-import-limit-per-query

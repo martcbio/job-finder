@@ -133,6 +133,7 @@ describe("job-finder API", () => {
           elapsedMs: 1250,
           options: {
             limit: 3,
+            sourceIds: ["jobserve", "linear-careers"],
             jobserveQueries: ["agentic"],
             jobserveMaxPages: 1,
             jobserveImportLimitPerQuery: 2,
@@ -151,6 +152,7 @@ describe("job-finder API", () => {
               keyword: "agentic",
               runId: 44,
               outcome: "success",
+              status: "success",
               discovered: 10,
               imported: 2,
               fullText: { persisted: 2, fetchedPages: 1, status: "success" },
@@ -200,6 +202,7 @@ describe("job-finder API", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       limit: 3,
+      sourceIds: undefined,
       jobserveQueries: ["agentic"],
       jobserveMaxPages: 1,
       jobserveImportLimitPerQuery: 2,
@@ -208,7 +211,103 @@ describe("job-finder API", () => {
       classifyLimit: 10,
     });
     expect(sources[0]?.outcome).toBe("success");
+    expect(sources[0]?.status).toBe("success");
     expect(data.elapsedMs).toBe(1250);
+  });
+
+  test("GET /api/sources exposes source-scoped refresh metadata and attempt statuses", async () => {
+    const handler = handlerWithQuery(async () => {
+      throw new Error("query should not run for source metadata");
+    });
+
+    const response = await handler(request("/api/sources"));
+    const body = await json(response);
+    const data = body.data as Record<string, unknown>;
+    const sources = data.fastRefresh as Array<Record<string, unknown>>;
+    const statuses = data.attemptStatuses as string[];
+
+    expect(response.status).toBe(200);
+    expect(sources.map((source) => source.id)).toContain("jobserve");
+    expect(sources.map((source) => source.id)).toContain("linear-careers");
+    expect(statuses).toContain("partial");
+    expect(statuses).toContain("auth_required");
+  });
+
+  test("POST /api/refresh/source/:source constrains fast refresh to one source", async () => {
+    const calls: unknown[] = [];
+    const handler = handlerWithQuery(
+      async () => {
+        throw new Error("query should not run for injected source refresh");
+      },
+      async (options) => {
+        calls.push(options);
+        return {
+          startedAt: "2026-05-21T00:00:00.000Z",
+          finishedAt: "2026-05-21T00:00:00.250Z",
+          elapsedMs: 250,
+          options: {
+            limit: 2,
+            sourceIds: ["linear-careers"],
+            jobserveQueries: ["agentic"],
+            jobserveMaxPages: 1,
+            jobserveImportLimitPerQuery: 1,
+            directLimit: 2,
+            timeoutMs: 5000,
+            classifyLimit: 10,
+          },
+          sources: [
+            {
+              source: {
+                id: "linear-careers",
+                label: "Linear Careers",
+                kind: "direct_employer",
+                quality: "high",
+              },
+              keyword: "linear-careers",
+              runId: 45,
+              outcome: "success",
+              status: "success",
+              discovered: 18,
+              imported: 2,
+              fullText: { persisted: 2, fetchedPages: null, status: "success" },
+              costs: {
+                jinaSearchTokens: 0,
+                jinaReaderTokens: 0,
+                openAiTokens: 0,
+                billableSearchApiCalls: 0,
+              },
+              elapsedMs: 250,
+              errors: [],
+              blockedReason: null,
+            },
+          ],
+          classified: [{ runId: 45, classified: 2 }],
+          costs: {
+            jinaSearchTokens: 0,
+            jinaReaderTokens: 0,
+            openAiTokens: 0,
+            billableSearchApiCalls: 0,
+          },
+          latest: { jobs: [], jobserve: [], direct: [] },
+        };
+      },
+    );
+
+    const response = await handler(
+      request("/api/refresh/source/linear", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 2, directLimit: 2, jobserveMaxPages: 1, timeoutMs: 5000 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      sourceIds: ["linear-careers"],
+      limit: 2,
+      directLimit: 2,
+    });
   });
 
   test("GET /api/jobs/latest returns UI-facing summaries with classification and eligibility", async () => {
@@ -304,6 +403,7 @@ describe("job-finder API", () => {
             label: "JobServe",
             outcome: "success",
             status: "success",
+            queryStatus: "success",
             query: "jobserve:agentic",
             directUrl: null,
             startedAt: "2026-05-21T00:00:00.000Z",
@@ -328,6 +428,81 @@ describe("job-finder API", () => {
     expect(calls).toHaveLength(1);
     expect(sources[0]?.candidateCount).toBe(2);
     expect(sources[0]?.outcome).toBe("success");
+    expect(sources[0]?.status).toBe("success");
+  });
+
+  test("GET /api/runs/latest returns the newest persisted source run", async () => {
+    const calls: string[] = [];
+    const handler = handlerWithQuery(async (sql) => {
+      calls.push(sql);
+      expect(sql).toContain("latest_sr.id");
+      return {
+        id: "45",
+        startedAt: "2026-05-21T00:00:00.000Z",
+        finishedAt: "2026-05-21T00:00:01.000Z",
+        status: "completed",
+        keyword: "linear-careers",
+        sourceSet: ["linear-careers"],
+        timeFilter: "direct_source",
+        limitPerQuery: 2,
+        timeoutMs: 5000,
+        totalReportedTokens: 0,
+        errorSummary: null,
+        elapsedMs: 1000,
+        costs: {
+          jinaSearchTokens: 0,
+          jinaReaderTokens: 0,
+          openAiTokens: 0,
+          billableSearchApiCalls: 0,
+        },
+        sources: [],
+      };
+    });
+
+    const response = await handler(request("/api/runs/latest"));
+    const body = await json(response);
+    const data = body.data as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(data.id).toBe("45");
+  });
+
+  test("GET /api/jobs/:id/full-text returns stored markdown and provenance", async () => {
+    const calls: string[] = [];
+    const handler = handlerWithQuery(async (sql) => {
+      calls.push(sql);
+      expect(sql).toContain("job_search.job_pages");
+      return {
+        jobId: "12",
+        title: "Forward Deployed AI Engineer",
+        company: "Linear",
+        canonicalUrl: "https://linear.app/careers/00000000-0000-0000-0000-000000000000",
+        reviewState: "ready_for_review",
+        pageId: "99",
+        status: "success",
+        fetchedAt: "2026-05-21T00:00:00.000Z",
+        fetchSource: "direct",
+        sourceUrl: "https://linear.app/careers/00000000-0000-0000-0000-000000000000",
+        rawTitle: "Forward Deployed AI Engineer",
+        markdown: "# Forward Deployed AI Engineer\n\nFull text",
+        usageTokens: 0,
+        decompressedBytes: 2048,
+        error: null,
+        sourceId: "linear-careers",
+        sourceLabel: "Linear Careers",
+        observedUrl: "https://linear.app/careers/00000000-0000-0000-0000-000000000000",
+      };
+    });
+
+    const response = await handler(request("/api/jobs/12/full-text"));
+    const body = await json(response);
+    const data = body.data as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(data.markdown).toContain("Full text");
+    expect(data.sourceLabel).toBe("Linear Careers");
   });
 
   test("POST /api/jobs/:id/review rejects invalid states before touching DB", async () => {

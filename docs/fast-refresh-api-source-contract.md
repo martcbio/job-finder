@@ -149,7 +149,10 @@ No adapter should silently degrade into vague rows. If the source is snippet-onl
 
 ## Source Outcomes
 
-Every source attempt should end in one of these visible states:
+Every source attempt should preserve the detailed internal outcome and expose a
+smaller UI/API `status`.
+
+Detailed internal outcomes:
 
 - `success`
 - `zero_results`
@@ -164,7 +167,20 @@ Every source attempt should end in one of these visible states:
 - `http_error`
 - `not_implemented`
 
-These states are not all fatal. For example, `snippet_only` can still produce reviewable candidates; `blocked_captcha` can demote a source to opportunistic; `zero_results` is a successful empty search.
+UI/API source-attempt statuses:
+
+- `success`
+- `zero_results`
+- `partial`
+- `blocked`
+- `timeout`
+- `parser_error`
+- `rate_limited`
+- `auth_required`
+
+These states are not all fatal. For example, `partial` can still produce
+reviewable candidates; `blocked` can demote a source to opportunistic;
+`zero_results` is a successful empty search.
 
 ## Identity And Dedupe
 

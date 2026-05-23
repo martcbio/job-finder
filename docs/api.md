@@ -104,6 +104,20 @@ Returns enum-like values a UI should use for controls:
 - `pipeline.runConfirmation`
 - integration status
 
+`GET /api/sources`
+
+Returns refresh-capable sources, source lanes, and the normalized source-attempt
+status vocabulary a UI should use:
+
+- `success`
+- `zero_results`
+- `partial`
+- `blocked`
+- `timeout`
+- `parser_error`
+- `rate_limited`
+- `auth_required`
+
 ### Jobs
 
 `GET /api/jobs`
@@ -138,6 +152,20 @@ Example:
 curl 'http://127.0.0.1:3737/api/jobs/queue?state=ready_for_review,duplicate_candidate'
 ```
 
+`GET /api/review-queue`
+
+Alias for `GET /api/jobs/queue`, provided for consumers that want a route named
+after the workflow rather than the underlying job collection.
+
+`GET /api/jobs/latest`
+
+Returns UI-facing job summaries from Postgres only. This route must not trigger
+network calls or refresh work.
+
+Query parameters:
+
+- `limit`: positive integer, default `20`, max `250`
+
 `GET /api/jobs/:jobId`
 
 Returns a job detail payload:
@@ -148,6 +176,13 @@ Returns a job detail payload:
 - page snapshots
 - review events
 - ATS identity fields
+
+`GET /api/jobs/:jobId/full-text`
+
+Returns the latest stored page snapshot for a job, including markdown,
+fetch/source provenance, usage tokens when known, decompressed byte count, and
+the latest source observation. This is the detail route for inspecting the actual
+job text the classifier and reviewer are judging.
 
 `GET /api/jobs/:jobId/events`
 
@@ -238,6 +273,48 @@ Body:
 ```
 
 ### Pipeline Runs
+
+`POST /api/refresh/fast`
+
+Runs the cheap-first native fast-refresh path and returns elapsed time, options,
+per-source status, candidate/import/full-text/classification counts, latest job
+summaries, and cost/token totals. It uses the same `runFastRefresh` module as the
+CLI.
+
+Body fields are optional and bounded:
+
+```json
+{
+  "limit": 20,
+  "sourceIds": ["jobserve", "linear-careers"],
+  "jobserveQueries": ["agentic", "langchain"],
+  "jobserveMaxPages": 1,
+  "jobserveImportLimitPerQuery": 8,
+  "directLimit": 6,
+  "timeoutMs": 20000,
+  "classifyLimit": 250
+}
+```
+
+`POST /api/refresh/source/:source`
+
+Runs the same fast-refresh path constrained to one source. Current source aliases:
+
+- `jobserve`
+- `linear` / `linear-careers`
+
+Example:
+
+```bash
+curl -X POST 'http://127.0.0.1:3737/api/refresh/source/linear' \
+  -H 'content-type: application/json' \
+  -d '{"limit": 5, "directLimit": 5, "timeoutMs": 20000}'
+```
+
+`GET /api/runs/latest`
+
+Returns the newest persisted refresh/search run evidence using the same shape as
+`GET /api/runs/:id`.
 
 `GET /api/pipeline-runs`
 

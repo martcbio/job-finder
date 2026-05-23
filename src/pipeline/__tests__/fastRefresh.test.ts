@@ -206,6 +206,8 @@ describe("fast refresh contract helpers", () => {
     expect(sql).toContain("blocked_auth");
     expect(sql).toContain("http_error");
     expect(sql).toContain("jinaReaderTokens");
+    expect(sql).toContain('"classificationCount"');
+    expect(sql).toContain("job_classification_labels");
     expect(sql).toContain("WHERE sr.id = '99'");
   });
 

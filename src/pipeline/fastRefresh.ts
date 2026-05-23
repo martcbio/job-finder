@@ -61,6 +61,9 @@ export interface FastRefreshSourceSummary {
     fetchedPages: number | null;
     status: "success" | "pending" | "snippet_only" | "error";
   };
+  classification: {
+    classified: number;
+  };
   costs: FastRefreshCosts;
   elapsedMs: number;
   errors: string[];
@@ -172,6 +175,7 @@ export interface FastRefreshRunDetail {
     candidateCount: number;
     jobCount: number;
     fullTextCount: number;
+    classificationCount: number;
   }>;
 }
 
@@ -263,6 +267,13 @@ export async function runFastRefresh(
   for (const runId of runIds) {
     classified.push(await classifyRun(runId, options.classifyLimit));
   }
+  const classifiedByRunId = new Map(classified.map((item) => [item.runId, item.classified]));
+  const sourceSummaries = sources.map((source) => ({
+    ...source,
+    classification: {
+      classified: source.runId === null ? 0 : (classifiedByRunId.get(source.runId) ?? 0),
+    },
+  }));
 
   const jobserveRunIds = sources
     .filter((source) => source.source.id === "jobserve")
@@ -302,9 +313,9 @@ export async function runFastRefresh(
     finishedAt,
     elapsedMs: Date.now() - started,
     options,
-    sources,
+    sources: sourceSummaries,
     classified,
-    costs: aggregateCosts(sources),
+    costs: aggregateCosts(sourceSummaries),
     latest: {
       jobs,
       jobserve: jobs.filter((job) => job.source.id === "jobserve"),
@@ -503,11 +514,13 @@ function buildFastRefreshRunSqlWhere(whereSql: string): string {
                 sq.error,
                 COUNT(DISTINCT res.id)::int AS "candidateCount",
                 COUNT(DISTINCT jo.job_id)::int AS "jobCount",
-                COUNT(DISTINCT jp.job_id) FILTER (WHERE jp.status = 'success')::int AS "fullTextCount"
+                COUNT(DISTINCT jp.job_id) FILTER (WHERE jp.status = 'success')::int AS "fullTextCount",
+                COUNT(DISTINCT jcl.job_id)::int AS "classificationCount"
               FROM job_search.search_queries sq
               LEFT JOIN job_search.search_results res ON res.query_id = sq.id
               LEFT JOIN job_search.job_observations jo ON jo.search_result_id = res.id
               LEFT JOIN job_search.job_pages jp ON jp.job_id = jo.job_id
+              LEFT JOIN job_search.job_classification_labels jcl ON jcl.job_id = jo.job_id
               WHERE sq.run_id = sr.id
               GROUP BY sq.id
             ) source_row
@@ -612,7 +625,7 @@ export function renderFastRefreshMarkdown(result: FastRefreshResult): string {
 
   for (const row of result.sources) {
     lines.push(
-      `- ${row.source.label} / ${row.keyword}: ${row.outcome}, discovered ${row.discovered}, imported ${row.imported}, full-text pages ${row.fullText.persisted}, run ${row.runId ?? "none"}${
+      `- ${row.source.label} / ${row.keyword}: ${row.outcome}, discovered ${row.discovered}, imported ${row.imported}, full-text pages ${row.fullText.persisted}, classified ${row.classification.classified}, run ${row.runId ?? "none"}${
         row.fullText.fetchedPages === null ? "" : `, pages fetched ${row.fullText.fetchedPages}`
       }`,
     );
@@ -920,6 +933,9 @@ function sourceSummary(input: {
       fetchedPages: input.pagesFetched,
       status:
         input.pagesPersisted > 0 ? "success" : input.imported > 0 ? "snippet_only" : "pending",
+    },
+    classification: {
+      classified: 0,
     },
     costs: ZERO_COSTS,
     elapsedMs: input.elapsedMs,

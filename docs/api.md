@@ -281,6 +281,10 @@ per-source status, candidate/import/full-text/classification counts, latest job
 summaries, and cost/token totals. It uses the same `runFastRefresh` module as the
 CLI.
 
+Each source attempt includes `classification.classified` so UI and agent
+consumers can display classification coverage without joining against the
+top-level run summary.
+
 Body fields are optional and bounded:
 
 ```json

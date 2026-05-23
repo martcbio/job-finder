@@ -156,6 +156,7 @@ describe("job-finder API", () => {
               discovered: 10,
               imported: 2,
               fullText: { persisted: 2, fetchedPages: 1, status: "success" },
+              classification: { classified: 2 },
               costs: {
                 jinaSearchTokens: 0,
                 jinaReaderTokens: 0,
@@ -212,6 +213,7 @@ describe("job-finder API", () => {
     });
     expect(sources[0]?.outcome).toBe("success");
     expect(sources[0]?.status).toBe("success");
+    expect((sources[0]?.classification as Record<string, unknown>)?.classified).toBe(2);
     expect(data.elapsedMs).toBe(1250);
   });
 
@@ -270,6 +272,7 @@ describe("job-finder API", () => {
               discovered: 18,
               imported: 2,
               fullText: { persisted: 2, fetchedPages: null, status: "success" },
+              classification: { classified: 2 },
               costs: {
                 jinaSearchTokens: 0,
                 jinaReaderTokens: 0,
@@ -414,6 +417,7 @@ describe("job-finder API", () => {
             candidateCount: 2,
             jobCount: 2,
             fullTextCount: 2,
+            classificationCount: 2,
           },
         ],
       };
@@ -427,6 +431,7 @@ describe("job-finder API", () => {
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
     expect(sources[0]?.candidateCount).toBe(2);
+    expect(sources[0]?.classificationCount).toBe(2);
     expect(sources[0]?.outcome).toBe("success");
     expect(sources[0]?.status).toBe("success");
   });

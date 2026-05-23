@@ -162,7 +162,6 @@ Every source attempt should end in one of these visible states:
 - `parse_error`
 - `timeout`
 - `http_error`
-- `api_key_missing`
 - `not_implemented`
 
 These states are not all fatal. For example, `snippet_only` can still produce reviewable candidates; `blocked_captcha` can demote a source to opportunistic; `zero_results` is a successful empty search.

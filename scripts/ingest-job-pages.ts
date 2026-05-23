@@ -72,12 +72,12 @@ function printUsage(): void {
 Options:
   --limit       Maximum jobs to ingest. Defaults to 25.
   --run-id      Restrict ingestion to jobs observed in a specific search run.
-  --timeout-ms  Per-page Jina Reader timeout. Defaults to 45000.
+  --timeout-ms  Per-page Jina Reader timeout when fallback is needed. Defaults to 45000.
   --http-timeout-ms       Plain HTTP extraction timeout. Defaults to 15000.
   --http-min-text-length  Minimum readable chars for HTTP success. Defaults to 500.
   --json        Print machine-readable ingest summary.
 
-Requires DATABASE_URL and applied job_search migrations. JINA_API_KEY is required only when ATS and plain HTTP extraction fail and Jina Reader fallback is needed.`);
+Requires DATABASE_URL and applied job_search migrations. Jina Reader fallback is attempted without Authorization when JINA_API_KEY is absent.`);
 }
 
 function errorStatus(message: string): "timeout" | "error" {
@@ -114,24 +114,9 @@ async function run(): Promise<void> {
       continue;
     }
 
-    const jinaApiKey = process.env.JINA_API_KEY ?? "";
-    if (!jinaApiKey) {
-      const message = "JINA_API_KEY is required for Jina Reader fallback after ATS and HTTP extraction failed";
-      await runPsql(
-        buildInsertPageIngestAttemptSql(row.id, {
-          source: "jina_reader",
-          status: "skipped",
-          durationMs: null,
-          usageTokens: null,
-          metadata: { reason: "missing_jina_api_key" },
-          error: message,
-        }),
-      );
-      throw new Error(message);
-    }
-
     try {
       const startedAt = Date.now();
+      const jinaApiKey = process.env.JINA_API_KEY ?? "";
       const call = await fetchJinaReaderWithUsage(
         row.canonical_url,
         { jinaApiKey, jinaBaseUrl: "https://r.jina.ai" },

@@ -176,12 +176,58 @@ Options:
   --exclude-remote    Do not append "remote" to source-style site queries.
   --max-queries       Query cap. Defaults to 12 to avoid accidental broad runs.
   --limit             URL cap per query. Defaults to 20.
-  --timeout-ms        Per-Jina-query timeout. Defaults to 45000.
+  --timeout-ms        Per-Jina-query timeout when Jina Search is configured. Defaults to 45000.
   --json              Print machine-readable JSON.
   --dry-run           Print generated queries without calling Jina.
   --links             Generate source-style outbound search links instead of calling Jina.
 
-Jina search is used only when --links and --dry-run are absent. Notion and OpenRouter are not loaded.`);
+Jina search is used only when --links and --dry-run are absent and JINA_API_KEY is set. Without a key, the script falls back to source-style outbound search links. Notion and OpenRouter are not loaded.`);
+}
+
+function buildLinkResults(
+  targets: ReturnType<typeof buildSearchTargets>,
+  options: SearchOnlyOptions,
+): SearchLinkResult[] {
+  const links: SearchLinkResult[] = [];
+
+  for (const target of targets) {
+    if (target.kind === "direct-url") {
+      links.push({
+        keyword: target.keyword,
+        label: target.label,
+        query: null,
+        engine: "direct",
+        timeFilter: options.timeFilter,
+        url: target.url,
+      });
+      continue;
+    }
+
+    for (const engine of options.engines) {
+      links.push({
+        keyword: target.keyword,
+        label: target.label,
+        query: target.query,
+        engine,
+        timeFilter: options.timeFilter,
+        url: buildSearchEngineUrl(engine, target.query, options.timeFilter),
+      });
+    }
+  }
+
+  return links;
+}
+
+function printLinks(links: SearchLinkResult[]): void {
+  for (const link of links) {
+    if (link.engine === "direct") {
+      console.log(`\n${link.label}`);
+      console.log(`direct: ${link.url}`);
+    } else {
+      console.log(`\n${link.label}: ${link.query}`);
+      console.log(`${link.engine}: ${link.url}`);
+    }
+  }
 }
 
 async function run(): Promise<void> {
@@ -201,53 +247,29 @@ async function run(): Promise<void> {
     );
   }
 
-  if (options.links) {
-    const links: SearchLinkResult[] = [];
-
-    for (const target of selectedTargets) {
-      if (target.kind === "direct-url") {
-        links.push({
-          keyword: target.keyword,
-          label: target.label,
-          query: null,
-          engine: "direct",
-          timeFilter: options.timeFilter,
-          url: target.url,
-        });
-        if (!options.json) {
-          console.log(`\n${target.label}`);
-          console.log(`direct: ${target.url}`);
-        }
-        continue;
-      }
-
-      for (const engine of options.engines) {
-        const url = buildSearchEngineUrl(engine, target.query, options.timeFilter);
-        links.push({
-          keyword: target.keyword,
-          label: target.label,
-          query: target.query,
-          engine,
-          timeFilter: options.timeFilter,
-          url,
-        });
-
-        if (!options.json) {
-          console.log(`\n${target.label}: ${target.query}`);
-          console.log(`${engine}: ${url}`);
-        }
-      }
-    }
-
+  const jinaApiKey = process.env.JINA_API_KEY ?? "";
+  if (options.links || (!jinaApiKey && !options.dryRun)) {
+    const links = buildLinkResults(selectedTargets, options);
     if (options.json) {
-      console.log(JSON.stringify({ links }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            links,
+            warnings: jinaApiKey
+              ? []
+              : ["No JINA_API_KEY present; generated outbound search links instead of live API search."],
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      if (!jinaApiKey && !options.links) {
+        console.error("No JINA_API_KEY present; generating outbound search links instead of live API search.");
+      }
+      printLinks(links);
     }
     return;
-  }
-
-  const jinaApiKey = process.env.JINA_API_KEY ?? "";
-  if (!jinaApiKey && !options.dryRun) {
-    throw new Error("JINA_API_KEY is required for live search. Use --dry-run to inspect queries.");
   }
 
   const config = { jinaApiKey };

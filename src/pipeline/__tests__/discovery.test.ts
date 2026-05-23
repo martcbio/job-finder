@@ -12,6 +12,7 @@ describe("discovery provider helpers", () => {
     expect(isDiscoveryProvider("auto")).toBe(true);
     expect(isDiscoveryProvider("brave")).toBe(true);
     expect(isDiscoveryProvider("jina")).toBe(true);
+    expect(isDiscoveryProvider("keyless")).toBe(true);
     expect(isDiscoveryProvider("google")).toBe(false);
   });
 
@@ -56,5 +57,17 @@ describe("discovery provider helpers", () => {
     await expect(fetchDiscoveryWithUsage('"Agentic"', {}, { provider: "brave" })).rejects.toThrow(
       "BRAVE_API_KEY is required for Brave discovery",
     );
+  });
+
+  test("auto mode returns an explicit keyless zero-result state without credentials", async () => {
+    const call = await fetchDiscoveryWithUsage('"Agentic"', {}, { provider: "auto" });
+
+    expect(call.results).toEqual([]);
+    expect(call.usage).toEqual({
+      provider: "keyless",
+      billableQueries: 0,
+      tokens: 0,
+      decompressedContentLength: null,
+    });
   });
 });

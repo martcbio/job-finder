@@ -46,8 +46,10 @@ dev router.
 
 ## Integration Boundary
 
-Postgres is required. Jina is required only for live search pipeline steps.
-OpenRouter remains relevant to legacy evaluation paths. Notion is optional.
+Postgres is required. Jina, OpenRouter, Brave, and Notion are optional: the
+supported API/fast-refresh path must run without their keys. Search-provider
+keys can improve coverage, and legacy evaluation/export paths can still use
+OpenRouter or Notion when explicitly invoked.
 
 `GET /api/meta` reports this explicitly:
 
@@ -59,8 +61,15 @@ OpenRouter remains relevant to legacy evaluation paths. Notion is optional.
       "configured": true
     },
     "jina": {
-      "requiredForSearch": true,
-      "configured": true
+      "mode": "optional",
+      "requiredForSearch": false,
+      "configured": false
+    },
+    "openrouter": {
+      "mode": "optional_legacy",
+      "requiredForApiStartup": false,
+      "requiredForFastRefresh": false,
+      "configured": false
     },
     "notion": {
       "mode": "optional",
@@ -73,8 +82,7 @@ OpenRouter remains relevant to legacy evaluation paths. Notion is optional.
 ```
 
 Do not import `src/config` from frontend/API code unless you intentionally want
-legacy scrape behavior. That legacy config still validates Notion credentials for
-the original Notion-first scraper. The API layer intentionally does not import it.
+legacy scrape behavior. The API layer intentionally does not import it.
 
 ## Routes
 
@@ -266,8 +274,8 @@ Body for an inline plan:
 }
 ```
 
-Starting a local pipeline run is intentionally gated because it can consume Jina
-tokens and hit external sources. To execute from the API, send:
+Starting a local pipeline run is intentionally gated because it can hit external
+sources, even when no paid API key is configured. To execute from the API, send:
 
 ```json
 {

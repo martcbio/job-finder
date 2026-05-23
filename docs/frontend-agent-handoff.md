@@ -11,8 +11,8 @@ jobs, keeps conservative duplicate candidates, and leaves human review in charge
 of applications.
 
 The frontend should treat the local JSON API as its backend. The API wraps the
-Postgres-backed domain modules and deliberately avoids the legacy Notion-first
-scraper path.
+Postgres-backed domain modules and deliberately avoids API-key-dependent legacy
+paths.
 
 ## What To Read First
 
@@ -123,8 +123,8 @@ Starting a run requires:
 }
 ```
 
-That gate is intentional because live runs can consume Jina tokens and hit
-external sources.
+That gate is intentional because live runs hit external sources even when no
+paid API key is configured.
 
 ### CV And Applications
 
@@ -143,10 +143,13 @@ application.
 
 Notion is optional. It is not the source of truth.
 
-Do not make new UI/API code depend on:
+Do not make new UI/API code depend on any API key, including:
 
 - `NOTION_TOKEN`
 - `NOTION_DATABASE_ID`
+- `JINA_API_KEY`
+- `OPENROUTER_API_KEY`
+- `BRAVE_API_KEY`
 - `src/config`
 - `src/index.ts`
 - legacy scripts such as `scripts/find-candidates.ts`,

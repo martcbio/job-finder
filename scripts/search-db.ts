@@ -131,10 +131,10 @@ Options:
   --max-queries       Query cap. Defaults to 12 to avoid accidental broad runs.
   --limit             Result cap per query. Defaults to 20.
   --timeout-ms        Per-discovery-query timeout. Defaults to 45000.
-  --discovery         Discovery provider: auto, brave, or jina. Defaults to auto.
+  --discovery         Discovery provider: auto, brave, jina, or keyless. Defaults to auto.
   --json              Print machine-readable run summary.
 
-Requires DATABASE_URL and applied job_search migrations. Auto discovery prefers BRAVE_API_KEY, then JINA_API_KEY.`);
+Requires DATABASE_URL and applied job_search migrations. Auto discovery prefers BRAVE_API_KEY, then JINA_API_KEY, then a keyless zero-result state.`);
 }
 
 async function assertMigrationsReady(): Promise<void> {

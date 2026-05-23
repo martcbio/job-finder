@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type ApiQuery, type FastRefreshRunner, createJobFinderApiHandler } from "../server";
+import { type ApiQuery, createJobFinderApiHandler, type FastRefreshRunner } from "../server";
 
 function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://job-finder.local.test${path}`, init);
@@ -9,7 +9,10 @@ async function json(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
-function handlerWithQuery(query: (sql: string) => Promise<unknown>, fastRefresh?: FastRefreshRunner) {
+function handlerWithQuery(
+  query: (sql: string) => Promise<unknown>,
+  fastRefresh?: FastRefreshRunner,
+) {
   const typedQuery: ApiQuery = async <T>(sql: string): Promise<T> => {
     return (await query(sql)) as T;
   };
@@ -20,7 +23,6 @@ function handlerWithQuery(query: (sql: string) => Promise<unknown>, fastRefresh?
     now: () => new Date("2026-05-21T00:00:00.000Z"),
     env: {
       DATABASE_URL: "postgres://mcb@localhost:5432/jobs",
-      JINA_API_KEY: "jina-test",
     },
     allowOrigins: ["http://localhost:5173"],
   });
@@ -31,7 +33,6 @@ describe("job-finder API", () => {
     const handler = createJobFinderApiHandler({
       env: {
         DATABASE_URL: "postgres://mcb@localhost:5432/jobs",
-        JINA_API_KEY: "jina-test",
       },
     });
 
@@ -47,6 +48,9 @@ describe("job-finder API", () => {
     expect(data.reviewStates).toContain("ready_for_review");
     expect(data.applicationStatuses).toContain("waiting");
     expect(sourceLanes.map((lane) => lane.id)).toContain("jobspy");
+    expect(integrations.jina?.requiredForSearch).toBe(false);
+    expect(integrations.jina?.configured).toBe(false);
+    expect(integrations.openrouter?.requiredForFastRefresh).toBe(false);
     expect(integrations.notion?.mode).toBe("optional");
     expect(integrations.notion?.requiredForApiStartup).toBe(false);
     expect(integrations.notion?.configured).toBe(false);

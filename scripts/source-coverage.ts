@@ -145,18 +145,18 @@ Options:
   --location             Optional location text for search queries.
   --exclude-remote       Do not append remote to source-style site queries.
   --limit-per-source     Search result cap per source. Defaults to 1.
-  --timeout-ms           Per-Jina-query timeout. Defaults to 30000.
+  --timeout-ms           Per discovery-query timeout. Defaults to 30000.
   --discovery-delay-ms   Delay between discovery calls. Defaults to 1000.
   --page-limit           Page ingest cap. Defaults to persisted result count.
   --classify-limit       Classification cap. Defaults to page ingest cap.
   --report               Markdown report path. Defaults to docs/artifacts/source-coverage-YYYY-MM-DD.md.
   --from-run-id          Regenerate a coverage report from an existing search run without live calls.
-  --discovery            Discovery provider: auto, brave, or jina. Defaults to auto.
+  --discovery            Discovery provider: auto, brave, jina, or keyless. Defaults to auto.
   --include-draft        Include draft/opportunistic sources in the run.
   --execute              Required for live network/database writes.
   --json                 Print machine-readable summary.
 
-Requires DATABASE_URL and applied job_search migrations. Auto discovery prefers BRAVE_API_KEY, then JINA_API_KEY.`);
+Requires DATABASE_URL and applied job_search migrations. Auto discovery prefers BRAVE_API_KEY, then JINA_API_KEY, then a keyless zero-result state.`);
 }
 
 async function assertMigrationsReady(): Promise<void> {

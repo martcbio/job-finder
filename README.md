@@ -2,7 +2,7 @@
 
 Local, Postgres-backed job-search pipeline for source fanout across ATS and career surfaces.
 
-The current fork uses Jina Search for discovery, stores runs/results/jobs in a schema-isolated local Postgres database, ingests job pages with cheaper structured paths before Jina Reader, classifies jobs into review categories, and keeps all application actions human-gated.
+The current fork stores runs/results/jobs in a schema-isolated local Postgres database, uses cheap/direct source paths before any third-party search provider, ingests job pages with structured paths before Reader fallback, classifies jobs into review categories, and keeps all application actions human-gated.
 
 Notion support still exists in legacy modules and can be brought back as an export/review integration later, but it is not the source of truth for the current pipeline.
 
@@ -10,7 +10,6 @@ Notion support still exists in legacy modules and can be brought back as an expo
 
 - Bun
 - Local Postgres
-- `JINA_API_KEY` for search-query discovery and Jina Reader fallback
 
 No Docker is required.
 
@@ -44,9 +43,9 @@ bun run api
 ```
 
 The API is the supported boundary for UI work. It uses Postgres-backed domain
-modules and does not require Notion credentials. Legacy Notion-first scripts and
-`src/index.ts` remain available as reference/integration code, but new UI work
-should not depend on them.
+modules and does not require Notion, OpenRouter, Brave, or Jina credentials.
+Legacy Notion-first scripts and `src/index.ts` remain available as
+reference/integration code, but new UI work should not depend on them.
 
 ## Common Commands
 
@@ -121,13 +120,13 @@ Use `bun run pipeline:run -- --dry-run ...` to inspect commands before executing
 
 ## Ingestion Cost Control
 
-Discovery uses Jina Search when a source is a search query. Direct-link sources such as Remote Rocketship are stored as direct observations and do not require Jina.
+Discovery prefers source-specific adapters and direct/public endpoints. Search-provider APIs are optional accelerators; when no search key is configured, the default provider records an explicit keyless zero-result state rather than failing the run.
 
 Full-page ingestion uses this order:
 
 1. Native ATS API clients where available: Lever, Ashby, Greenhouse, Workable.
 2. Plain HTTP fetch plus readable HTML/text extraction.
-3. Jina Reader fallback, with reported token usage recorded.
+3. Jina Reader fallback, attempted without Authorization when no key is configured, with reported token usage recorded when available.
 4. Browser automation is intentionally deferred as a last resort.
 
 Timeouts and failed calls are persisted as first-class attempts. Unknown token usage is recorded as unknown, not zero.

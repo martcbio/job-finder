@@ -3,11 +3,12 @@ import { planMigrations } from "../db/migrations";
 import { runPsql, runPsqlJson } from "../db/psql";
 import { fetchLinearCareersJobs } from "./directSources";
 import {
-  type ClassifiableJobRow,
   buildClassifiableJobsForSearchRunSql,
   buildUpdateJobClassificationSql,
+  type ClassifiableJobRow,
   classifyJobText,
 } from "./jobClassification";
+import { type JobScreeningDecision, screenJob } from "./jobScreening";
 import {
   type JobServeContractRow,
   type RankedJobServeContract,
@@ -15,8 +16,7 @@ import {
   rankJobServeContracts,
 } from "./jobserveContracts";
 import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "./jobserveLive";
-import { type NormalizedJobInput, ingestNormalizedJobs } from "./normalizedJobIngest";
-import { type JobScreeningDecision, screenJob } from "./jobScreening";
+import { ingestNormalizedJobs, type NormalizedJobInput } from "./normalizedJobIngest";
 
 export type SourceKind =
   | "direct_employer"
@@ -40,7 +40,6 @@ export type SourceOutcome =
   | "parse_error"
   | "timeout"
   | "http_error"
-  | "api_key_missing"
   | "not_implemented";
 
 export interface SourceAdapter {
@@ -231,8 +230,18 @@ export interface FastRefreshJobRow {
   page_error: string | null;
   page_usage_tokens: string | number | null;
   page_decompressed_bytes: string | number | null;
-  labels: Array<{ label: string; source_stage?: string; confidence?: string | number; reason?: string }>;
-  duplicate_candidates: Array<{ id: string; state: string; confidence: string | number; reason: string }>;
+  labels: Array<{
+    label: string;
+    source_stage?: string;
+    confidence?: string | number;
+    reason?: string;
+  }>;
+  duplicate_candidates: Array<{
+    id: string;
+    state: string;
+    confidence: string | number;
+    reason: string;
+  }>;
   review_events: unknown[];
 }
 
@@ -276,7 +285,9 @@ export async function runFastRefresh(
   await assertMigrationsReady();
 
   const adapters = buildFastRefreshSourceAdapters(options);
-  const sources = await Promise.all(adapters.map((adapter) => ingestSourceAdapter(adapter, options)));
+  const sources = await Promise.all(
+    adapters.map((adapter) => ingestSourceAdapter(adapter, options)),
+  );
 
   const runIds = sources.flatMap((item) => (item.runId === null ? [] : [item.runId]));
   const classified: FastRefreshClassificationSummary[] = [];
@@ -622,7 +633,9 @@ export function renderFastRefreshMarkdown(result: FastRefreshResult): string {
           .filter(Boolean)
           .join(" | ")}`,
       );
-      lines.push(`   matched: ${row.ranking.reasons.join(", ") || row.classification.labels.join(", ")}`);
+      lines.push(
+        `   matched: ${row.ranking.reasons.join(", ") || row.classification.labels.join(", ")}`,
+      );
       lines.push(`   full text: ${row.ingest.fullTextStatus}; review: ${row.reviewState}`);
       lines.push("");
     }
@@ -639,7 +652,9 @@ export function renderFastRefreshMarkdown(result: FastRefreshResult): string {
           .filter(Boolean)
           .join(" | ")}`,
       );
-      lines.push(`   matched: ${row.classification.labels.join(", ") || "direct-source current role"}`);
+      lines.push(
+        `   matched: ${row.classification.labels.join(", ") || "direct-source current role"}`,
+      );
       lines.push("");
     }
   }
@@ -659,7 +674,9 @@ export function renderFastRefreshMarkdown(result: FastRefreshResult): string {
 async function assertMigrationsReady(): Promise<void> {
   const plan = await planMigrations();
   if (plan.pending.length > 0) {
-    throw new Error(`Database has ${plan.pending.length} pending migration(s). Run bun run db:migrate.`);
+    throw new Error(
+      `Database has ${plan.pending.length} pending migration(s). Run bun run db:migrate.`,
+    );
   }
 }
 
@@ -667,7 +684,9 @@ export function buildFastRefreshSourceAdapters(
   options: Pick<FastRefreshOptions, "jobserveQueries" | "jobserveMaxPages">,
 ): FastRefreshSourceAdapter[] {
   return [
-    ...options.jobserveQueries.map((query) => jobServeSourceAdapter(query, options.jobserveMaxPages)),
+    ...options.jobserveQueries.map((query) =>
+      jobServeSourceAdapter(query, options.jobserveMaxPages),
+    ),
     linearCareersSourceAdapter(),
   ];
 }
@@ -793,7 +812,10 @@ function linearCareersSourceAdapter(): FastRefreshSourceAdapter {
   };
 }
 
-async function classifyRun(runId: number, limit: number): Promise<FastRefreshClassificationSummary> {
+async function classifyRun(
+  runId: number,
+  limit: number,
+): Promise<FastRefreshClassificationSummary> {
   const rows = await runPsqlJson<ClassifiableJobRow[]>(
     buildClassifiableJobsForSearchRunSql(runId, limit),
   );
@@ -871,7 +893,8 @@ function sourceSummary(input: {
     fullText: {
       persisted: input.pagesPersisted,
       fetchedPages: input.pagesFetched,
-      status: input.pagesPersisted > 0 ? "success" : input.imported > 0 ? "snippet_only" : "pending",
+      status:
+        input.pagesPersisted > 0 ? "success" : input.imported > 0 ? "snippet_only" : "pending",
     },
     costs: ZERO_COSTS,
     elapsedMs: input.elapsedMs,
@@ -938,7 +961,8 @@ function sourceAdapterFor(
 function linksForJob(row: FastRefreshJobRow): JobSummaryLink[] {
   const links: JobSummaryLink[] = [];
   pushLink(links, "canonical", row.canonical_url);
-  if (row.observed_url && row.observed_url !== row.canonical_url) pushLink(links, "source", row.observed_url);
+  if (row.observed_url && row.observed_url !== row.canonical_url)
+    pushLink(links, "source", row.observed_url);
   for (const [kind, label] of [
     ["apply", "Apply URL"],
     ["source", "Source URL"],
@@ -1005,7 +1029,11 @@ function rankingForJob(
     return {
       tier: null,
       score: 72,
-      reasons: ["direct employer", "current careers page", ...row.labels.map((label) => label.label)],
+      reasons: [
+        "direct employer",
+        "current careers page",
+        ...row.labels.map((label) => label.label),
+      ],
       softened: null,
     };
   }
@@ -1095,7 +1123,6 @@ function outcomeFromError(err: unknown): SourceOutcome {
   if (/captcha/i.test(message)) return "blocked_captcha";
   if (/401|403|auth/i.test(message)) return "blocked_auth";
   if (/parse|could not find|could not parse/i.test(message)) return "parse_error";
-  if (/api key/i.test(message)) return "api_key_missing";
   return "http_error";
 }
 

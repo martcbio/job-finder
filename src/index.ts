@@ -18,6 +18,7 @@ const reconcileOnly = process.argv.includes("--reconcile-only");
 
 async function main() {
   const startTime = Date.now();
+  assertLegacyNotionScraperConfig();
   const notion = createNotionClient(config.notionToken);
   await runPreflight(notion, config.notionDatabaseId);
 
@@ -147,6 +148,22 @@ async function main() {
       tokenSummary,
     );
   }
+}
+
+function assertLegacyNotionScraperConfig(): void {
+  const missing = [
+    config.notionToken ? null : "NOTION_TOKEN",
+    config.notionDatabaseId ? null : "NOTION_DATABASE_ID",
+    config.openrouterApiKey ? null : "OPENROUTER_API_KEY",
+  ].filter((item): item is string => item !== null);
+
+  if (missing.length === 0) return;
+
+  throw new Error(
+    `Legacy Notion scraper requires ${missing.join(
+      ", ",
+    )}. The supported Postgres/API refresh path is keyless apart from DATABASE_URL; use bun run jobs:fast-refresh or bun run api.`,
+  );
 }
 
 main().catch(async (err) => {

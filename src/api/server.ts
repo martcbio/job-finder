@@ -10,6 +10,15 @@ import {
   renderCvDraftMarkdown,
 } from "../pipeline/cvDraft";
 import {
+  buildFastRefreshRunSql,
+  buildLatestJobRowsSql,
+  type FastRefreshJobRow,
+  type FastRefreshOptions,
+  type FastRefreshResult,
+  jobRowToSummary,
+  runFastRefresh,
+} from "../pipeline/fastRefresh";
+import {
   APPLICATION_STATUSES,
   type ApplicationListRow,
   type ApplicationStatus,
@@ -57,18 +66,11 @@ import {
 import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { parseSourceLaneIds, SOURCE_LANES } from "../pipeline/sourceLanes";
-import {
-  type FastRefreshOptions,
-  type FastRefreshResult,
-  buildFastRefreshRunSql,
-  buildLatestJobRowsSql,
-  jobRowToSummary,
-  runFastRefresh,
-  type FastRefreshJobRow,
-} from "../pipeline/fastRefresh";
 
 export type ApiQuery = <T>(sql: string) => Promise<T>;
-export type FastRefreshRunner = (options: Partial<FastRefreshOptions>) => Promise<FastRefreshResult>;
+export type FastRefreshRunner = (
+  options: Partial<FastRefreshOptions>,
+) => Promise<FastRefreshResult>;
 
 export interface JobFinderApiOptions {
   query?: ApiQuery;
@@ -839,11 +841,15 @@ function integrationStatus(env: NodeJS.ProcessEnv): unknown {
       configured: Boolean(env.DATABASE_URL),
     },
     jina: {
-      requiredForSearch: true,
+      mode: "optional",
+      requiredForSearch: false,
+      keylessFallback: "explicit_zero_results_or_unauthenticated_reader",
       configured: Boolean(env.JINA_API_KEY),
     },
     openrouter: {
-      requiredForLegacyEvaluation: true,
+      mode: "optional_legacy",
+      requiredForApiStartup: false,
+      requiredForFastRefresh: false,
       configured: Boolean(env.OPENROUTER_API_KEY),
     },
     notion: {

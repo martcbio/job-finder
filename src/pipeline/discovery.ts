@@ -6,7 +6,7 @@ import {
   type JinaSearchUsage,
 } from "./search";
 
-export const DISCOVERY_PROVIDERS = ["auto", "brave", "jina"] as const;
+export const DISCOVERY_PROVIDERS = ["auto", "brave", "jina", "keyless"] as const;
 
 export type DiscoveryProvider = (typeof DISCOVERY_PROVIDERS)[number];
 
@@ -54,6 +54,18 @@ export async function fetchDiscoveryWithUsage(
     return fetchBraveSearchWithUsage(query, credentials, options);
   }
 
+  if (provider === "keyless") {
+    return {
+      results: [],
+      usage: {
+        provider: "keyless",
+        billableQueries: 0,
+        tokens: 0,
+        decompressedContentLength: null,
+      },
+    };
+  }
+
   const call = await fetchJinaSearchWithUsage(
     query,
     { jinaApiKey: credentials.jinaApiKey ?? "" },
@@ -87,9 +99,10 @@ function resolveDiscoveryProvider(
     return "jina";
   }
 
+  if (requested === "keyless") return "keyless";
   if (credentials.braveApiKey) return "brave";
   if (credentials.jinaApiKey) return "jina";
-  throw new Error("No discovery provider credentials available; set BRAVE_API_KEY or JINA_API_KEY");
+  return "keyless";
 }
 
 async function fetchBraveSearchWithUsage(

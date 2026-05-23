@@ -115,7 +115,8 @@ export function buildPipelinePlan(options: PipelinePlanOptions): PipelineStep[] 
       : []),
     {
       name: "ingest_pages",
-      description: "Ingest full job pages using ATS metadata first, then Jina Reader.",
+      description:
+        "Ingest full job pages using ATS metadata first, then plain HTTP and unauthenticated Jina Reader fallback.",
       command: [
         "bun",
         "run",

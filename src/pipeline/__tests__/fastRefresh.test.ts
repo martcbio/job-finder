@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  buildFastRefreshSourceAdapters,
   buildFastRefreshRunSql,
   buildLatestJobRowsSql,
   jobRowToSummary,
@@ -69,6 +70,25 @@ describe("fast refresh contract helpers", () => {
     expect(options.limit).toBe(5);
     expect(options.jobserveQueries).toEqual(["agentic", "rag"]);
     expect(options.jobserveMaxPages).toBe(3);
+  });
+
+  test("builds concrete source adapters for JobServe queries and Linear Careers", () => {
+    const adapters = buildFastRefreshSourceAdapters({
+      jobserveQueries: ["agentic", "rag"],
+      jobserveMaxPages: 2,
+    });
+
+    expect(adapters.map((adapter) => adapter.id)).toEqual([
+      "jobserve",
+      "jobserve",
+      "linear-careers",
+    ]);
+    expect(adapters.map((adapter) => adapter.defaultKeyword)).toEqual([
+      "agentic",
+      "rag",
+      "linear-careers",
+    ]);
+    expect(adapters[0]?.discover).toBeFunction();
   });
 
   test("maps DB rows to UI-facing summaries with links, classification, eligibility, and dedupe", () => {

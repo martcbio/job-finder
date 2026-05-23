@@ -15,7 +15,7 @@ import {
   rankJobServeContracts,
 } from "./jobserveContracts";
 import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "./jobserveLive";
-import { ingestNormalizedJobs } from "./normalizedJobIngest";
+import { type NormalizedJobInput, ingestNormalizedJobs } from "./normalizedJobIngest";
 import { type JobScreeningDecision, screenJob } from "./jobScreening";
 
 export type SourceKind =
@@ -48,6 +48,29 @@ export interface SourceAdapter {
   label: string;
   kind: SourceKind;
   quality: SourceQuality;
+}
+
+export interface SourceDiscoveryInput {
+  keyword: string;
+  limit: number;
+  timeoutMs: number;
+}
+
+export interface SourceDiscoveryResult {
+  source: SourceAdapter;
+  keyword: string;
+  outcome: SourceOutcome;
+  discovered: number;
+  jobs: NormalizedJobInput[];
+  pagesFetched: number | null;
+  costs: FastRefreshCosts;
+  errors: string[];
+  blockedReason: string | null;
+}
+
+export interface FastRefreshSourceAdapter extends SourceAdapter {
+  defaultKeyword: string;
+  discover(input: SourceDiscoveryInput): Promise<SourceDiscoveryResult>;
 }
 
 export interface FastRefreshOptions {
@@ -252,10 +275,8 @@ export async function runFastRefresh(
   const startedAt = new Date(started).toISOString();
   await assertMigrationsReady();
 
-  const sources = await Promise.all([
-    ...options.jobserveQueries.map((query) => ingestJobServeQuery(query, options)),
-    ingestLinearCareers(options),
-  ]);
+  const adapters = buildFastRefreshSourceAdapters(options);
+  const sources = await Promise.all(adapters.map((adapter) => ingestSourceAdapter(adapter, options)));
 
   const runIds = sources.flatMap((item) => (item.runId === null ? [] : [item.runId]));
   const classified: FastRefreshClassificationSummary[] = [];
@@ -642,58 +663,71 @@ async function assertMigrationsReady(): Promise<void> {
   }
 }
 
-async function ingestJobServeQuery(
-  query: string,
-  options: Pick<FastRefreshOptions, "jobserveMaxPages" | "jobserveImportLimitPerQuery" | "timeoutMs">,
+export function buildFastRefreshSourceAdapters(
+  options: Pick<FastRefreshOptions, "jobserveQueries" | "jobserveMaxPages">,
+): FastRefreshSourceAdapter[] {
+  return [
+    ...options.jobserveQueries.map((query) => jobServeSourceAdapter(query, options.jobserveMaxPages)),
+    linearCareersSourceAdapter(),
+  ];
+}
+
+async function ingestSourceAdapter(
+  adapter: FastRefreshSourceAdapter,
+  options: Pick<FastRefreshOptions, "directLimit" | "jobserveImportLimitPerQuery" | "timeoutMs">,
 ): Promise<FastRefreshSourceSummary> {
   const started = Date.now();
   try {
-    const result = await fetchLiveJobServeRoles({
-      query,
-      maxPages: options.jobserveMaxPages,
+    const limit =
+      adapter.id === "linear-careers" ? options.directLimit : options.jobserveImportLimitPerQuery;
+    const discovery = await adapter.discover({
+      keyword: adapter.defaultKeyword,
+      limit,
       timeoutMs: options.timeoutMs,
     });
-    const jobs = result.roles
-      .slice(0, options.jobserveImportLimitPerQuery)
-      .map((role) => jobServeRoleToNormalizedJob(role, query));
-    if (jobs.length === 0) {
+    if (discovery.jobs.length === 0) {
       return sourceSummary({
-        source: sourceAdapterFor("jobserve", "JobServe", ""),
-        keyword: query,
+        source: discovery.source,
+        keyword: discovery.keyword,
         runId: null,
-        outcome: "zero_results",
-        discovered: result.roles.length,
+        outcome: discovery.outcome,
+        discovered: discovery.discovered,
         imported: 0,
         pagesPersisted: 0,
-        pagesFetched: result.pagesFetched,
+        pagesFetched: discovery.pagesFetched,
         elapsedMs: Date.now() - started,
+        errors: discovery.errors,
+        blockedReason: discovery.blockedReason,
       });
     }
 
     const ingest = await ingestNormalizedJobs({
-      sourceId: "jobserve",
-      sourceLabel: "JobServe",
-      keyword: query,
-      jobs,
+      sourceId: adapter.id,
+      sourceLabel: adapter.label,
+      keyword: discovery.keyword,
+      jobs: discovery.jobs,
       timeoutMs: options.timeoutMs,
     });
 
     return sourceSummary({
-      source: sourceAdapterFor("jobserve", "JobServe", ""),
-      keyword: query,
+      source: discovery.source,
+      keyword: discovery.keyword,
       runId: ingest.runId,
       outcome: ingest.errors.length > 0 ? "http_error" : "success",
-      discovered: result.roles.length,
+      discovered: discovery.discovered,
       imported: ingest.jobsPersisted,
       pagesPersisted: ingest.pagesPersisted,
-      pagesFetched: result.pagesFetched,
+      pagesFetched: discovery.pagesFetched,
       elapsedMs: Date.now() - started,
-      errors: ingest.errors.map((error) => `${error.title}: ${error.error}`),
+      errors: [
+        ...discovery.errors,
+        ...ingest.errors.map((error) => `${error.title}: ${error.error}`),
+      ],
     });
   } catch (err) {
     return sourceSummary({
-      source: sourceAdapterFor("jobserve", "JobServe", ""),
-      keyword: query,
+      source: adapter,
+      keyword: adapter.defaultKeyword,
       runId: null,
       outcome: outcomeFromError(err),
       discovered: 0,
@@ -707,64 +741,56 @@ async function ingestJobServeQuery(
   }
 }
 
-async function ingestLinearCareers(
-  options: Pick<FastRefreshOptions, "directLimit" | "timeoutMs">,
-): Promise<FastRefreshSourceSummary> {
-  const started = Date.now();
-  try {
-    const result = await fetchLinearCareersJobs({
-      limit: options.directLimit,
-      timeoutMs: options.timeoutMs,
-    });
-    if (result.jobs.length === 0) {
-      return sourceSummary({
+function jobServeSourceAdapter(query: string, maxPages: number): FastRefreshSourceAdapter {
+  return {
+    ...sourceAdapterFor("jobserve", "JobServe", ""),
+    defaultKeyword: query,
+    async discover(input) {
+      const result = await fetchLiveJobServeRoles({
+        query,
+        maxPages,
+        timeoutMs: input.timeoutMs,
+      });
+      const jobs = result.roles
+        .slice(0, input.limit)
+        .map((role) => jobServeRoleToNormalizedJob(role, query));
+      return {
+        source: sourceAdapterFor("jobserve", "JobServe", ""),
+        keyword: query,
+        outcome: jobs.length > 0 ? "success" : "zero_results",
+        discovered: result.roles.length,
+        jobs,
+        pagesFetched: result.pagesFetched,
+        costs: ZERO_COSTS,
+        errors: [],
+        blockedReason: null,
+      };
+    },
+  };
+}
+
+function linearCareersSourceAdapter(): FastRefreshSourceAdapter {
+  return {
+    ...sourceAdapterFor("linear-careers", "Linear Careers", ""),
+    defaultKeyword: "linear-careers",
+    async discover(input) {
+      const result = await fetchLinearCareersJobs({
+        limit: input.limit,
+        timeoutMs: input.timeoutMs,
+      });
+      return {
         source: sourceAdapterFor(result.sourceId, result.sourceLabel, ""),
         keyword: "linear-careers",
-        runId: null,
-        outcome: "zero_results",
+        outcome: result.jobs.length > 0 ? "success" : "zero_results",
         discovered: result.discovered,
-        imported: 0,
-        pagesPersisted: 0,
+        jobs: result.jobs,
         pagesFetched: null,
-        elapsedMs: Date.now() - started,
-      });
-    }
-
-    const ingest = await ingestNormalizedJobs({
-      sourceId: result.sourceId,
-      sourceLabel: result.sourceLabel,
-      keyword: "linear-careers",
-      jobs: result.jobs,
-      timeoutMs: options.timeoutMs,
-    });
-
-    return sourceSummary({
-      source: sourceAdapterFor(result.sourceId, result.sourceLabel, ""),
-      keyword: "linear-careers",
-      runId: ingest.runId,
-      outcome: ingest.errors.length > 0 ? "http_error" : "success",
-      discovered: result.discovered,
-      imported: ingest.jobsPersisted,
-      pagesPersisted: ingest.pagesPersisted,
-      pagesFetched: null,
-      elapsedMs: Date.now() - started,
-      errors: ingest.errors.map((error) => `${error.title}: ${error.error}`),
-    });
-  } catch (err) {
-    return sourceSummary({
-      source: sourceAdapterFor("linear-careers", "Linear Careers", ""),
-      keyword: "linear-careers",
-      runId: null,
-      outcome: outcomeFromError(err),
-      discovered: 0,
-      imported: 0,
-      pagesPersisted: 0,
-      pagesFetched: null,
-      elapsedMs: Date.now() - started,
-      errors: [errorMessage(err)],
-      blockedReason: errorMessage(err),
-    });
-  }
+        costs: ZERO_COSTS,
+        errors: [],
+        blockedReason: null,
+      };
+    },
+  };
 }
 
 async function classifyRun(runId: number, limit: number): Promise<FastRefreshClassificationSummary> {
@@ -836,7 +862,7 @@ function sourceSummary(input: {
   blockedReason?: string | null;
 }): FastRefreshSourceSummary {
   return {
-    source: input.source,
+    source: sourceMetadata(input.source),
     keyword: input.keyword,
     runId: input.runId,
     outcome: input.outcome,
@@ -851,6 +877,15 @@ function sourceSummary(input: {
     elapsedMs: input.elapsedMs,
     errors: input.errors ?? [],
     blockedReason: input.blockedReason ?? null,
+  };
+}
+
+function sourceMetadata(source: SourceAdapter): SourceAdapter {
+  return {
+    id: source.id,
+    label: source.label,
+    kind: source.kind,
+    quality: source.quality,
   };
 }
 

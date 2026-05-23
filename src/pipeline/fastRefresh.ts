@@ -16,88 +16,26 @@ import {
   rankJobServeContracts,
 } from "./jobserveContracts";
 import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "./jobserveLive";
-import { ingestNormalizedJobs, type NormalizedJobInput } from "./normalizedJobIngest";
+import { ingestNormalizedJobs } from "./normalizedJobIngest";
+import {
+  describeSourceAdapter,
+  type FastRefreshSourceAdapter,
+  type SourceAdapter,
+  type SourceAdapterDescriptor,
+  type SourceAttemptStatus,
+  type SourceOutcome,
+  sourceAttemptStatus,
+} from "./sourceAdapterContract";
 
-export type SourceKind =
-  | "direct_employer"
-  | "ats"
-  | "recruiter"
-  | "aggregator"
-  | "search"
-  | "protected";
-
-export type SourceQuality = "high" | "medium" | "low" | "opportunistic";
-
-export type SourceOutcome =
-  | "success"
-  | "zero_results"
-  | "snippet_only"
-  | "blocked_captcha"
-  | "blocked_auth"
-  | "blocked_robots_or_waf"
-  | "redirect_only"
-  | "expired"
-  | "parse_error"
-  | "timeout"
-  | "http_error"
-  | "not_implemented";
-
-export type SourceAttemptStatus =
-  | "success"
-  | "zero_results"
-  | "partial"
-  | "blocked"
-  | "timeout"
-  | "parser_error"
-  | "rate_limited"
-  | "auth_required";
-
-export const SOURCE_ATTEMPT_STATUSES: SourceAttemptStatus[] = [
-  "success",
-  "zero_results",
-  "partial",
-  "blocked",
-  "timeout",
-  "parser_error",
-  "rate_limited",
-  "auth_required",
-];
-
-export interface SourceAdapter {
-  id: string;
-  label: string;
-  kind: SourceKind;
-  quality: SourceQuality;
-}
-
-export interface SourceAdapterDescriptor extends SourceAdapter {
-  defaultKeyword: string;
-  defaultIncluded: boolean;
-  supportsSourceScopedRefresh: boolean;
-}
-
-export interface SourceDiscoveryInput {
-  keyword: string;
-  limit: number;
-  timeoutMs: number;
-}
-
-export interface SourceDiscoveryResult {
-  source: SourceAdapter;
-  keyword: string;
-  outcome: SourceOutcome;
-  discovered: number;
-  jobs: NormalizedJobInput[];
-  pagesFetched: number | null;
-  costs: FastRefreshCosts;
-  errors: string[];
-  blockedReason: string | null;
-}
-
-export interface FastRefreshSourceAdapter extends SourceAdapter {
-  defaultKeyword: string;
-  discover(input: SourceDiscoveryInput): Promise<SourceDiscoveryResult>;
-}
+export {
+  type FastRefreshSourceAdapter,
+  SOURCE_ATTEMPT_STATUSES,
+  type SourceAdapter,
+  type SourceAdapterDescriptor,
+  type SourceAttemptStatus,
+  type SourceOutcome,
+  sourceAttemptStatus,
+} from "./sourceAdapterContract";
 
 export interface FastRefreshOptions {
   limit: number;
@@ -772,15 +710,9 @@ export function listFastRefreshSources(
   > = DEFAULT_FAST_REFRESH_OPTIONS,
 ): SourceAdapterDescriptor[] {
   const defaultIds = new Set(DEFAULT_FAST_REFRESH_OPTIONS.sourceIds);
-  return buildFastRefreshSourceAdapters(options).map((adapter) => ({
-    id: adapter.id,
-    label: adapter.label,
-    kind: adapter.kind,
-    quality: adapter.quality,
-    defaultKeyword: adapter.defaultKeyword,
-    defaultIncluded: defaultIds.has(adapter.id),
-    supportsSourceScopedRefresh: true,
-  }));
+  return buildFastRefreshSourceAdapters(options).map((adapter) =>
+    describeSourceAdapter(adapter, defaultIds.has(adapter.id)),
+  );
 }
 
 async function ingestSourceAdapter(
@@ -1179,28 +1111,6 @@ function aggregateCosts(rows: FastRefreshSourceSummary[]): FastRefreshCosts {
     }),
     { ...ZERO_COSTS },
   );
-}
-
-export function sourceAttemptStatus(
-  outcome: SourceOutcome,
-  imported: number,
-  errors: readonly string[] = [],
-): SourceAttemptStatus {
-  const errorText = errors.join("\n");
-  if (/rate|429/i.test(errorText)) return "rate_limited";
-  if (/401|403|auth/i.test(errorText) || outcome === "blocked_auth") return "auth_required";
-  if (outcome === "success") return imported > 0 || errors.length === 0 ? "success" : "partial";
-  if (outcome === "zero_results") return "zero_results";
-  if (outcome === "timeout") return "timeout";
-  if (outcome === "parse_error") return "parser_error";
-  if (
-    outcome === "blocked_captcha" ||
-    outcome === "blocked_robots_or_waf" ||
-    outcome === "redirect_only"
-  ) {
-    return "blocked";
-  }
-  return "partial";
 }
 
 function addNullable(left: number | null, right: number | null): number | null {

@@ -55,6 +55,9 @@ Each source should normalize into a shared candidate shape before ingest:
 - fetch strategy used;
 - explicit failure reason when discovery or ingest fails.
 
+The implementation contract lives in `src/pipeline/sourceAdapterContract.ts`,
+with operator-facing notes in `docs/source-adapter-contract.md`.
+
 ## Constraints
 
 - Postgres remains the source of truth.

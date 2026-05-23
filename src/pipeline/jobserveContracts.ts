@@ -15,6 +15,29 @@ export interface RankedJobServeContract extends JobServeContractRow {
   postedAt: Date | null;
 }
 
+export function buildJobServeRowsSql(candidateLimit: number): string {
+  return `SELECT COALESCE(json_agg(row_to_json(rows)), '[]'::json)
+FROM (
+  SELECT
+    j.id,
+    j.title_normalized AS title,
+    j.company_hint AS company,
+    j.canonical_url AS url,
+    j.last_seen_at::text AS "lastSeenAt",
+    COALESCE(MAX(jp.markdown) FILTER (WHERE jp.status = 'success'), '') AS markdown,
+    COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), '') AS description
+  FROM job_search.jobs j
+  JOIN job_search.job_observations jo ON jo.job_id = j.id
+  JOIN job_search.search_results sr ON sr.id = jo.search_result_id
+  JOIN job_search.search_queries sq ON sq.id = sr.query_id
+  LEFT JOIN job_search.job_pages jp ON jp.job_id = j.id
+  WHERE sq.source_id = 'jobserve'
+  GROUP BY j.id, j.title_normalized, j.company_hint, j.canonical_url, j.last_seen_at
+  ORDER BY j.last_seen_at DESC, j.id DESC
+  LIMIT ${candidateLimit}
+) rows;`;
+}
+
 const STRICT_TERM_PATTERNS = [
   { label: "agentic", pattern: /\bagentic\b/i },
   { label: "langchain", pattern: /\blangchain\b/i },

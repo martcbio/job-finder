@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type ApiQuery, createJobFinderApiHandler } from "../server";
+import { type ApiQuery, type FastRefreshRunner, createJobFinderApiHandler } from "../server";
 
 function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://job-finder.local.test${path}`, init);
@@ -9,13 +9,14 @@ async function json(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
-function handlerWithQuery(query: (sql: string) => Promise<unknown>) {
+function handlerWithQuery(query: (sql: string) => Promise<unknown>, fastRefresh?: FastRefreshRunner) {
   const typedQuery: ApiQuery = async <T>(sql: string): Promise<T> => {
     return (await query(sql)) as T;
   };
 
   return createJobFinderApiHandler({
     query: typedQuery,
+    fastRefresh,
     now: () => new Date("2026-05-21T00:00:00.000Z"),
     env: {
       DATABASE_URL: "postgres://mcb@localhost:5432/jobs",
@@ -112,6 +113,217 @@ describe("job-finder API", () => {
     expect(response.status).toBe(200);
     expect(calls).toHaveLength(1);
     expect(data).toHaveLength(1);
+  });
+
+  test("POST /api/refresh/fast runs the shared fast-refresh service with bounded options", async () => {
+    const calls: unknown[] = [];
+    const handler = handlerWithQuery(
+      async () => {
+        throw new Error("query should not run for injected fast refresh");
+      },
+      async (options) => {
+        calls.push(options);
+        return {
+          startedAt: "2026-05-21T00:00:00.000Z",
+          finishedAt: "2026-05-21T00:00:01.250Z",
+          elapsedMs: 1250,
+          options: {
+            limit: 3,
+            jobserveQueries: ["agentic"],
+            jobserveMaxPages: 1,
+            jobserveImportLimitPerQuery: 2,
+            directLimit: 1,
+            timeoutMs: 5000,
+            classifyLimit: 10,
+          },
+          sources: [
+            {
+              source: {
+                id: "jobserve",
+                label: "JobServe",
+                kind: "recruiter",
+                quality: "medium",
+              },
+              keyword: "agentic",
+              runId: 44,
+              outcome: "success",
+              discovered: 10,
+              imported: 2,
+              fullText: { persisted: 2, fetchedPages: 1, status: "success" },
+              costs: {
+                jinaSearchTokens: 0,
+                jinaReaderTokens: 0,
+                openAiTokens: 0,
+                billableSearchApiCalls: 0,
+              },
+              elapsedMs: 1000,
+              errors: [],
+              blockedReason: null,
+            },
+          ],
+          classified: [{ runId: 44, classified: 2 }],
+          costs: {
+            jinaSearchTokens: 0,
+            jinaReaderTokens: 0,
+            openAiTokens: 0,
+            billableSearchApiCalls: 0,
+          },
+          latest: { jobs: [], jobserve: [], direct: [] },
+        };
+      },
+    );
+
+    const response = await handler(
+      request("/api/refresh/fast", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          limit: 3,
+          jobserveQueries: ["agentic"],
+          jobserveMaxPages: 1,
+          jobserveImportLimitPerQuery: 2,
+          directLimit: 1,
+          timeoutMs: 5000,
+          classifyLimit: 10,
+        }),
+      }),
+    );
+    const body = await json(response);
+    const data = body.data as Record<string, unknown>;
+    const sources = data.sources as Array<Record<string, unknown>>;
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      limit: 3,
+      jobserveQueries: ["agentic"],
+      jobserveMaxPages: 1,
+      jobserveImportLimitPerQuery: 2,
+      directLimit: 1,
+      timeoutMs: 5000,
+      classifyLimit: 10,
+    });
+    expect(sources[0]?.outcome).toBe("success");
+    expect(data.elapsedMs).toBe(1250);
+  });
+
+  test("GET /api/jobs/latest returns UI-facing summaries with classification and eligibility", async () => {
+    const calls: string[] = [];
+    const handler = handlerWithQuery(async (sql) => {
+      calls.push(sql);
+      expect(sql).toContain("job_search.job_pages");
+      return [
+        {
+          id: 12,
+          title: "Forward Deployed AI Engineer",
+          company: "Linear",
+          canonical_url: "https://linear.app/careers/00000000-0000-0000-0000-000000000000",
+          review_state: "ready_for_review",
+          category: "fde",
+          rag_focus: "yes",
+          enterprise_focus: "yes",
+          classification_confidence: "0.7600",
+          classification_reason: "matched FDE/customer-facing engineering language",
+          page_ingest_status: "success",
+          first_seen_at: "2026-05-21T00:00:00.000Z",
+          last_seen_at: "2026-05-21T00:01:00.000Z",
+          source_id: "linear-careers",
+          source_label: "Linear Careers",
+          observed_url: "https://linear.app/careers/00000000-0000-0000-0000-000000000000",
+          description_sample: "What you'll do: build AI agent workflows. Remote across Europe.",
+          markdown:
+            "# Linear - Forward Deployed AI Engineer\n\n- Source: Linear Careers\n- Job URL: https://linear.app/careers/00000000-0000-0000-0000-000000000000\n- Location: Europe, North America\n\nWhat you'll do: build AI agent workflows, requirements, qualifications, responsibilities, enterprise RAG workflows, customer engineering, and remote across Europe.",
+          page_status: "success",
+          page_error: null,
+          page_usage_tokens: null,
+          page_decompressed_bytes: 2048,
+          labels: [
+            { label: "fde", source_stage: "page", confidence: "0.7600", reason: "matched FDE" },
+            {
+              label: "rag_enterprise",
+              source_stage: "page",
+              confidence: "0.7600",
+              reason: "matched RAG",
+            },
+          ],
+          duplicate_candidates: [],
+          review_events: [],
+        },
+      ];
+    });
+
+    const response = await handler(request("/api/jobs/latest?limit=5"));
+    const body = await json(response);
+    const data = body.data as Array<Record<string, unknown>>;
+    const first = data[0] as Record<string, unknown>;
+    const source = first.source as Record<string, unknown>;
+    const classification = first.classification as Record<string, unknown>;
+    const eligibility = first.eligibility as Record<string, unknown>;
+    const ingest = first.ingest as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(source.id).toBe("linear-careers");
+    expect(classification.category).toBe("fde");
+    expect(classification.labels).toContain("rag_enterprise");
+    expect(eligibility.status).not.toBeUndefined();
+    expect(ingest.fullTextStatus).toBe("success");
+  });
+
+  test("GET /api/runs/:id returns source-level refresh status", async () => {
+    const calls: string[] = [];
+    const handler = handlerWithQuery(async (sql) => {
+      calls.push(sql);
+      expect(sql).toContain("FROM job_search.search_runs sr");
+      return {
+        id: "44",
+        startedAt: "2026-05-21T00:00:00.000Z",
+        finishedAt: "2026-05-21T00:00:01.000Z",
+        status: "completed",
+        keyword: "jobserve:agentic",
+        sourceSet: ["jobserve"],
+        timeFilter: "normalized_import",
+        limitPerQuery: 2,
+        timeoutMs: 5000,
+        totalReportedTokens: 0,
+        errorSummary: null,
+        elapsedMs: 1000,
+        costs: {
+          jinaSearchTokens: 0,
+          jinaReaderTokens: 0,
+          openAiTokens: 0,
+          billableSearchApiCalls: 0,
+        },
+        sources: [
+          {
+            id: "jobserve",
+            label: "JobServe",
+            outcome: "success",
+            status: "success",
+            query: "jobserve:agentic",
+            directUrl: null,
+            startedAt: "2026-05-21T00:00:00.000Z",
+            finishedAt: "2026-05-21T00:00:01.000Z",
+            usageTokens: null,
+            decompressedBytes: null,
+            error: null,
+            candidateCount: 2,
+            jobCount: 2,
+            fullTextCount: 2,
+          },
+        ],
+      };
+    });
+
+    const response = await handler(request("/api/runs/44"));
+    const body = await json(response);
+    const data = body.data as Record<string, unknown>;
+    const sources = data.sources as Array<Record<string, unknown>>;
+
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(sources[0]?.candidateCount).toBe(2);
+    expect(sources[0]?.outcome).toBe("success");
   });
 
   test("POST /api/jobs/:id/review rejects invalid states before touching DB", async () => {

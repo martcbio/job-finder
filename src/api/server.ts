@@ -57,11 +57,22 @@ import {
 import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { parseSourceLaneIds, SOURCE_LANES } from "../pipeline/sourceLanes";
+import {
+  type FastRefreshOptions,
+  type FastRefreshResult,
+  buildFastRefreshRunSql,
+  buildLatestJobRowsSql,
+  jobRowToSummary,
+  runFastRefresh,
+  type FastRefreshJobRow,
+} from "../pipeline/fastRefresh";
 
 export type ApiQuery = <T>(sql: string) => Promise<T>;
+export type FastRefreshRunner = (options: Partial<FastRefreshOptions>) => Promise<FastRefreshResult>;
 
 export interface JobFinderApiOptions {
   query?: ApiQuery;
+  fastRefresh?: FastRefreshRunner;
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
   allowOrigins?: string[];
@@ -69,6 +80,7 @@ export interface JobFinderApiOptions {
 
 interface ApiContext {
   query: ApiQuery;
+  fastRefresh: FastRefreshRunner;
   env: NodeJS.ProcessEnv;
   now: () => Date;
   allowOrigins: string[];
@@ -141,6 +153,7 @@ export function createJobFinderApiHandler(
 ): (request: Request) => Promise<Response> {
   const context: ApiContext = {
     query: options.query ?? ((sql) => runPsqlJson(sql)),
+    fastRefresh: options.fastRefresh ?? ((fastOptions) => runFastRefresh(fastOptions)),
     env: options.env ?? process.env,
     now: options.now ?? (() => new Date()),
     allowOrigins: options.allowOrigins ?? ["http://localhost:3000", "http://localhost:5173"],
@@ -222,6 +235,15 @@ async function handleApiRequest(
     return jsonResponse({ ok: true, data: rows });
   }
 
+  if (route.method === "GET" && route.path === "/api/jobs/latest") {
+    const rows = await context.query<FastRefreshJobRow[]>(
+      buildLatestJobRowsSql({
+        limit: positiveIntParam(route.search, "limit", 20, 250),
+      }),
+    );
+    return jsonResponse({ ok: true, data: rows.map((row) => jobRowToSummary(row)) });
+  }
+
   if (route.method === "GET" && route.path === "/api/jobs/queue") {
     const rows = await context.query<ReviewQueueRow[]>(
       buildReviewQueueSql({
@@ -232,12 +254,26 @@ async function handleApiRequest(
     return jsonResponse({ ok: true, data: rows });
   }
 
+  if (route.method === "POST" && route.path === "/api/refresh/fast") {
+    const body = await readJsonObject(request);
+    const result = await context.fastRefresh(fastRefreshOptionsFromBody(body));
+    return jsonResponse({ ok: true, data: result });
+  }
+
+  const runDetailMatch = matchPath(route.path, "/api/runs/:runId");
+  if (route.method === "GET" && runDetailMatch) {
+    const runId = pathParam(runDetailMatch, "runId");
+    const row = await context.query(buildFastRefreshRunSql(runId));
+    if (row === null) throw new ApiError(404, "run_not_found", `No run found with id ${runId}`);
+    return jsonResponse({ ok: true, data: row });
+  }
+
   const jobDetailMatch = matchPath(route.path, "/api/jobs/:jobId");
   if (route.method === "GET" && jobDetailMatch) {
     const jobId = pathParam(jobDetailMatch, "jobId");
     const row = await context.query<JobDetailRow | null>(buildJobDetailSql(jobId));
     if (row === null) throw new ApiError(404, "job_not_found", `No job found with id ${jobId}`);
-    return jsonResponse({ ok: true, data: row });
+    return jsonResponse({ ok: true, data: { ...row, summary: jobDetailToSummary(row) } });
   }
 
   const jobEventsMatch = matchPath(route.path, "/api/jobs/:jobId/events");
@@ -696,6 +732,58 @@ function savedSweepInputFromBody(body: Record<string, unknown>): SavedSweepInput
   };
 }
 
+function fastRefreshOptionsFromBody(body: Record<string, unknown>): Partial<FastRefreshOptions> {
+  return {
+    limit: positiveIntValue(body.limit, "limit", 20, 250),
+    jobserveQueries:
+      body.jobserveQueries === undefined
+        ? undefined
+        : nonEmptyStringArray(body.jobserveQueries, "jobserveQueries", []),
+    jobserveMaxPages: positiveIntValue(body.jobserveMaxPages, "jobserveMaxPages", 3, 25),
+    jobserveImportLimitPerQuery: positiveIntValue(
+      body.jobserveImportLimitPerQuery,
+      "jobserveImportLimitPerQuery",
+      8,
+      100,
+    ),
+    directLimit: positiveIntValue(body.directLimit, "directLimit", 6, 100),
+    timeoutMs: positiveIntValue(body.timeoutMs, "timeoutMs", 20000, 300000),
+    classifyLimit: positiveIntValue(body.classifyLimit, "classifyLimit", 250, 5000),
+  };
+}
+
+function jobDetailToSummary(row: JobDetailRow): ReturnType<typeof jobRowToSummary> {
+  const latestObservation = firstRecord(row.observations);
+  const latestPage = firstRecord(row.pages);
+  return jobRowToSummary({
+    id: Number(row.id),
+    title: row.title,
+    company: row.company_hint,
+    canonical_url: row.canonical_url,
+    review_state: row.review_state,
+    category: row.category,
+    rag_focus: row.rag_focus,
+    enterprise_focus: row.enterprise_focus,
+    classification_confidence: row.classification_confidence,
+    classification_reason: row.classification_reason,
+    page_ingest_status: row.page_ingest_status,
+    first_seen_at: row.first_seen_at,
+    last_seen_at: row.last_seen_at,
+    source_id: stringField(latestObservation.source_id),
+    source_label: stringField(latestObservation.source_label),
+    observed_url: stringField(latestObservation.observed_url),
+    description_sample: stringField(latestObservation.description_raw),
+    markdown: stringField(latestPage.markdown),
+    page_status: stringField(latestPage.status),
+    page_error: stringField(latestPage.error),
+    page_usage_tokens: stringOrNumberField(latestPage.usage_tokens),
+    page_decompressed_bytes: stringOrNumberField(latestPage.decompressed_bytes),
+    labels: row.labels as FastRefreshJobRow["labels"],
+    duplicate_candidates: [],
+    review_events: row.review_events,
+  });
+}
+
 async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
@@ -711,6 +799,22 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
     throw new ApiError(400, "invalid_body", "Request body must be a JSON object");
   }
   return parsed as Record<string, unknown>;
+}
+
+function firstRecord(value: unknown[]): Record<string, unknown> {
+  const first = value[0];
+  return first && typeof first === "object" && !Array.isArray(first)
+    ? (first as Record<string, unknown>)
+    : {};
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function stringOrNumberField(value: unknown): string | number | null {
+  if (typeof value === "string" || typeof value === "number") return value;
+  return null;
 }
 
 function buildMeta(env: NodeJS.ProcessEnv): unknown {

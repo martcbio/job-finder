@@ -55,9 +55,10 @@ export async function runFastRefresh(
   );
 
   const runIds = sources.flatMap((item) => (item.runId === null ? [] : [item.runId]));
-  const classified = await Promise.all(
-    runIds.map((runId) => classifyRun(runId, options.classifyLimit)),
-  );
+  const classified: FastRefreshClassificationSummary[] = [];
+  for (const runId of runIds) {
+    classified.push(await classifyRun(runId, options.classifyLimit));
+  }
   const classifiedByRunId = new Map(classified.map((item) => [item.runId, item.classified]));
   const sourceSummaries = sources.map((source) => ({
     ...source,

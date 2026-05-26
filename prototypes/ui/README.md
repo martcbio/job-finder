@@ -1,6 +1,7 @@
 # Job Finder UI Prototype Gallery
 
-Seven visual directions for the job-finder review UI. This is a **gallery only** — compare layouts here; production wiring (refresh, review POST, etc.) will live in a separate app path once we pick 1–2 candidates.
+Four visual directions for the job-finder review UI. **Signal Cockpit** is wired to
+live Postgres data and fast refresh; the others read the same API hook.
 
 Reads from the local JSON API when available; falls back to mock data when the API is offline.
 
@@ -44,12 +45,10 @@ Direct dev (no Caddy): same port — http://127.0.0.1:32002/
 
 | ID | Name | Concept |
 |----|------|---------|
-| `cockpit` | Signal Cockpit | Dense ops console — queue + source yield |
+| `cockpit` | Signal Cockpit | **Live** — queue, source yield, fast refresh |
 | `swipe` | Swipe Triage | Card stack for fast review decisions |
 | `bento` | Bento Command | Living dashboard tiles with micro-motion |
-| `editorial` | Editorial Ledger | Magazine-style featured job + list |
-| `split` | Split Focus | Queue rail + detail pane |
 | `timeline` | Pipeline Timeline | Runs, events, sources chronology |
-| `kanban` | Review Board | Lanes by `review_state` |
 
-All prototypes consume `GET /api/jobs/queue`, `/api/source-health`, and `/api/pipeline-runs` where relevant.
+Signal Cockpit calls `POST /api/refresh/fast` and reads `GET /api/jobs/queue`,
+`/api/source-health`, `/api/pipeline-runs`, and `/api/runs/latest`.

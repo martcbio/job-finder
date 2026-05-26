@@ -43,13 +43,15 @@ export interface ReviewQueueRow {
 
 export interface SourceHealthRow {
   source_id: string;
-  lane: string;
+  source_label?: string;
+  lane?: string;
   attempts: number;
   successes: number;
-  success_rate: number;
+  success_rate: number | string;
   timeouts: number;
   errors: number;
-  avg_tokens: number | null;
+  avg_tokens?: number | null;
+  avg_reported_tokens?: number | null;
   avg_results: number | null;
   total_results: number;
 }
@@ -59,8 +61,35 @@ export interface PipelineRunRow {
   status: string;
   started_at: string;
   finished_at: string | null;
-  step_count: number;
-  error_message: string | null;
+  step_count?: number;
+  error_message?: string | null;
+  error_summary?: string | null;
+  steps?: Array<{ step_name: string; status: string }>;
+  sweep_name?: string | null;
+}
+
+export interface RefreshRunRow {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: string;
+  keyword: string;
+  elapsedMs: number | null;
+}
+
+export interface FastRefreshResult {
+  startedAt: string;
+  finishedAt: string;
+  elapsedMs: number;
+  sources: Array<{
+    source: { id: string; label: string };
+    outcome: string;
+    status: string;
+    discovered: number;
+    imported: number;
+    classification: { classified: number };
+  }>;
+  latest: { jobs: unknown[] };
 }
 
 export interface ApiMeta {
@@ -74,14 +103,7 @@ export interface ApiEnvelope<T> {
   error?: { code: string; message: string };
 }
 
-export type PrototypeId =
-  | "cockpit"
-  | "swipe"
-  | "bento"
-  | "editorial"
-  | "split"
-  | "timeline"
-  | "kanban";
+export type PrototypeId = "cockpit" | "swipe" | "bento" | "timeline";
 
 export interface PrototypeInfo {
   id: PrototypeId;

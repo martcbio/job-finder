@@ -506,7 +506,12 @@ function buildInsertLabelsSql(classification: JobClassification): string {
   reason
 )
 VALUES
-${values};`;
+${values}
+ON CONFLICT (job_id, label, source_stage) DO UPDATE
+SET
+  confidence = EXCLUDED.confidence,
+  reason = EXCLUDED.reason,
+  classified_at = now();`;
 }
 
 function addLabel(

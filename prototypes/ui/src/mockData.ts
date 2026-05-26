@@ -24,28 +24,10 @@ export const PROTOTYPES = [
     accent: "#0ea5e9",
   },
   {
-    id: "editorial",
-    name: "Editorial Ledger",
-    tagline: "Magazine layout for deliberate reading",
-    accent: "#d4a574",
-  },
-  {
-    id: "split",
-    name: "Split Focus",
-    tagline: "Queue rail + detail pane workflow",
-    accent: "#6366f1",
-  },
-  {
     id: "timeline",
     name: "Pipeline Timeline",
     tagline: "Runs, sources, and evidence chronology",
     accent: "#14b8a6",
-  },
-  {
-    id: "kanban",
-    name: "Review Board",
-    tagline: "Kanban lanes by review state",
-    accent: "#ec4899",
   },
 ] as const;
 

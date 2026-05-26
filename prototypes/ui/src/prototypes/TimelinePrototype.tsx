@@ -54,7 +54,7 @@ function buildTimeline(
       time: new Date(Date.now() - Math.random() * 86400000 * 2).toISOString(),
       kind: "source",
       title: s.source_id,
-      detail: `${s.total_results} results · ${Math.round(s.success_rate * 100)}% success`,
+      detail: `${s.total_results} results · ${Math.round(Number(s.success_rate) * 100)}% success`,
     });
   }
 

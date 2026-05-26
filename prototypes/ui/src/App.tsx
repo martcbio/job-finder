@@ -3,9 +3,6 @@ import { LiveBanner } from "./components/shared";
 import { PROTOTYPES } from "./mockData";
 import BentoCommandPrototype from "./prototypes/BentoCommandPrototype";
 import CockpitPrototype from "./prototypes/CockpitPrototype";
-import EditorialPrototype from "./prototypes/EditorialPrototype";
-import KanbanPrototype from "./prototypes/KanbanPrototype";
-import SplitFocusPrototype from "./prototypes/SplitFocusPrototype";
 import SwipeTriagePrototype from "./prototypes/SwipeTriagePrototype";
 import TimelinePrototype from "./prototypes/TimelinePrototype";
 import type { PrototypeId } from "./types";
@@ -19,7 +16,6 @@ export default function App() {
 
   return (
     <div className="grain min-h-[100dvh]">
-      {/* Gallery nav — fixed strip */}
       <div className="sticky top-0 z-40 border-b border-white/5 bg-[#0c0d0f]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
           <div className="flex items-center gap-3">
@@ -28,7 +24,7 @@ export default function App() {
             </span>
             <span className="hidden text-zinc-700 md:inline">/</span>
             <span className="hidden text-xs text-zinc-500 md:inline">Prototype Gallery</span>
-            <LiveBanner live={data.live} loading={data.loading} />
+            <LiveBanner live={data.live} loading={data.loading || data.refreshing} />
           </div>
 
           <nav className="flex gap-1 overflow-x-auto pb-1 md:pb-0">
@@ -59,21 +55,27 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => data.refresh()}
+            onClick={() => void data.refresh()}
             className="hidden shrink-0 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-200 md:block"
           >
-            Refresh API
+            Reload API
           </button>
         </div>
       </div>
 
-      {/* Active prototype */}
       <div key={active}>
         {active === "cockpit" && (
           <CockpitPrototype
             queue={data.queue}
             sourceHealth={data.sourceHealth}
             pipelineRuns={data.pipelineRuns}
+            lastRefreshRun={data.lastRefreshRun}
+            lastFastRefresh={data.lastFastRefresh}
+            live={data.live}
+            refreshing={data.refreshing}
+            refreshError={data.refreshError}
+            onRefreshData={() => void data.refresh()}
+            onRunFastRefresh={() => void data.runFastRefresh()}
           />
         )}
         {active === "swipe" && <SwipeTriagePrototype queue={data.queue} />}
@@ -84,8 +86,6 @@ export default function App() {
             pipelineRuns={data.pipelineRuns}
           />
         )}
-        {active === "editorial" && <EditorialPrototype queue={data.queue} />}
-        {active === "split" && <SplitFocusPrototype queue={data.queue} />}
         {active === "timeline" && (
           <TimelinePrototype
             queue={data.queue}
@@ -93,10 +93,8 @@ export default function App() {
             pipelineRuns={data.pipelineRuns}
           />
         )}
-        {active === "kanban" && <KanbanPrototype queue={data.queue} />}
       </div>
 
-      {/* Footer hint */}
       <footer className="border-t border-white/5 px-6 py-4 text-center">
         <p className="text-[11px] text-zinc-600">
           Branch <code className="text-zinc-500">cursor-party-ui</code> ·{" "}

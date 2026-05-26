@@ -40,6 +40,7 @@ confirmation strings.
 Build UI against `bun run api`, not by shelling out to CLI scripts. The useful
 first surfaces are:
 
+- `POST /api/refresh/fast` for day-to-day job refresh (same as `bun run jobs:fast-refresh`)
 - `GET /api/jobs/queue` for the review list
 - `GET /api/jobs/:jobId` for detail pages/drawers
 - `GET /api/source-health` for source/cost visibility

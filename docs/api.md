@@ -274,12 +274,36 @@ Body:
 
 ### Pipeline Runs
 
+`GET /api/pipeline-runs`
+
+Returns audited pipeline run history and step status.
+
+Query parameters:
+
+- `limit`: positive integer, default `25`, max `250`
+
+`POST /api/pipeline-runs`
+
+By default this returns the planned local command sequence without executing it.
+This is the safest endpoint for a UI to call while building controls.
+
+Body for a saved sweep plan:
+
+```json
+{
+  "sweepName": "daily-agentic",
+  "skipSteps": ["search"]
+}
+```
+
+### Fast refresh
+
 `POST /api/refresh/fast`
 
 Runs the cheap-first native fast-refresh path and returns elapsed time, options,
 per-source status, candidate/import/full-text/classification counts, latest job
 summaries, and cost/token totals. It uses the same `runFastRefresh` module as the
-CLI.
+CLI (`bun run jobs:fast-refresh`).
 
 Each source attempt includes `classification.classified` so UI and agent
 consumers can display classification coverage without joining against the
@@ -319,28 +343,6 @@ curl -X POST 'http://127.0.0.1:3737/api/refresh/source/linear' \
 
 Returns the newest persisted refresh/search run evidence using the same shape as
 `GET /api/runs/:id`.
-
-`GET /api/pipeline-runs`
-
-Returns audited pipeline run history and step status.
-
-Query parameters:
-
-- `limit`: positive integer, default `25`, max `250`
-
-`POST /api/pipeline-runs`
-
-By default this returns the planned local command sequence without executing it.
-This is the safest endpoint for a UI to call while building controls.
-
-Body for a saved sweep plan:
-
-```json
-{
-  "sweepName": "daily-agentic",
-  "skipSteps": ["search"]
-}
-```
 
 Body for an inline plan:
 

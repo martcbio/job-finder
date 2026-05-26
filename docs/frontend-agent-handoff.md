@@ -107,6 +107,16 @@ Show:
 
 This is how the user decides which sources are worth running more often.
 
+### Fast refresh (day-to-day)
+
+Use `POST /api/refresh/fast` for the cheap native refresh path — same behavior as
+`bun run jobs:fast-refresh`. Prefer this over pipeline runs for routine UI refresh
+controls.
+
+Per-source refresh: `POST /api/refresh/source/:source` (`jobserve`, `linear`).
+
+Run evidence: `GET /api/runs/latest` and `GET /api/runs/:id`.
+
 ### Pipeline Runs
 
 Use `GET /api/pipeline-runs`.

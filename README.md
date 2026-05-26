@@ -47,6 +47,25 @@ modules and does not require Notion, OpenRouter, Brave, or Jina credentials.
 Legacy Notion-first scripts and `src/index.ts` remain available as
 reference/integration code, but new UI work should not depend on them.
 
+## Refresh jobs (day-to-day)
+
+Re-fetch from configured native sources (JobServe, linear-careers), ingest pages, and classify — no saved sweep required:
+
+```bash
+export DATABASE_URL=postgres://mcb@localhost:5432/jobs
+bun run jobs:fast-refresh
+```
+
+Same path via API:
+
+```bash
+curl -X POST http://127.0.0.1:3737/api/refresh/fast \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+**Fast refresh** = cheap native sources, bounded limits. **Pipeline run** (below) = full saved-sweep fanout with explicit confirm.
+
 ## Common Commands
 
 Run a DB-backed search across selected sources:

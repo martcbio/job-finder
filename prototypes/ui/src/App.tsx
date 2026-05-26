@@ -24,7 +24,10 @@ export default function App() {
             </span>
             <span className="hidden text-zinc-700 md:inline">/</span>
             <span className="hidden text-xs text-zinc-500 md:inline">Prototype Gallery</span>
-            <LiveBanner live={data.live} loading={data.loading || data.refreshing} />
+            <LiveBanner
+              live={data.live}
+              loading={data.loading || data.grabbing || data.refreshing}
+            />
           </div>
 
           <nav className="flex gap-1 overflow-x-auto pb-1 md:pb-0">
@@ -53,13 +56,6 @@ export default function App() {
             ))}
           </nav>
 
-          <button
-            type="button"
-            onClick={() => void data.refresh()}
-            className="hidden shrink-0 rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-200 md:block"
-          >
-            Reload API
-          </button>
         </div>
       </div>
 
@@ -72,10 +68,13 @@ export default function App() {
             lastRefreshRun={data.lastRefreshRun}
             lastFastRefresh={data.lastFastRefresh}
             live={data.live}
+            grabbing={data.grabbing}
             refreshing={data.refreshing}
             refreshError={data.refreshError}
-            onRefreshData={() => void data.refresh()}
-            onRunFastRefresh={() => void data.runFastRefresh()}
+            refreshFeedback={data.refreshFeedback}
+            lastGrabbedAt={data.lastGrabbedAt}
+            onRefresh={() => void data.grabLatest()}
+            onFindNewJobs={() => void data.runFastRefresh()}
           />
         )}
         {active === "swipe" && <SwipeTriagePrototype queue={data.queue} />}

@@ -275,6 +275,19 @@ describe("screenJob", () => {
     expect(decision.reasons.map((reason) => reason.code)).toContain("inside_ir35");
   });
 
+  test("does not treat Inside IR35: no metadata as inside IR35", () => {
+    const decision = screen(
+      [
+        "- Outside IR35: no",
+        "- Inside IR35: no",
+        "Head of Engineering and AI. London. 12 month contract.",
+      ].join("\n"),
+      "McCabe & Barton - Head of Engineering and AI",
+    );
+
+    expect(decision.reasons.map((reason) => reason.code)).not.toContain("inside_ir35");
+  });
+
   test("rejects DevOps and SRE primary roles", () => {
     const decision = screen(
       "Build CI/CD, provisioning, observability, production operations, and incident response.",

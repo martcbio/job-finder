@@ -1,3 +1,5 @@
+import { isInsideIr35 } from "./ir35Signals";
+
 export type JobScreeningStatus = "high_signal" | "needs_human_review" | "rejected";
 
 export type JobScreeningReasonCode =
@@ -380,7 +382,7 @@ export function screenJob(input: JobScreeningInput): JobScreeningDecision {
     });
   }
 
-  if (/\binside ir35\b/i.test(text)) {
+  if (isInsideIr35(text)) {
     const reason = {
       code: "inside_ir35" as const,
       detail: "Inside IR35 is a strong negative",

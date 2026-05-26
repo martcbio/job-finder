@@ -43,11 +43,32 @@ export function DupWarning({ job }: { job: ReviewQueueRow }) {
   );
 }
 
+export function SignalChip({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "good" | "warn" | "bad";
+}) {
+  const styles = {
+    neutral: "border-zinc-700/80 bg-zinc-800/50 text-zinc-400",
+    good: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+    warn: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+    bad: "border-red-500/30 bg-red-500/10 text-red-300",
+  }[tone];
+
+  return (
+    <span
+      className={`inline-flex shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-[10px] leading-none ${styles}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function JobMeta({ job }: { job: ReviewQueueRow }) {
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-      <span>{job.company_hint ?? "Unknown co."}</span>
-      <span className="text-zinc-700">|</span>
       <span>{formatRelative(job.last_seen_at)}</span>
       {job.classification_confidence && (
         <>

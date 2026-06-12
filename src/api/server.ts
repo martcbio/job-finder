@@ -1,5 +1,5 @@
 import { runPsqlJson } from "../db/psql";
-import { runFastRefresh } from "../pipeline/fastRefresh";
+import { runQueueRefresh } from "../pipeline/queueRefresh";
 import type { JobFinderApiOptions } from "./context";
 import { errorResponse } from "./errors";
 import { handleApiRequest } from "./handlers";
@@ -13,7 +13,7 @@ export function createJobFinderApiHandler(
 ): (request: Request) => Promise<Response> {
   const context = {
     query: options.query ?? ((sql) => runPsqlJson(sql)),
-    fastRefresh: options.fastRefresh ?? ((fastOptions) => runFastRefresh(fastOptions)),
+    fastRefresh: options.fastRefresh ?? ((fastOptions) => runQueueRefresh(fastOptions)),
     env: options.env ?? process.env,
     now: options.now ?? (() => new Date()),
     allowOrigins: options.allowOrigins ?? ["http://localhost:3000", "http://localhost:5173"],

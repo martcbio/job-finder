@@ -231,6 +231,13 @@ describe("job-finder API", () => {
     expect(response.status).toBe(200);
     expect(sources.map((source) => source.id)).toContain("jobserve");
     expect(sources.map((source) => source.id)).toContain("linear-careers");
+    const queueRefresh = data.queueRefresh as Array<Record<string, unknown>>;
+    const refreshableSourceIds = data.refreshableSourceIds as string[];
+    expect(queueRefresh.map((source) => source.id)).toContain("rippling");
+    expect(queueRefresh.map((source) => source.id)).toContain("jobspy");
+    expect(queueRefresh.length).toBeGreaterThan(10);
+    expect(refreshableSourceIds).toContain("greenhouse");
+    expect(refreshableSourceIds).toContain("jobspy");
     expect(statuses).toContain("partial");
     expect(statuses).toContain("auth_required");
   });

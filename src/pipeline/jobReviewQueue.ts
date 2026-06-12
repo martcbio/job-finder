@@ -4,6 +4,8 @@ import type { ReviewState } from "./jobReview";
 export interface ReviewQueueFilters {
   limit: number;
   states: ReviewState[];
+  /** When set, only jobs observed via these search source ids (e.g. linear-careers). */
+  sourceIds?: string[];
 }
 
 export interface ReviewQueueLabel {
@@ -135,6 +137,7 @@ FROM (
   LEFT JOIN job_search.search_queries sq ON sq.id = sr.query_id
   LEFT JOIN job_search.job_pages jp ON jp.job_id = j.id AND jp.status = 'success'
   WHERE j.review_state = ANY(${reviewStateArrayLiteral(filters.states)})
+    ${sourceIdsFilterSql(filters.sourceIds)}
   GROUP BY j.id
   ORDER BY j.last_seen_at DESC, j.id DESC
   LIMIT ${filters.limit}
@@ -191,6 +194,19 @@ export function renderReviewQueueMarkdown(
 
 function reviewStateArrayLiteral(states: ReviewState[]): string {
   return `ARRAY[${states.map((state) => quoteSqlLiteral(state)).join(", ")}]::text[]`;
+}
+
+function sourceIdsFilterSql(sourceIds: string[] | undefined): string {
+  if (!sourceIds || sourceIds.length === 0) return "";
+  const literal = `ARRAY[${sourceIds.map((id) => quoteSqlLiteral(id)).join(", ")}]::text[]`;
+  return `AND EXISTS (
+    SELECT 1
+    FROM job_search.job_observations jo_src
+    JOIN job_search.search_results sr_src ON sr_src.id = jo_src.search_result_id
+    JOIN job_search.search_queries sq_src ON sq_src.id = sr_src.query_id
+    WHERE jo_src.job_id = j.id
+      AND sq_src.source_id = ANY(${literal})
+  )`;
 }
 
 function formatLabels(labels: ReviewQueueLabel[]): string {

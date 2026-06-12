@@ -21,6 +21,16 @@ describe("buildReviewQueueSql", () => {
     );
     expect(sql).toContain("LIMIT 10");
   });
+
+  test("filters by source id when sourceIds provided", () => {
+    const sql = buildReviewQueueSql({
+      limit: 5,
+      states: ["ready_for_review"],
+      sourceIds: ["linear-careers"],
+    });
+
+    expect(sql).toContain("sq_src.source_id = ANY(ARRAY['linear-careers']::text[])");
+  });
 });
 
 describe("renderReviewQueueMarkdown", () => {

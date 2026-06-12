@@ -66,12 +66,18 @@ import {
   requiredReviewState,
   requiredString,
   reviewStatesFromSearch,
+  sourceIdsFromSearch,
   nullableString,
   stringList,
   positiveIntValue,
 } from "./parse";
 import { fastRefreshOptionsFromBody, savedSweepInputFromBody } from "./requestBodies";
-import { fastRefreshSourceId, uniqueFastRefreshSources } from "./refreshApi";
+import {
+  fastRefreshSourceId,
+  listQueueRefreshSources,
+  listRefreshableSourceIds,
+  uniqueFastRefreshSources,
+} from "./refreshApi";
 
 export async function handleApiRequest(
   request: Request,
@@ -101,6 +107,8 @@ export async function handleApiRequest(
       ok: true,
       data: {
         fastRefresh: uniqueFastRefreshSources(),
+        queueRefresh: listQueueRefreshSources(),
+        refreshableSourceIds: listRefreshableSourceIds(),
         sourceLanes: SOURCE_LANES,
         attemptStatuses: SOURCE_ATTEMPT_STATUSES,
       },
@@ -135,6 +143,7 @@ export async function handleApiRequest(
       buildReviewQueueSql({
         limit: positiveIntParam(route.search, "limit", 25, 250),
         states: reviewStatesFromSearch(route.search),
+        sourceIds: sourceIdsFromSearch(route.search),
       }),
     );
     return jsonResponse({ ok: true, data: rows });

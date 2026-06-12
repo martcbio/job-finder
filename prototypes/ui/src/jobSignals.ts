@@ -23,6 +23,13 @@ const CATEGORY_SHORT: Record<string, string> = {
   other: "Other",
 };
 
+/** From ingest metadata line `- Posted date: …` in description_sample. */
+export function extractPostedDate(sample: string | null | undefined): string | null {
+  if (!sample) return null;
+  const match = sample.match(/(?:^|\n)-?\s*Posted date:\s*([^\n]+)/i);
+  return match?.[1]?.trim() ?? null;
+}
+
 export function deriveJobSignals(job: ReviewQueueRow): JobListingSignals {
   const text = [job.title, job.company_hint ?? "", job.description_sample ?? ""].join("\n");
   const screening = screenJob({

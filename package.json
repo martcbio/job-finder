@@ -27,6 +27,7 @@
     "applications:list": "bun scripts/list-applications.ts",
     "applications:record": "bun scripts/record-application.ts",
     "api": "bun scripts/api.ts",
+    "gen:refresh-registry": "bun -e \"import { allQueueRefreshSourceIds } from './src/pipeline/queueRefresh/registry.ts'; const ids = allQueueRefreshSourceIds(); await Bun.write('prototypes/ui/src/queueRefreshRegistry.ts', '/** Generated — run: bun run gen:refresh-registry */\\nexport const QUEUE_REFRESH_SOURCE_IDS = new Set<string>(' + JSON.stringify(ids, null, 2) + ');\\n');\"",
     "source:availability": "bun scripts/source-availability.ts",
     "source:coverage": "bun scripts/source-coverage.ts",
     "db:check": "bun scripts/db-check.ts",

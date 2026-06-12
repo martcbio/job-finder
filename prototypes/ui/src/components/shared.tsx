@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import { formatRelative, formatState, stateColor } from "../mockData";
+import { extractPostedDate } from "../jobSignals";
 import type { ReviewQueueRow } from "../types";
+
+function formatPublishedLabel(raw: string): string {
+  const parsed = Date.parse(raw);
+  if (!Number.isNaN(parsed)) return formatRelative(new Date(parsed).toISOString());
+  return raw;
+}
 
 export function StateBadge({ state }: { state: string }) {
   const color = stateColor(state);
@@ -67,9 +74,17 @@ export function SignalChip({
 }
 
 export function JobMeta({ job }: { job: ReviewQueueRow }) {
+  const posted = extractPostedDate(job.description_sample);
+
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-      <span>{formatRelative(job.last_seen_at)}</span>
+      {posted && (
+        <>
+          <span title={posted}>Published {formatPublishedLabel(posted)}</span>
+          <span className="text-zinc-700">|</span>
+        </>
+      )}
+      <span title={job.last_seen_at}>Seen {formatRelative(job.last_seen_at)}</span>
       {job.classification_confidence && (
         <>
           <span className="text-zinc-700">|</span>
@@ -80,10 +95,19 @@ export function JobMeta({ job }: { job: ReviewQueueRow }) {
   );
 }
 
+export function InlineSpinner({ className = "" }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent opacity-70 ${className}`}
+      aria-hidden
+    />
+  );
+}
+
 export function LiveBanner({ live, loading }: { live: boolean; loading: boolean }) {
   return (
     <div
-      className={`flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium ${
+      className={`flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium transition-colors duration-300 ${
         live
           ? "bg-emerald-500/15 text-emerald-400"
           : "bg-zinc-800 text-zinc-400"
@@ -92,7 +116,7 @@ export function LiveBanner({ live, loading }: { live: boolean; loading: boolean 
       <span
         className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-400" : "bg-zinc-500"} ${loading ? "animate-pulse" : ""}`}
       />
-      {loading ? "Connecting..." : live ? "Live API" : "Mock data (API offline)"}
+      {loading ? "Connecting…" : live ? "Live API" : "Mock data (API offline)"}
     </div>
   );
 }

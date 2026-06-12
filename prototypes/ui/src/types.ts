@@ -97,6 +97,19 @@ export interface ApiMeta {
   reviewActors: string[];
 }
 
+export interface FastRefreshSourceInfo {
+  id: string;
+  label: string;
+  kind: string;
+  defaultIncluded: boolean;
+}
+
+export interface SourcesApiData {
+  fastRefresh: FastRefreshSourceInfo[];
+  queueRefresh?: FastRefreshSourceInfo[];
+  refreshableSourceIds?: string[];
+}
+
 export interface ApiEnvelope<T> {
   ok: boolean;
   data?: T;

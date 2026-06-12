@@ -24,10 +24,7 @@ export default function App() {
             </span>
             <span className="hidden text-zinc-700 md:inline">/</span>
             <span className="hidden text-xs text-zinc-500 md:inline">Prototype Gallery</span>
-            <LiveBanner
-              live={data.live}
-              loading={data.loading || data.grabbing || data.refreshing}
-            />
+            <LiveBanner live={data.live} loading={data.loading} />
           </div>
 
           <nav className="flex gap-1 overflow-x-auto pb-1 md:pb-0">
@@ -62,22 +59,36 @@ export default function App() {
       <div key={active}>
         {active === "cockpit" && (
           <CockpitPrototype
-            queue={data.queue}
-            sourceHealth={data.sourceHealth}
+            queue={data.visibleQueue}
             pipelineRuns={data.pipelineRuns}
             lastRefreshRun={data.lastRefreshRun}
             lastFastRefresh={data.lastFastRefresh}
             live={data.live}
             grabbing={data.grabbing}
             refreshing={data.refreshing}
+            grabbingUi={data.grabbingUi}
+            refreshingUi={data.refreshingUi}
+            syncingUi={data.syncingUi}
             refreshError={data.refreshError}
             refreshFeedback={data.refreshFeedback}
             lastGrabbedAt={data.lastGrabbedAt}
-            onRefresh={() => void data.grabLatest()}
-            onFindNewJobs={() => void data.runFastRefresh()}
+            sourceCatalog={data.sourceCatalog}
+            enabledSourceIds={data.enabledSourceIds}
+            refreshTargets={data.refreshTargets}
+            onToggleSource={data.toggleSource}
+            onSelectAllSources={data.selectAllSources}
+            onDeselectAllSources={data.deselectAllSources}
+            onUpdateQueue={() => void data.runFastRefresh()}
+            onReloadFromDb={() => void data.grabLatest()}
           />
         )}
-        {active === "swipe" && <SwipeTriagePrototype queue={data.queue} />}
+        {active === "swipe" && (
+          <SwipeTriagePrototype
+            queue={data.visibleQueue}
+            live={data.live}
+            onReview={(jobId, state) => data.submitReview(jobId, state)}
+          />
+        )}
         {active === "bento" && (
           <BentoCommandPrototype
             queue={data.queue}

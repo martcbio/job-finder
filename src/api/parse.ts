@@ -23,6 +23,7 @@ import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { parseSourceLaneIds, SOURCE_LANES } from "../pipeline/sourceLanes";
 import { DEFAULT_QUEUE_STATES } from "./constants";
 import { ApiError } from "./errors";
+import { fastRefreshSourceId } from "./refreshApi";
 
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type") ?? "";
@@ -65,6 +66,17 @@ export function reviewStatesFromSearch(search: URLSearchParams): ReviewState[] {
   );
   if (values.length === 0) return [...DEFAULT_QUEUE_STATES];
   return [...new Set(values.map((value) => requiredReviewState(value, "state")))];
+}
+
+export function sourceIdsFromSearch(search: URLSearchParams): string[] | undefined {
+  const values = search.getAll("source").flatMap((value) =>
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+  if (values.length === 0) return undefined;
+  return [...new Set(values.map((value) => fastRefreshSourceId(value)))];
 }
 
 export function nullableReviewState(value: string | null): ReviewState | null {

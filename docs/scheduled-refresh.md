@@ -1,0 +1,33 @@
+# Scheduled Fast Refresh
+
+Ongoing ingestion runs `scripts/scheduled-fast-refresh.sh` every 6 hours via a
+launchd agent. The wrapper sources the login profile (for `JINA_API_KEY` /
+`OPENROUTER_API_KEY`), defaults `DATABASE_URL` to the local `jobs` database,
+skips cleanly when Postgres is down, and writes each run's markdown report to
+`logs/scheduled/` (last 60 kept, `latest.md` symlink).
+
+## Install (one-time)
+
+```bash
+cp launchd/com.mcb.job-finder.fast-refresh.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mcb.job-finder.fast-refresh.plist
+```
+
+## Operate
+
+```bash
+# run now, without waiting for the interval
+launchctl kickstart gui/$(id -u)/com.mcb.job-finder.fast-refresh
+
+# check last run
+cat logs/scheduled/latest.md
+
+# uninstall
+launchctl bootout gui/$(id -u)/com.mcb.job-finder.fast-refresh
+rm ~/Library/LaunchAgents/com.mcb.job-finder.fast-refresh.plist
+```
+
+The run itself is the default `bun scripts/fast-refresh.ts` profile: JobServe
+queries (3 pages, 8 imports per query) plus the linear-careers direct source,
+then classification of up to 250 pending jobs. Failed runs are kept as
+`*.failed.md` and exit non-zero so launchd records the failure.

@@ -122,3 +122,16 @@ That maps cleanly to job-market evidence. If many job postings say "RAG," the us
 ## Open Follow-Up
 
 Ask an agent in `/Users/mcb/Codelocal/resume2` to inspect the current job ingestion and skill-overlap logic, then propose a structured extraction and clustering layer. The goal is not a full rewrite first. The goal is a report that shows what the current pipeline is missing and what small schema/output changes would make job-market clusters usable for writing strategy and portfolio planning.
+
+## Implementation Status (2026-06-12)
+
+The first automated layer of this idea now exists in code:
+
+- `db/migrations/015_add_job_skill_signals.sql` — `job_skill_signals` + `job_skill_extractions` ledger
+- `src/pipeline/skillSignals.ts` — deterministic lexicon extractor (vocabulary seeded from the 2026-06-05 manual run in `artifacts/job-market/2026-06-05/`)
+- `src/pipeline/skillClusters.ts` — SQL co-occurrence + Jaccard union-find clustering + venn-pair report
+- `bun run jobs:skill-clusters` — extract pending jobs, print markdown report (`--json` for raw)
+- `GET /api/skill-clusters` — same report for the Cockpit UI
+- the scheduled fast-refresh wrapper re-runs extraction after each ingest
+
+The LLM/agent summarization layer described above remains the next step on top of these tables.

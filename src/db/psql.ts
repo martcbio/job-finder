@@ -61,12 +61,24 @@ function rowsToText(rows: Row[]): string {
   return rows.map((row) => Object.values(row).map(cellToText).join("|")).join("\n");
 }
 
+const TRANSACTION_CONTROL_RE = /^\s*(?:BEGIN|COMMIT|ROLLBACK)\b/im;
+
 async function execute(sql: string, options: PsqlOptions): Promise<Row[]> {
   const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
   const commandSql = options.setSearchPath === false ? sql : `${jobSearchPathSql()}\n${sql}`;
+  const client = clientFor(databaseUrl);
   try {
-    const result = await clientFor(databaseUrl).unsafe(commandSql);
-    return lastStatementRows(result);
+    // Explicit transaction scripts need a dedicated connection; the pool
+    // rejects raw BEGIN/COMMIT to protect connection state.
+    if (TRANSACTION_CONTROL_RE.test(commandSql)) {
+      const reserved = await client.reserve();
+      try {
+        return lastStatementRows(await reserved.unsafe(commandSql));
+      } finally {
+        reserved.release();
+      }
+    }
+    return lastStatementRows(await client.unsafe(commandSql));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new PsqlError(message, { stdout: "", stderr: message }, 1);

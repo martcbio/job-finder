@@ -45,6 +45,17 @@ import {
   buildUpsertSavedSweepSql,
   type SavedSweepRow,
 } from "../pipeline/savedSweeps";
+import {
+  buildClusterJobStatsSql,
+  buildExtractionTotalsSql,
+  buildSkillSignalCountsSql,
+  buildSkillSignalPairsSql,
+  clusterSignals,
+  computeOverlaps,
+  DEFAULT_CLUSTER_OPTIONS,
+  type SignalCountRow,
+  type SignalPairRow,
+} from "../pipeline/skillClusters";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { SOURCE_LANES } from "../pipeline/sourceLanes";
 import type { ApiContext, ApiRoute } from "./context";
@@ -228,6 +239,40 @@ export async function handleApiRequest(
         `No job found with id ${pathParam(jobReviewMatch, "jobId")}`,
       );
     return jsonResponse({ ok: true, data: row });
+  }
+
+  if (route.method === "GET" && route.path === "/api/skill-clusters") {
+    const totals = await context.query<{ extracted_jobs: number; signalled_jobs: number }>(
+      buildExtractionTotalsSql(),
+    );
+    const counts = await context.query<SignalCountRow[]>(buildSkillSignalCountsSql());
+    const pairs = await context.query<SignalPairRow[]>(
+      buildSkillSignalPairsSql(DEFAULT_CLUSTER_OPTIONS.minShared),
+    );
+    const overlaps = computeOverlaps(counts, pairs);
+    const clusterShapes = clusterSignals(counts, overlaps);
+    const clusterStats =
+      clusterShapes.length > 0
+        ? await context.query<{ cluster: string; jobs: number; top_companies: string[] }[]>(
+            buildClusterJobStatsSql(clusterShapes),
+          )
+        : [];
+    const statsByName = new Map(clusterStats.map((row) => [row.cluster, row]));
+    return jsonResponse({
+      ok: true,
+      data: {
+        generatedAt: new Date().toISOString(),
+        extractedJobs: totals.extracted_jobs,
+        signalledJobs: totals.signalled_jobs,
+        signals: counts,
+        overlaps,
+        clusters: clusterShapes.map((cluster) => ({
+          ...cluster,
+          jobs: statsByName.get(cluster.name)?.jobs ?? 0,
+          topCompanies: statsByName.get(cluster.name)?.top_companies ?? [],
+        })),
+      },
+    });
   }
 
   if (route.method === "GET" && route.path === "/api/source-health") {

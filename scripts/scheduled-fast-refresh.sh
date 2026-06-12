@@ -22,6 +22,8 @@ fi
 
 if bun scripts/fast-refresh.ts > "$OUT" 2>&1; then
   ln -sf "$OUT" "$LOG_DIR/latest.md"
+  # Refresh skill signals/clusters over whatever the run brought in.
+  bun scripts/skill-clusters.ts > "$LOG_DIR/skill-clusters.md" 2>>"$LOG_DIR/skill-clusters.err.log" || true
 else
   mv "$OUT" "${OUT%.md}.failed.md"
   ln -sf "${OUT%.md}.failed.md" "$LOG_DIR/latest.md"

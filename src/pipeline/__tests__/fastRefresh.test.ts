@@ -169,8 +169,24 @@ describe("fast refresh contract helpers", () => {
     expect(summary.classification.labels).toContain("rag_enterprise");
     expect(summary.eligibility.status).toBe("likely_ok");
     expect(summary.ingest.fullTextStatus).toBe("success");
+    expect(summary.ingest.markdownLineCount).toBeGreaterThan(1);
+    expect(summary.ingest.markdownBulletCount).toBeGreaterThan(1);
     expect(summary.dedupe.candidateCount).toBe(1);
     expect(summary.cost.jinaReaderTokens).toBe(0);
+  });
+
+  test("surfaces capture quality flags from stored markdown metadata", () => {
+    const summary = jobRowToSummary(
+      baseRow({
+        markdown:
+          "# Senior Agentic Engineer\n\n- Capture quality flags: single_line_long_body, nav_or_cookie_boilerplate\n\nBody",
+      }),
+    );
+
+    expect(summary.ingest.captureQualityFlags).toEqual([
+      "single_line_long_body",
+      "nav_or_cookie_boilerplate",
+    ]);
   });
 
   test("exposes blocked and snippet-only full-text states instead of flattening them", () => {

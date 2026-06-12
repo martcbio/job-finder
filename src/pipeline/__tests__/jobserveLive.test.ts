@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { jobServeRoleToNormalizedJob, parseJobServeRolesFromClassicHtml } from "../jobserveLive";
+import {
+  jobServeDetailMarkdownFromHtml,
+  jobServeRoleToNormalizedJob,
+  parseJobServeRolesFromClassicHtml,
+} from "../jobserveLive";
 
 const classicHtml = `
 <form>
@@ -39,7 +43,9 @@ describe("live JobServe parsing", () => {
       "agentic",
     ]);
 
-    const normalized = jobServeRoleToNormalizedJob(roles[0]!, "forward deployed engineer");
+    const [role] = roles;
+    if (!role) throw new Error("Expected parsed role");
+    const normalized = jobServeRoleToNormalizedJob(role, "forward deployed engineer");
     expect(normalized.sourceLabel).toBe("JobServe");
     expect(normalized.company).toBe("Investigo");
     expect(normalized.compensation).toContain("Outside IR35");
@@ -48,5 +54,51 @@ describe("live JobServe parsing", () => {
       reference: "JS123",
       outside_ir35: true,
     });
+  });
+
+  test("converts JobServe detail pages into scoped markdown with lists", () => {
+    const markdown = jobServeDetailMarkdownFromHtml(
+      `<!doctype html>
+      <html>
+        <head><title>Senior AI Engineer</title></head>
+        <body>
+          <nav><ul><li>Home</li><li>Job Search</li></ul></nav>
+          <div id="job">
+            <h1>Senior AI Engineer</h1>
+            <p>Role Overview</p>
+            <ul>
+              <li>Design autonomous task execution</li>
+              <li>Implement monitoring for agent behaviour</li>
+            </ul>
+          </div>
+        </body>
+      </html>`,
+      "https://www.jobserve.com/gb/en/WABC123.jsjob",
+    );
+
+    expect(markdown).toContain("# Senior AI Engineer");
+    expect(markdown).toContain("- Design autonomous task execution");
+    expect(markdown).toContain("- Implement monitoring for agent behaviour");
+    expect(markdown).not.toContain("Job Search");
+  });
+
+  test("prefers fetched detail markdown over the search-card snippet", () => {
+    const [role] = parseJobServeRolesFromClassicHtml(classicHtml, {
+      pageUrl: "https://www.jobserve.com/gb/en/JobListing.aspx?page=1",
+    });
+    if (!role) throw new Error("Expected parsed role");
+
+    const normalized = jobServeRoleToNormalizedJob(
+      {
+        ...role,
+        detail_status: "success",
+        detail_markdown: "# Forward Deployed AI Engineer\n\n- Build real agent systems",
+        detail_error: "",
+      },
+      "forward deployed engineer",
+    );
+
+    expect(normalized.description).toContain("- Build real agent systems");
+    expect(normalized.description).not.toBe(role.summary_snippet);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { rankJobServeContracts, type JobServeContractRow } from "../jobserveContracts";
+import { type JobServeContractRow, rankJobServeContracts } from "../jobserveContracts";
 
 function row(overrides: Partial<JobServeContractRow>): JobServeContractRow {
   return {
@@ -26,7 +26,8 @@ describe("JobServe contract ranking", () => {
         row({
           id: 2,
           title: "Forward Deployed AI Engineer",
-          markdown: "- Outside IR35: yes\n- Employment type: Contract\nPosted date: 20/05/2026 13:29:08",
+          markdown:
+            "- Outside IR35: yes\n- Employment type: Contract\nPosted date: 20/05/2026 13:29:08",
         }),
         row({
           id: 3,

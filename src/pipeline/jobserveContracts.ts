@@ -84,7 +84,12 @@ export function rankJobServeContract(row: JobServeContractRow): RankedJobServeCo
   }
 
   if (hasOutsideIr35 && hasContract && adjacentMatches.length > 0) {
-    return ranked(row, 2, ["outside IR35", "contract", ...adjacentMatches], "AI-adjacent term only");
+    return ranked(
+      row,
+      2,
+      ["outside IR35", "contract", ...adjacentMatches],
+      "AI-adjacent term only",
+    );
   }
 
   if (!hasInsideIr35 && hasContract && strictMatches.length > 0) {
@@ -97,7 +102,12 @@ export function rankJobServeContract(row: JobServeContractRow): RankedJobServeCo
   }
 
   if (!hasInsideIr35 && hasContract && adjacentMatches.length > 0) {
-    return ranked(row, 4, ["contract", ...adjacentMatches], "IR35 unclear and AI-adjacent term only");
+    return ranked(
+      row,
+      4,
+      ["contract", ...adjacentMatches],
+      "IR35 unclear and AI-adjacent term only",
+    );
   }
 
   return null;
@@ -157,9 +167,7 @@ function matchingLabels(
   haystack: string,
   patterns: readonly { label: string; pattern: RegExp }[],
 ): string[] {
-  return patterns
-    .filter((item) => item.pattern.test(haystack))
-    .map((item) => item.label);
+  return patterns.filter((item) => item.pattern.test(haystack)).map((item) => item.label);
 }
 
 function parseJobServePostedAt(haystack: string): Date | null {

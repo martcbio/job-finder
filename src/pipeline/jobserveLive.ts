@@ -1,3 +1,4 @@
+import { htmlToReadableMarkdown } from "./httpPageExtract";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
 
 export interface LiveJobServeOptions {
@@ -24,6 +25,9 @@ export interface LiveJobServeRole {
   employer_kind: string;
   employer_name: string;
   summary_snippet: string;
+  detail_markdown: string;
+  detail_status: "success" | "error" | "skipped";
+  detail_error: string;
   posted_date: string;
   duration: string;
   reference: string;
@@ -126,7 +130,7 @@ export async function fetchLiveJobServeRoles(
       if (role.security_clearance_required) {
         excludedRoles.push(role);
       } else {
-        roles.push(role);
+        roles.push(await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs));
       }
     }
   }
@@ -154,7 +158,7 @@ export function jobServeRoleToNormalizedJob(
     company: role.employer_name || null,
     url: role.url,
     sourceUrl: role.permalink && role.permalink !== role.url ? role.permalink : null,
-    description: role.summary_snippet,
+    description: role.detail_markdown || role.summary_snippet,
     location: role.location || null,
     employmentType: role.job_type || null,
     compensation: role.rate || null,
@@ -394,14 +398,67 @@ function parseJobServeRoleBlock(
     duration: labels.get("duration") ?? "",
     reference: labels.get("reference") ?? "",
     permalink: labels.get("permalink") ?? "",
+    detail_markdown: "",
+    detail_status: detailUrl ? "skipped" : "error",
+    detail_error: detailUrl ? "" : "No JobServe detail URL was present in the search result.",
     outside_ir35: /\boutside[\s-]*ir3[45]\b/i.test(roleText),
     inside_ir35: /\binside[\s-]*ir3[45]\b/i.test(roleText),
     remote_signal: /\bremote\b/i.test(roleText),
-    security_clearance_required: /\b(?:sc cleared|security clearance|dv clearance|clearance required)\b/i.test(
-      roleText,
-    ),
+    security_clearance_required:
+      /\b(?:sc cleared|security clearance|dv clearance|clearance required)\b/i.test(roleText),
     priority_notes: priorityNotes(roleText),
   };
+}
+
+async function fetchJobServeRoleDetail(
+  fetcher: typeof fetch,
+  jar: CookieJar,
+  role: LiveJobServeRole,
+  timeoutMs: number,
+): Promise<LiveJobServeRole> {
+  if (!role.detail_fetch_url) return role;
+
+  try {
+    const detail = await requestText(fetcher, jar, role.detail_fetch_url, {
+      timeoutMs,
+      headers: { Accept: FORM_ACCEPT, Referer: role.url },
+    });
+    const markdown = jobServeDetailMarkdownFromHtml(detail.text, detail.url);
+    const bodyLength = readableMarkdownBody(markdown).length;
+    if (bodyLength < Math.max(300, role.summary_snippet.length)) {
+      return {
+        ...role,
+        detail_status: "error",
+        detail_error: `JobServe detail extraction returned only ${bodyLength} readable character(s).`,
+      };
+    }
+    return {
+      ...role,
+      detail_markdown: markdown.trim(),
+      detail_status: "success",
+      detail_error: "",
+    };
+  } catch (err) {
+    return {
+      ...role,
+      detail_status: "error",
+      detail_error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export function jobServeDetailMarkdownFromHtml(html: string, url: string): string {
+  return htmlToReadableMarkdown(html, url, {
+    contentSelectors: ["#job", "main", '[role="main"]', "article"],
+  });
+}
+
+function readableMarkdownBody(markdown: string): string {
+  return markdown
+    .split("\n")
+    .filter((line) => !/^(Title:|URL Source:)\s/.test(line))
+    .join("\n")
+    .trim();
 }
 
 function extractLabelValues(block: string): Map<string, string> {
@@ -450,7 +507,12 @@ function absoluteUrl(url: string, base = BASE_URL): string {
 }
 
 function stripHtml(value: string): string {
-  return decodeHtml(value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  return decodeHtml(
+    value
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 function decodeHtml(value: string): string {

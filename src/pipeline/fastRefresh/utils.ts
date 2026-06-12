@@ -90,6 +90,28 @@ export function extractPostedAt(markdown: string | null): string | null {
   return extractMarkdownMetadata(markdown, "Posted date");
 }
 
+export function extractMarkdownMetadataList(markdown: string | null, label: string): string[] {
+  const value = extractMarkdownMetadata(markdown, label);
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+export function markdownLineCount(markdown: string | null): number {
+  if (!markdown) return 0;
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+}
+
+export function markdownBulletCount(markdown: string | null): number {
+  if (!markdown) return 0;
+  return markdown.split(/\r?\n/).filter((line) => /^[-*]\s+/.test(line.trim())).length;
+}
+
 export function addNullable(left: number | null, right: number | null): number | null {
   if (left === null || right === null) return null;
   return left + right;

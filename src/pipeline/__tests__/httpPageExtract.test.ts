@@ -30,6 +30,34 @@ describe("htmlToReadableMarkdown", () => {
     expect(markdown).toContain("- RAG evaluation");
     expect(markdown).not.toContain("window.noisy");
   });
+
+  test("can scope extraction to the job content instead of page chrome", () => {
+    const markdown = htmlToReadableMarkdown(
+      `<!doctype html>
+      <html>
+        <head><title>Job page</title></head>
+        <body>
+          <nav><ul><li>Home</li><li>Pricing</li></ul></nav>
+          <div id="job">
+            <h1>Senior AI Engineer</h1>
+            <p>You are currently only able to use a limited number of features of this website.</p>
+            <p>Role Overview</p>
+            <ul><li>Build agent workflows</li><li>Monitor model cost</li></ul>
+          </div>
+          <footer>Privacy Policy</footer>
+        </body>
+      </html>`,
+      "https://jobs.example.com/42",
+      { contentSelectors: ["#job"] },
+    );
+
+    expect(markdown).toContain("# Senior AI Engineer");
+    expect(markdown).toContain("- Build agent workflows");
+    expect(markdown).toContain("- Monitor model cost");
+    expect(markdown).not.toContain("Pricing");
+    expect(markdown).not.toContain("Privacy Policy");
+    expect(markdown).not.toContain("limited number of features");
+  });
 });
 
 describe("fetchHttpPageMarkdown", () => {

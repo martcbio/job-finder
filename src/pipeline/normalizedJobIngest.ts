@@ -203,6 +203,7 @@ export function normalizedJobMarkdown(job: NormalizedJobInput): string {
     job.employmentType ? `- Employment type: ${job.employmentType}` : null,
     job.compensation ? `- Compensation: ${job.compensation}` : null,
     ...rawMetadataLines(job.raw),
+    arrayMetadataLine("Capture quality flags", captureQualityFlags(job.raw, job.description)),
     "",
     job.description.trim(),
   ].filter((line): line is string => line !== null);
@@ -338,8 +339,37 @@ function rawMetadataLines(raw: unknown): string[] {
     booleanMetadataLine("Outside IR35", record.outside_ir35),
     booleanMetadataLine("Inside IR35", record.inside_ir35),
     booleanMetadataLine("Remote signal", record.remote_signal),
+    metadataLine("Detail status", textValue(record.detail_status)),
+    metadataLine("Detail error", textValue(record.detail_error)),
     arrayMetadataLine("Priority notes", record.priority_notes),
   ].filter((line): line is string => line !== null);
+}
+
+export function captureQualityFlags(raw: unknown, description: string): string[] {
+  const flags: string[] = [];
+  const text = description.trim();
+  const lineCount = text.split("\n").filter((line) => line.trim()).length;
+  if (text.length > 1200 && lineCount <= 3) flags.push("single_line_long_body");
+  if (/\b(?:skip to content|open app|sign up|privacy terms|cookie settings)\b/i.test(text)) {
+    flags.push("nav_or_cookie_boilerplate");
+  }
+  if (
+    /\b(?:job not found|not available anymore|no longer accepting applications|page you are looking for doesn't exist)\b/i.test(
+      text,
+    )
+  ) {
+    flags.push("closed_or_error_page");
+  }
+  if (/\bcurrent openings\b/i.test(text) && /\bsearch \d+ jobs\b/i.test(text)) {
+    flags.push("listing_page_not_job_detail");
+  }
+
+  const record = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const detailStatus = (record as Record<string, unknown>).detail_status;
+  if (detailStatus === "error") flags.push("detail_fetch_error");
+  if (detailStatus === "skipped") flags.push("detail_fetch_skipped");
+
+  return [...new Set(flags)];
 }
 
 function metadataLine(label: string, value: string): string | null {
@@ -352,7 +382,9 @@ function booleanMetadataLine(label: string, value: unknown): string | null {
 
 function arrayMetadataLine(label: string, value: unknown): string | null {
   if (!Array.isArray(value)) return null;
-  const items = value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+  const items = value.filter(
+    (item): item is string => typeof item === "string" && item.trim() !== "",
+  );
   return items.length > 0 ? `- ${label}: ${items.join(", ")}` : null;
 }
 

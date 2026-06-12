@@ -1,3 +1,4 @@
+import { htmlToReadableMarkdown } from "./httpPageExtract";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
 
 export interface DirectSourceFetchOptions {
@@ -41,7 +42,7 @@ export async function fetchLinearCareersJobs(
       company: "Linear",
       url: listing.url,
       sourceUrl: LINEAR_CAREERS_URL,
-      description: extractReadablePageText(detailHtml),
+      description: extractLinearJobMarkdown(detailHtml, listing.url),
       location: listing.location,
       employmentType: null,
       compensation: null,
@@ -72,7 +73,7 @@ export function parseLinearCareersListings(html: string): LinearListing[] {
     const body = match[3];
     if (!path || !body || seen.has(path)) continue;
     const text = cleanText(body);
-    if (!text || !text.includes("Learn more")) continue;
+    if (!text.includes("Learn more")) continue;
     const withoutCta = text.replace(/\s*Learn more\s*(?:→|->)?\s*$/i, "").trim();
     const listing = splitLinearListingText(withoutCta);
     if (!listing.title) continue;
@@ -88,10 +89,16 @@ export function parseLinearCareersListings(html: string): LinearListing[] {
 
 function isRelevantLinearRole(listing: LinearListing): boolean {
   const title = listing.title.toLowerCase();
-  if (/\b(?:designer|marketing|product manager|counsel|accounting|sales|account executive)\b/.test(title)) {
+  if (
+    /\b(?:designer|marketing|product manager|counsel|accounting|sales|account executive)\b/.test(
+      title,
+    )
+  ) {
     return false;
   }
-  return /\b(?:ai|engineer|engineering|solutions)\b/i.test(`${listing.title} ${listing.location ?? ""}`);
+  return /\b(?:ai|engineer|engineering|solutions)\b/i.test(
+    `${listing.title} ${listing.location ?? ""}`,
+  );
 }
 
 function splitLinearListingText(text: string): { title: string; location: string | null } {
@@ -118,11 +125,7 @@ function splitLinearListingText(text: string): { title: string; location: string
   return { title: text.trim(), location: null };
 }
 
-async function requestText(
-  fetcher: typeof fetch,
-  url: string,
-  timeoutMs: number,
-): Promise<string> {
+async function requestText(fetcher: typeof fetch, url: string, timeoutMs: number): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(`Direct source request timed out after ${timeoutMs}ms`),
@@ -144,17 +147,19 @@ async function requestText(
   }
 }
 
-function extractReadablePageText(html: string): string {
-  return cleanText(
-    html
-      .replace(/<script\b[^>]*>.*?<\/script>/gis, " ")
-      .replace(/<style\b[^>]*>.*?<\/style>/gis, " ")
-      .replace(/<noscript\b[^>]*>.*?<\/noscript>/gis, " "),
-  ).slice(0, 24000);
+export function extractLinearJobMarkdown(html: string, url: string): string {
+  return htmlToReadableMarkdown(html, url, {
+    contentSelectors: ["main", '[role="main"]', "article"],
+  }).slice(0, 24000);
 }
 
 function cleanText(html: string): string {
-  return decodeHtml(html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+  return decodeHtml(
+    html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 function decodeHtml(value: string): string {

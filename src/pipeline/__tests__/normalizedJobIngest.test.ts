@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { normalizedJobMarkdown, normalizeExternalJobPayload } from "../normalizedJobIngest";
+import {
+  captureQualityFlags,
+  normalizedJobMarkdown,
+  normalizeExternalJobPayload,
+} from "../normalizedJobIngest";
 
 describe("normalized job ingest", () => {
   test("normalizes old JobSpy snapshot roles", () => {
@@ -121,5 +125,16 @@ describe("normalized job ingest", () => {
     expect(() => normalizeExternalJobPayload({ roles: [{ title: "No URL" }] }, "jobspy")).toThrow(
       'Invalid jobspy job at index 0: External job "No URL" is missing a URL',
     );
+  });
+
+  test("flags low-fidelity captured descriptions", () => {
+    const flags = captureQualityFlags(
+      { detail_status: "error" },
+      `${"This is one very long flattened role body. ".repeat(40)} Skip to content Sign up`,
+    );
+
+    expect(flags).toContain("single_line_long_body");
+    expect(flags).toContain("nav_or_cookie_boilerplate");
+    expect(flags).toContain("detail_fetch_error");
   });
 });

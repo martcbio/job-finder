@@ -85,6 +85,9 @@ export interface JobSummary {
     firstSeenAt: string;
     lastSeenAt: string;
     postedAt: string | null;
+    captureQualityFlags: string[];
+    markdownLineCount: number;
+    markdownBulletCount: number;
   };
   ranking: {
     tier: number | null;

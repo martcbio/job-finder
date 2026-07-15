@@ -3,6 +3,7 @@ import type { ReviewQueueRow } from "../../types";
 import {
   deriveEmploymentType,
   deriveItRelevance,
+  facetCounts,
   filterQueueJobs,
   toQueueJobView,
 } from "../reviewQueueModel";
@@ -81,6 +82,41 @@ describe("deriveEmploymentType", () => {
 
   test("returns unknown without a type signal", () => {
     expect(deriveEmploymentType(job("Backend Developer"))).toBe("unknown");
+  });
+});
+
+describe("IR35 employment-type invariant", () => {
+  const permanentConflict = toQueueJobView(
+    job(
+      "AI Architect",
+      "London - £85k - £90k per annum + Bonus, Permanent\nRecruiter terms mention outside IR35",
+    ),
+  );
+  const genuineContract = toQueueJobView(
+    job("AI Architect Contract", "London - £600 per day outside IR35"),
+  );
+  const negativeMetadataPermanent = toQueueJobView(
+    job("AI Architect", "- Inside IR35: no\n- Outside IR35: no\nPermanent £90k salary"),
+  );
+
+  test("suppresses IR35 when strong permanent evidence conflicts", () => {
+    expect(permanentConflict.employmentType).toBe("permanent");
+    expect(permanentConflict.ir35).toBe("unknown");
+    expect(permanentConflict.signalConflict).toBe("ir35_on_permanent");
+    expect(negativeMetadataPermanent.signalConflict).toBeNull();
+  });
+
+  test("keeps explicit IR35 contract signals", () => {
+    expect(genuineContract.employmentType).toBe("contract");
+    expect(genuineContract.ir35).toBe("outside");
+    expect(genuineContract.signalConflict).toBeNull();
+  });
+
+  test("excludes permanent conflicts from IR35 quick filters and facet buckets", () => {
+    const views = [permanentConflict, genuineContract];
+
+    expect(filterQueueJobs(views, "", [], ["outside"])).toEqual([genuineContract]);
+    expect(facetCounts(views, "ir35")).toEqual([["Outside IR35", 1]]);
   });
 });
 

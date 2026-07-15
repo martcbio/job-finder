@@ -1,5 +1,9 @@
 import { extractLocation } from "../../../src/pipeline/fastRefresh/utils";
-import { isInsideIr35, parseIr35Metadata } from "../../../src/pipeline/ir35Signals";
+import {
+  isInsideIr35,
+  parseIr35Metadata,
+  stripIr35MetadataLines,
+} from "../../../src/pipeline/ir35Signals";
 import { screenJob } from "../../../src/pipeline/jobScreening";
 import type { ReviewQueueRow } from "./types";
 
@@ -91,7 +95,7 @@ export function deriveIr35Status(job: ReviewQueueRow): Ir35Status {
   if (labels.has("inside_ir35")) return "inside";
   if (labels.has("outside_ir35")) return "outside";
   if (isInsideIr35(text)) return "inside";
-  if (/\boutside[\s-]*ir35\b/i.test(text)) return "outside";
+  if (/\boutside[\s-]*ir35\b/i.test(stripIr35MetadataLines(text))) return "outside";
   return "unknown";
 }
 

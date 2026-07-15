@@ -55,6 +55,7 @@ export interface QueueJobView {
   postedAt: Date;
   postedAgeDays: number;
   ir35: "inside" | "outside" | "unknown";
+  signalConflict: "ir35_on_permanent" | null;
   itRelevance: ItRelevance;
   employmentType: EmploymentType;
   searchText: string;
@@ -141,12 +142,13 @@ const NON_IT_SUPPORTING_PATTERNS = [
 
 const CONTRACT_PATTERNS = [
   /\bcontract(?:or|ing)?\b/i,
-  /\b(?:inside|outside|in[ -]?scope of)\s*ir3[45]\b/i,
   /\bday rate\b/i,
   /(?:£|\$|€)\s?\d[\d,.]*\s*(?:\/|per\s+)(?:day|daily)\b/i,
   /\b\d[\d,.]*\s*(?:pd|p\/d)\b/i,
   /\bfixed[ -]?term\b/i,
 ] as const;
+
+const IR35_PATTERN = /\b(?:inside|outside|in[ -]?scope of)\s*ir3[45]\b/i;
 
 const PERMANENT_PATTERNS = [
   /\bpermanent\b/i,
@@ -213,12 +215,13 @@ export function deriveEmploymentType(job: ReviewQueueRow): EmploymentType {
   if (/\bcontract\b/i.test(employmentMetadata)) return "contract";
   if (/\b(?:permanent|perm|full[ -]?time)\b/i.test(employmentMetadata)) return "permanent";
 
-  const ir35Metadata = parseIr35Metadata(all);
-  if (ir35Metadata.inside === true || ir35Metadata.outside === true) return "contract";
-
   const body = stripIr35MetadataLines(all);
   if (matchesAny(body, CONTRACT_PATTERNS)) return "contract";
   if (matchesAny(all, PERMANENT_PATTERNS)) return "permanent";
+
+  const ir35Metadata = parseIr35Metadata(all);
+  if (ir35Metadata.inside === true || ir35Metadata.outside === true) return "contract";
+  if (IR35_PATTERN.test(body)) return "contract";
   return "unknown";
 }
 
@@ -288,6 +291,12 @@ function normalizedLocation(raw: string | null): string {
 }
 
 export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobView {
+  const employmentType = deriveEmploymentType(job);
+  const detectedIr35 = deriveIr35Status(job);
+  const signalConflict =
+    employmentType === "permanent" && detectedIr35 !== "unknown"
+      ? ("ir35_on_permanent" as const)
+      : null;
   const signals = deriveJobSignals(job);
   const postedAt = derivePostedAt(job);
   const role = signals.categoryShort ?? (job.category ? titleCase(job.category) : "—");
@@ -298,9 +307,8 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
   const tech = job.classification_labels.map((label) => titleCase(label.label));
   const salary = deriveSalary(job.description_sample);
   const confidence = deriveConfidence(job.classification_confidence);
-  const ir35 = deriveIr35Status(job);
+  const ir35 = employmentType === "contract" ? detectedIr35 : "unknown";
   const itRelevance = deriveItRelevance(job);
-  const employmentType = deriveEmploymentType(job);
   const postedAgeDays = Math.max(0, (now - postedAt.getTime()) / 86_400_000);
   const searchText = [
     job.title,
@@ -329,6 +337,7 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
     postedAt,
     postedAgeDays,
     ir35,
+    signalConflict,
     itRelevance,
     employmentType,
     searchText,
@@ -353,10 +362,12 @@ function facetValues(job: QueueJobView, facet: FacetId): string[] {
     if (job.postedAgeDays <= 30) return ["Past 30 days"];
     return ["Older"];
   }
-  if (facet === "ir35")
+  if (facet === "ir35") {
+    if (job.employmentType !== "contract") return [];
     return [
       job.ir35 === "outside" ? "Outside IR35" : job.ir35 === "inside" ? "Inside IR35" : "Unknown",
     ];
+  }
   return [job[facet]];
 }
 

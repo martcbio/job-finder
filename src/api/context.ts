@@ -6,12 +6,21 @@ export type FastRefreshRunner = (
   options: Partial<FastRefreshOptions>,
 ) => Promise<FastRefreshResult>;
 
+export interface CloudConfig {
+  supabaseUrl?: string;
+  supabaseServiceKey?: string;
+}
+
+export type ApiFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
 export interface ApiContext {
   query: ApiQuery;
   fastRefresh: FastRefreshRunner;
   env: NodeJS.ProcessEnv;
   now: () => Date;
   allowOrigins: string[];
+  cloudConfig: CloudConfig;
+  fetch: ApiFetch;
 }
 
 export interface ApiRoute {
@@ -27,4 +36,6 @@ export interface JobFinderApiOptions {
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
   allowOrigins?: string[];
+  cloudConfig?: CloudConfig;
+  fetch?: ApiFetch;
 }

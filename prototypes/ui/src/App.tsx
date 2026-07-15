@@ -3,6 +3,7 @@ import { LiveBanner } from "./components/shared";
 import { PROTOTYPES } from "./mockData";
 import BentoCommandPrototype from "./prototypes/BentoCommandPrototype";
 import CockpitPrototype from "./prototypes/CockpitPrototype";
+import CloudLanePrototype from "./prototypes/CloudLanePrototype";
 import SwipeTriagePrototype from "./prototypes/SwipeTriagePrototype";
 import TimelinePrototype from "./prototypes/TimelinePrototype";
 import type { PrototypeId } from "./types";
@@ -82,6 +83,7 @@ export default function App() {
             onReloadFromDb={() => void data.grabLatest()}
           />
         )}
+        {active === "cloud" && <CloudLanePrototype />}
         {active === "swipe" && (
           <SwipeTriagePrototype
             queue={data.visibleQueue}

@@ -22,17 +22,17 @@ import {
   type RecordedApplicationRow,
 } from "../pipeline/jobApplications";
 import {
-  buildReviewDuplicateCandidateSql,
-  type DuplicateCandidateReviewRow,
-} from "../pipeline/jobDuplicates";
-import { buildJobsExportSql, type JobExportRow } from "../pipeline/jobExport";
-import {
   buildJobDetailSql,
   buildJobFullTextSql,
   type JobDetailRow,
   type JobFullTextRow,
   jobDetailToSummary,
 } from "../pipeline/jobDetail";
+import {
+  buildReviewDuplicateCandidateSql,
+  type DuplicateCandidateReviewRow,
+} from "../pipeline/jobDuplicates";
+import { buildJobsExportSql, type JobExportRow } from "../pipeline/jobExport";
 import {
   buildReviewEventsSql,
   buildReviewTransitionSql,
@@ -58,19 +58,20 @@ import {
 } from "../pipeline/skillClusters";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { SOURCE_LANES } from "../pipeline/sourceLanes";
+import { listCloudOpenings, listCloudRuns, parseCloudSince } from "./cloudOpenings";
 import type { ApiContext, ApiRoute } from "./context";
-import { ApiError } from "./errors";
-import { jsonResponse } from "./errors";
+import { ApiError, jsonResponse } from "./errors";
 import { matchPath, pathParam } from "./http";
 import { buildMeta, readHealth } from "./meta";
-import { planOrStartPipeline, type PipelineRunRequest } from "./pipelineApi";
 import {
   nullableApplicationStatus,
+  nullablePositiveInt,
   nullableReviewState,
+  nullableString,
   optionalActor,
   optionalApplicationStatus,
   positiveIntParam,
-  nullablePositiveInt,
+  positiveIntValue,
   readJsonObject,
   requiredCvReviewStatus,
   requiredDuplicateReviewState,
@@ -78,17 +79,16 @@ import {
   requiredString,
   reviewStatesFromSearch,
   sourceIdsFromSearch,
-  nullableString,
   stringList,
-  positiveIntValue,
 } from "./parse";
-import { fastRefreshOptionsFromBody, savedSweepInputFromBody } from "./requestBodies";
+import { type PipelineRunRequest, planOrStartPipeline } from "./pipelineApi";
 import {
   fastRefreshSourceId,
   listQueueRefreshSources,
   listRefreshableSourceIds,
   uniqueFastRefreshSources,
 } from "./refreshApi";
+import { fastRefreshOptionsFromBody, savedSweepInputFromBody } from "./requestBodies";
 
 export async function handleApiRequest(
   request: Request,
@@ -124,6 +124,19 @@ export async function handleApiRequest(
         attemptStatuses: SOURCE_ATTEMPT_STATUSES,
       },
     });
+  }
+
+  if (route.method === "GET" && route.path === "/api/cloud/openings") {
+    const data = await listCloudOpenings(context, {
+      limit: positiveIntParam(route.search, "limit", 100, 500),
+      since: parseCloudSince(route.search.get("since")),
+    });
+    return jsonResponse({ ok: true, data });
+  }
+
+  if (route.method === "GET" && route.path === "/api/cloud/runs") {
+    const data = await listCloudRuns(context, positiveIntParam(route.search, "limit", 30, 500));
+    return jsonResponse({ ok: true, data });
   }
 
   if (route.method === "GET" && route.path === "/api/jobs") {

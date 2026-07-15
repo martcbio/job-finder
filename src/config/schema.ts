@@ -6,6 +6,11 @@ const OptionalUrlEnv = z.preprocess(
   z.string().url().optional(),
 );
 
+const OptionalStringEnv = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const ConfigSchema = z.object({
   keywords: z.array(z.string()),
   domains: z.array(z.string()),
@@ -16,6 +21,8 @@ const ConfigSchema = z.object({
   openrouterApiKey: z.string().default(""),
   llmModel: z.string().default("google/gemini-2.5-flash"),
   slackWebhookUrl: OptionalUrlEnv,
+  supabaseUrl: OptionalUrlEnv,
+  supabaseServiceKey: OptionalStringEnv,
   enableAtsEnrichment: z.boolean().default(true),
 });
 
@@ -32,6 +39,8 @@ export const config: Readonly<JobFinderConfig> = Object.freeze(
     openrouterApiKey: process.env.OPENROUTER_API_KEY,
     llmModel: process.env.LLM_MODEL,
     slackWebhookUrl: process.env.SLACK_WEBHOOK_URL,
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY,
     enableAtsEnrichment: process.env.ENABLE_ATS_ENRICHMENT
       ? process.env.ENABLE_ATS_ENRICHMENT === "true"
       : undefined,

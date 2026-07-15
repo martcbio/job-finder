@@ -12,6 +12,12 @@ export const PROTOTYPES = [
     accent: "#22c55e",
   },
   {
+    id: "cloud",
+    name: "Cloud Lane",
+    tagline: "Modal scanner openings and run health",
+    accent: "#a78bfa",
+  },
+  {
     id: "swipe",
     name: "Swipe Triage",
     tagline: "Card stack for fast human review",

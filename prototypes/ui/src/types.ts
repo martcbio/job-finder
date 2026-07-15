@@ -116,7 +116,44 @@ export interface ApiEnvelope<T> {
   error?: { code: string; message: string };
 }
 
-export type PrototypeId = "cockpit" | "swipe" | "bento" | "timeline";
+export interface CloudOpeningRow {
+  org: string;
+  ats: "ashby" | "greenhouse" | "lever";
+  external_id: string;
+  title: string | null;
+  company: string;
+  location: string;
+  locations: string[];
+  url: string;
+  posted_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  first_seen_run_id: string;
+  last_seen_run_id: string;
+}
+
+export interface CloudRunRow {
+  run_id: string;
+  run_date: string;
+  completed_at: string;
+  health: "complete" | "degraded" | "failed";
+  matched_openings_count: number;
+  substrate: "modal" | "mac";
+}
+
+export type CloudUnavailableCode =
+  | "cloud_not_configured"
+  | "cloud_schema_not_exposed"
+  | "cloud_upstream_error";
+
+export type CloudRowsResult<T> =
+  | { status: "available"; rows: T[] }
+  | {
+      status: "cloud_unavailable";
+      reason: { code: CloudUnavailableCode; message: string; upstreamStatus?: number };
+    };
+
+export type PrototypeId = "cockpit" | "cloud" | "swipe" | "bento" | "timeline";
 
 export interface PrototypeInfo {
   id: PrototypeId;

@@ -1,0 +1,42 @@
+{
+  "anthropic": {
+    "ats": "greenhouse",
+    "company": "Anthropic"
+  },
+  "openai": {
+    "ats": "ashby",
+    "company": "OpenAI"
+  },
+  "cursor": {
+    "ats": null,
+    "company": "Cursor / Anysphere"
+  },
+  "cognition": {
+    "ats": "ashby",
+    "company": "Cognition"
+  },
+  "databricks": {
+    "ats": null,
+    "company": "Databricks"
+  },
+  "Sierra": {
+    "ats": "ashby",
+    "company": "Sierra"
+  },
+  "imbue": {
+    "ats": "greenhouse",
+    "company": "Imbue"
+  },
+  "cohere": {
+    "ats": "ashby",
+    "company": "Cohere"
+  },
+  "mistral": {
+    "ats": "lever",
+    "company": "Mistral AI"
+  },
+  "perplexity": {
+    "ats": null,
+    "company": "Perplexity"
+  }
+}

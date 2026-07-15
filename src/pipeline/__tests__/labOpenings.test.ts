@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AtsOrgAcquisition, AtsOrgJob } from "../../services/ats/types";
 import { exitCodeForRecordStatus } from "../labBoards";
-import { createLabOpeningsModule } from "../labOpenings";
+import { createLabOpeningsModule, resolveLabOpeningsPaths } from "../labOpenings";
 
 const temporaryDirectories: string[] = [];
 
@@ -74,6 +74,22 @@ function clock(start = "2026-07-12T08:15:00.000Z"): () => Date {
 }
 
 describe("lab openings freshness", () => {
+  test("resolves cloud paths from env without changing local defaults", () => {
+    expect(resolveLabOpeningsPaths({})).toEqual({
+      marketDir: "/Users/mcb/Claudelocal/careers/market",
+      projectDir: "/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party",
+    });
+    expect(
+      resolveLabOpeningsPaths({
+        CAREERS_MARKET_DIR: "/scratch/market",
+        CAREERS_PROJECT_DIR: "/opt/job-finder",
+      }),
+    ).toEqual({
+      marketDir: "/scratch/market",
+      projectDir: "/opt/job-finder",
+    });
+  });
+
   test("fails when the target configuration is missing", async () => {
     const marketDir = await temporaryMarket();
     const module = createLabOpeningsModule({ marketDir });

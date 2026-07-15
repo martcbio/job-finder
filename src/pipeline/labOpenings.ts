@@ -175,6 +175,15 @@ export interface LabOpeningsModule {
   inspect(ids?: ProjectionId[]): Promise<FreshnessReport>;
 }
 
+export function resolveLabOpeningsPaths(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { marketDir: string; projectDir: string } {
+  return {
+    marketDir: env.CAREERS_MARKET_DIR ?? DEFAULT_MARKET_DIR,
+    projectDir: env.CAREERS_PROJECT_DIR ?? DEFAULT_PROJECT_DIR,
+  };
+}
+
 function errorCode(error: unknown): string | undefined {
   if (error && typeof error === "object" && "code" in error) {
     return String(error.code);
@@ -623,8 +632,9 @@ async function publishLegacyAttempt(input: {
 }
 
 export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}): LabOpeningsModule {
-  const marketDir = options.marketDir ?? DEFAULT_MARKET_DIR;
-  const projectDir = options.projectDir ?? DEFAULT_PROJECT_DIR;
+  const paths = resolveLabOpeningsPaths();
+  const marketDir = options.marketDir ?? paths.marketDir;
+  const projectDir = options.projectDir ?? paths.projectDir;
   const now = options.now ?? (() => new Date());
   const makeRunId = options.makeRunId ?? defaultRunId;
   const listers =

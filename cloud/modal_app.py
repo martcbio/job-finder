@@ -478,7 +478,9 @@ if modal is not None:
         .run_commands(
             "curl -fsSL https://bun.sh/install | bash",
             "ln -sf /root/.bun/bin/bun /usr/local/bin/bun",
-            f"cd {REPO_ROOT} && bun install --frozen-lockfile",
+            # --ignore-scripts: the repo's prepare script (lefthook install) needs git,
+            # which the slim image lacks; commit hooks have no role in the container.
+            f"cd {REPO_ROOT} && bun install --frozen-lockfile --ignore-scripts",
         )
     )
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { clearAshbyCache, fetchAshbyJob, parseAshbyUrl } from "../ashby";
+import { clearAshbyCache, fetchAshbyJob, listOrgJobs, parseAshbyUrl } from "../ashby";
 import type { Fetcher } from "../types";
 
 import ledgerFixture from "./fixtures/ashby-ledger-org.json";
@@ -153,6 +153,26 @@ describe("fetchAshbyJob", () => {
       locations: ["Remote"],
       workplaceType: null,
       country: null,
+    });
+  });
+});
+
+describe("listOrgJobs", () => {
+  test("lists normalized jobs from an Ashby org fixture", async () => {
+    const result = await listOrgJobs("ledger", jsonFetcher(ledgerFixture));
+
+    expect(result.status).toBe("success");
+    if (result.status === "failure") throw new Error("expected Ashby acquisition to succeed");
+    expect(result.jobs.length).toBeGreaterThan(1);
+    expect(result.jobs[0]).toMatchObject({
+      source: "ashby",
+      org: "ledger",
+      id: "4fabe068-ce5b-4962-abd5-1d9dbb7c63f8",
+      title: "Tax Assistant Intern",
+      location: "Paris, France",
+      locations: ["Paris, France"],
+      url: "https://jobs.ashbyhq.com/ledger/4fabe068-ce5b-4962-abd5-1d9dbb7c63f8",
+      postedAt: "2026-03-16T14:08:33.399+00:00",
     });
   });
 });

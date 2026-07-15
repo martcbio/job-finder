@@ -1,7 +1,9 @@
 import { logger } from "../../logger";
+import { fetchAtsJson, fetchAtsResponse } from "./request";
 import {
   type AshbyOrgResponse,
   type AtsJobData,
+  type AtsOrgAcquisition,
   ashbyOrgResponseSchema,
   type Fetcher,
   type WorkplaceType,
@@ -54,7 +56,9 @@ async function fetchOrg(org: string, fetcher: Fetcher): Promise<AshbyOrgResponse
 
   let res: Response;
   try {
-    res = await fetcher(apiUrl);
+    res = await fetchAtsResponse(apiUrl, fetcher, (attempt, err) => {
+      log.warn({ attempt, err, org }, "ashby org retry");
+    });
   } catch (err) {
     log.warn({ err, org }, "ashby fetch failed");
     return null;
@@ -81,6 +85,47 @@ async function fetchOrg(org: string, fetcher: Fetcher): Promise<AshbyOrgResponse
 
   orgCache.set(org, result.data);
   return result.data;
+}
+
+export async function listOrgJobs(
+  org: string,
+  fetcher: Fetcher = fetch,
+): Promise<AtsOrgAcquisition> {
+  const endpoint = `https://api.ashbyhq.com/posting-api/job-board/${org}`;
+  const acquisition = await fetchAtsJson(
+    endpoint,
+    ashbyOrgResponseSchema,
+    fetcher,
+    (attempt, err) => {
+      log.warn({ attempt, err, org }, "ashby org retry");
+    },
+  );
+  if (acquisition.status === "failure") return acquisition;
+
+  return {
+    status: "success",
+    endpoint: acquisition.endpoint,
+    attempts: acquisition.attempts,
+    durationMs: acquisition.durationMs,
+    jobs: acquisition.data.jobs.map((job) => {
+      const primary = job.location ?? "";
+      const secondary = (job.secondaryLocations ?? []).map((item) => item.location);
+      const locations =
+        primary && !secondary.includes(primary) ? [primary, ...secondary] : secondary;
+
+      return {
+        source: "ashby",
+        org,
+        id: job.id,
+        title: job.title ?? null,
+        location: primary,
+        locations,
+        url: job.jobUrl ?? `https://jobs.ashbyhq.com/${org}/${job.id}`,
+        postedAt: job.publishedAt ?? null,
+        raw: job,
+      };
+    }),
+  };
 }
 
 export async function fetchAshbyJob(

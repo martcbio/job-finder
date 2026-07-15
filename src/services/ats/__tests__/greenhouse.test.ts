@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fetchGreenhouseJob, parseGreenhouseUrl } from "../greenhouse";
+import { fetchGreenhouseJob, listOrgJobs, parseGreenhouseUrl } from "../greenhouse";
 import type { Fetcher } from "../types";
 
 import openupFixture from "./fixtures/greenhouse-openup-senior-ai-engineer.json";
@@ -129,5 +129,32 @@ describe("fetchGreenhouseJob", () => {
       jsonFetcher({ location: { name: "x" } }),
     );
     expect(result).toBeNull();
+  });
+});
+
+describe("listOrgJobs", () => {
+  test("lists normalized jobs from a Greenhouse board fixture", async () => {
+    const result = await listOrgJobs(
+      "openup",
+      jsonFetcher({
+        jobs: [openupFixture],
+      }),
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status === "failure") throw new Error("expected Greenhouse acquisition to succeed");
+    expect(result.jobs).toEqual([
+      expect.objectContaining({
+        source: "greenhouse",
+        org: "openup",
+        id: "4847917101",
+        title: "Senior AI Engineer",
+        company: "OpenUp",
+        location: "Amsterdam",
+        locations: ["Amsterdam", "Amsterdam, North Holland, Netherlands"],
+        url: "https://boards.eu.greenhouse.io/openup/jobs/4847917101?gh_jid=4847917101",
+        postedAt: "2026-04-22T11:16:54-04:00",
+      }),
+    ]);
   });
 });

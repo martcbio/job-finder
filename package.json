@@ -39,6 +39,7 @@
     "jobs:export": "bun scripts/export-jobs.ts",
     "jobs:blog-lint": "bun scripts/job-market-blog-lint.ts",
     "jobs:skill-clusters": "bun scripts/skill-clusters.ts",
+    "labs:openings": "bun src/pipeline/labBoards.ts",
     "jobs:ingest-pages": "bun scripts/ingest-job-pages.ts",
     "jobs:import-normalized": "bun scripts/import-normalized-jobs.ts",
     "jobs:fast-refresh": "bun scripts/fast-refresh.ts",

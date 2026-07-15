@@ -1,5 +1,13 @@
 import { logger } from "../../logger";
-import { type AtsJobData, type Fetcher, leverJobSchema, type WorkplaceType } from "./types";
+import { fetchAtsJson } from "./request";
+import {
+  type AtsJobData,
+  type AtsOrgAcquisition,
+  type Fetcher,
+  leverJobSchema,
+  leverListResponseSchema,
+  type WorkplaceType,
+} from "./types";
 
 const log = logger.child({ component: "ats/lever" });
 
@@ -81,5 +89,47 @@ export async function fetchLeverJob(
     workplaceType: normalizeWorkplaceType(job.workplaceType),
     country: job.country ?? null,
     descriptionPlain: job.descriptionPlain ?? job.descriptionBodyPlain ?? null,
+  };
+}
+
+export async function listOrgJobs(
+  org: string,
+  fetcher: Fetcher = fetch,
+): Promise<AtsOrgAcquisition> {
+  const endpoint = `https://api.lever.co/v0/postings/${org}`;
+  const acquisition = await fetchAtsJson(
+    endpoint,
+    leverListResponseSchema,
+    fetcher,
+    (attempt, err) => {
+      log.warn({ attempt, err, org }, "lever org retry");
+    },
+  );
+  if (acquisition.status === "failure") return acquisition;
+
+  return {
+    status: "success",
+    endpoint: acquisition.endpoint,
+    attempts: acquisition.attempts,
+    durationMs: acquisition.durationMs,
+    jobs: acquisition.data.map((job) => {
+      const primary = job.categories?.location ?? "";
+      const all = job.categories?.allLocations ?? [];
+      const locations = primary && !all.includes(primary) ? [primary, ...all] : all;
+      const stableId = job.id || job.hostedUrl;
+      if (!stableId) throw new Error("Lever list entry passed validation without a stable identity");
+
+      return {
+        source: "lever",
+        org,
+        id: stableId,
+        title: job.text ?? null,
+        location: primary,
+        locations,
+        url: job.hostedUrl ?? `https://jobs.lever.co/${org}/${stableId}`,
+        postedAt: job.createdAt ? new Date(job.createdAt).toISOString() : null,
+        raw: job,
+      };
+    }),
   };
 }

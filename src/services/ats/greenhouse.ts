@@ -1,5 +1,12 @@
 import { logger } from "../../logger";
-import { type AtsJobData, type Fetcher, greenhouseJobSchema } from "./types";
+import { fetchAtsJson } from "./request";
+import {
+  type AtsJobData,
+  type AtsOrgAcquisition,
+  type Fetcher,
+  greenhouseJobSchema,
+  greenhouseListResponseSchema,
+} from "./types";
 
 const log = logger.child({ component: "ats/greenhouse" });
 
@@ -119,5 +126,51 @@ export async function fetchGreenhouseJob(
     workplaceType: null,
     country: extractCountry(job.offices?.[0]?.location),
     descriptionPlain: htmlToPlainText(job.content),
+  };
+}
+
+export async function listOrgJobs(
+  org: string,
+  fetcher: Fetcher = fetch,
+): Promise<AtsOrgAcquisition> {
+  const endpoint = `https://boards-api.greenhouse.io/v1/boards/${org}/jobs`;
+  const acquisition = await fetchAtsJson(
+    endpoint,
+    greenhouseListResponseSchema,
+    fetcher,
+    (attempt, err) => {
+      log.warn({ attempt, err, org }, "greenhouse org retry");
+    },
+  );
+  if (acquisition.status === "failure") return acquisition;
+
+  return {
+    status: "success",
+    endpoint: acquisition.endpoint,
+    attempts: acquisition.attempts,
+    durationMs: acquisition.durationMs,
+    jobs: acquisition.data.jobs.map((job) => {
+      const primary = job.location?.name ?? "";
+      const officeLocations = (job.offices ?? [])
+        .map((office) => office.location)
+        .filter((location): location is string => !!location);
+      const locations =
+        primary && !officeLocations.includes(primary)
+          ? [primary, ...officeLocations]
+          : officeLocations;
+
+      return {
+        source: "greenhouse",
+        org,
+        id: String(job.id),
+        title: job.title ?? null,
+        company: job.company_name ?? null,
+        location: primary,
+        locations,
+        url: job.absolute_url ?? `https://boards.greenhouse.io/${org}/jobs/${job.id}`,
+        postedAt: job.first_published ?? null,
+        raw: job,
+      };
+    }),
   };
 }

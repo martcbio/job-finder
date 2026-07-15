@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fetchLeverJob, parseLeverUrl } from "../lever";
+import { fetchLeverJob, listOrgJobs, parseLeverUrl } from "../lever";
 import type { Fetcher } from "../types";
 
 import yunoFixture from "./fixtures/lever-yuno-platform-engineer-ai.json";
@@ -132,5 +132,50 @@ describe("fetchLeverJob", () => {
       workplaceType: "Remote",
       country: "US",
     });
+  });
+});
+
+describe("listOrgJobs", () => {
+  test("rejects a board entry without a stable id or hosted URL", async () => {
+    const result = await listOrgJobs("acme", jsonFetcher([{ text: "AI Engineer" }]));
+
+    expect(result.status).toBe("failure");
+    if (result.status === "success") throw new Error("expected malformed Lever board to fail");
+    expect(result.failure.kind).toBe("schema");
+  });
+
+  test("lists normalized jobs from a Lever postings fixture", async () => {
+    const result = await listOrgJobs("yuno", jsonFetcher([yunoFixture]));
+
+    expect(result.status).toBe("success");
+    if (result.status === "failure") throw new Error("expected Lever acquisition to succeed");
+    expect(result.jobs).toEqual([
+      expect.objectContaining({
+        source: "lever",
+        org: "yuno",
+        id: "33309adb-efb0-414c-9e9a-da13435a0242",
+        title: "Senior Platform Engineer — AI Agent Infrastructure",
+        location: "Argentina",
+        locations: [
+          "Argentina",
+          "Bogota",
+          "Chile",
+          "Mexico",
+          "Colombia",
+          "Buenos Aires",
+          "Europe",
+          "Lima",
+          "Paraguay",
+          "Spain",
+          "Amsterdam",
+          "Belgium",
+          "Brazil",
+          "Germany",
+          "Italy",
+        ],
+        url: "https://jobs.lever.co/yuno/33309adb-efb0-414c-9e9a-da13435a0242",
+        postedAt: "2026-04-23T21:53:09.365Z",
+      }),
+    ]);
   });
 });

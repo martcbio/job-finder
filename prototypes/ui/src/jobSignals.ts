@@ -1,6 +1,6 @@
-import { screenJob } from "../../../src/pipeline/jobScreening";
 import { extractLocation } from "../../../src/pipeline/fastRefresh/utils";
-import { isInsideIr35 } from "../../../src/pipeline/ir35Signals";
+import { isInsideIr35, parseIr35Metadata } from "../../../src/pipeline/ir35Signals";
+import { screenJob } from "../../../src/pipeline/jobScreening";
 import type { ReviewQueueRow } from "./types";
 
 export interface JobListingSignals {
@@ -10,6 +10,8 @@ export interface JobListingSignals {
   categoryShort: string | null;
   chips: string[];
 }
+
+export type Ir35Status = "inside" | "outside" | "unknown";
 
 const CATEGORY_SHORT: Record<string, string> = {
   agentic_engineer: "Agentic",
@@ -41,12 +43,9 @@ export function deriveJobSignals(job: ReviewQueueRow): JobListingSignals {
     labels: job.classification_labels,
   });
 
-  const location =
-    extractLocation(null, job.description_sample) ??
-    extractLocationFromText(text);
+  const location = extractLocation(null, job.description_sample) ?? extractLocationFromText(text);
 
-  const insideIr35 =
-    screening.reasons.some((r) => r.code === "inside_ir35") || isInsideIr35(text);
+  const insideIr35 = deriveIr35Status(job) === "inside";
 
   const workplace = inferWorkplaceLabel(screening, text, insideIr35);
   const categoryShort =
@@ -82,6 +81,20 @@ export function deriveJobSignals(job: ReviewQueueRow): JobListingSignals {
   };
 }
 
+export function deriveIr35Status(job: ReviewQueueRow): Ir35Status {
+  const text = [job.title, job.company_hint ?? "", job.description_sample ?? ""].join("\n");
+  const metadata = parseIr35Metadata(text);
+  if (metadata.inside === true) return "inside";
+  if (metadata.outside === true) return "outside";
+
+  const labels = new Set(job.classification_labels.map((label) => label.label.toLowerCase()));
+  if (labels.has("inside_ir35")) return "inside";
+  if (labels.has("outside_ir35")) return "outside";
+  if (isInsideIr35(text)) return "inside";
+  if (/\boutside[\s-]*ir35\b/i.test(text)) return "outside";
+  return "unknown";
+}
+
 function inferWorkplaceLabel(
   screening: ReturnType<typeof screenJob>,
   text: string,
@@ -94,7 +107,9 @@ function inferWorkplaceLabel(
   if (codes.has("country_local_remote")) return "Country-local remote";
   if (codes.has("switzerland_local_or_ambiguous")) return "CH-local / hybrid";
 
-  if (/\bworldwide\b|\bwork from anywhere\b|\bremote across europe\b|\bremote in europe\b/i.test(text)) {
+  if (
+    /\bworldwide\b|\bwork from anywhere\b|\bremote across europe\b|\bremote in europe\b/i.test(text)
+  ) {
     return "Remote (broad)";
   }
   if (/\bfully remote\b|\b100%\s*remote\b|\bremote-first\b/i.test(text)) {

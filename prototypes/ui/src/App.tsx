@@ -2,8 +2,8 @@ import { useState } from "react";
 import { LiveBanner } from "./components/shared";
 import { PROTOTYPES } from "./mockData";
 import BentoCommandPrototype from "./prototypes/BentoCommandPrototype";
-import CockpitPrototype from "./prototypes/CockpitPrototype";
 import CloudLanePrototype from "./prototypes/CloudLanePrototype";
+import CockpitPrototype from "./prototypes/CockpitPrototype";
 import SwipeTriagePrototype from "./prototypes/SwipeTriagePrototype";
 import TimelinePrototype from "./prototypes/TimelinePrototype";
 import type { PrototypeId } from "./types";
@@ -13,7 +13,20 @@ export default function App() {
   const [active, setActive] = useState<PrototypeId>("cockpit");
   const data = useJobFinderData();
 
-  const current = PROTOTYPES.find((p) => p.id === active)!;
+  const current = PROTOTYPES.find((p) => p.id === active) ?? PROTOTYPES[0];
+
+  if (active === "cockpit") {
+    return (
+      <CockpitPrototype
+        queue={data.visibleQueue}
+        live={data.live}
+        loadError={data.loadError}
+        lastUpdatedAt={data.lastUpdatedAt}
+        prototypes={PROTOTYPES}
+        onSelectPrototype={setActive}
+      />
+    );
+  }
 
   return (
     <div className="grain min-h-[100dvh]">
@@ -35,9 +48,7 @@ export default function App() {
                 type="button"
                 onClick={() => setActive(p.id)}
                 className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition active:scale-[0.97] ${
-                  active === p.id
-                    ? "text-white"
-                    : "text-zinc-500 hover:text-zinc-300"
+                  active === p.id ? "text-white" : "text-zinc-500 hover:text-zinc-300"
                 }`}
                 style={
                   active === p.id
@@ -53,36 +64,10 @@ export default function App() {
               </button>
             ))}
           </nav>
-
         </div>
       </div>
 
       <div key={active}>
-        {active === "cockpit" && (
-          <CockpitPrototype
-            queue={data.visibleQueue}
-            pipelineRuns={data.pipelineRuns}
-            lastRefreshRun={data.lastRefreshRun}
-            lastFastRefresh={data.lastFastRefresh}
-            live={data.live}
-            grabbing={data.grabbing}
-            refreshing={data.refreshing}
-            grabbingUi={data.grabbingUi}
-            refreshingUi={data.refreshingUi}
-            syncingUi={data.syncingUi}
-            refreshError={data.refreshError}
-            refreshFeedback={data.refreshFeedback}
-            lastGrabbedAt={data.lastGrabbedAt}
-            sourceCatalog={data.sourceCatalog}
-            enabledSourceIds={data.enabledSourceIds}
-            refreshTargets={data.refreshTargets}
-            onToggleSource={data.toggleSource}
-            onSelectAllSources={data.selectAllSources}
-            onDeselectAllSources={data.deselectAllSources}
-            onUpdateQueue={() => void data.runFastRefresh()}
-            onReloadFromDb={() => void data.grabLatest()}
-          />
-        )}
         {active === "cloud" && <CloudLanePrototype />}
         {active === "swipe" && (
           <SwipeTriagePrototype
@@ -110,8 +95,8 @@ export default function App() {
       <footer className="border-t border-white/5 px-6 py-4 text-center">
         <p className="text-[11px] text-zinc-600">
           Branch <code className="text-zinc-500">cursor-party-ui</code> ·{" "}
-          <code className="text-zinc-500">https://job-finder.test:8443</code> ·{" "}
-          {current.name} accent {current.accent}
+          <code className="text-zinc-500">https://job-finder.test:8443</code> · {current.name}{" "}
+          accent {current.accent}
         </p>
       </footer>
     </div>

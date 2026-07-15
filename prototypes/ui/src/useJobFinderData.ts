@@ -7,18 +7,16 @@ import {
   buildSourceCatalog,
   EVERGREEN_SOURCE_IDS,
   filterQueueBySources,
+  hasSavedSourceSelection,
   loadEnabledSourceIds,
-  refreshTargets,
+  type SourceCatalogEntry,
   saveEnabledSourceIds,
   toggleSourceId,
-  type SourceCatalogEntry,
 } from "./sourceFilters";
-import type { FastRefreshSourceInfo } from "./types";
-import { useDelayedBusy } from "./useDelayedBusy";
 import type {
   ApiEnvelope,
   ApiMeta,
-  FastRefreshResult,
+  FastRefreshSourceInfo,
   PipelineRunRow,
   RefreshRunRow,
   ReviewQueueRow,
@@ -73,9 +71,7 @@ function normalizeQueueRow(row: ReviewQueueRow): ReviewQueueRow {
 
 function normalizeSourceHealth(row: SourceHealthRow): SourceHealthRow {
   const rate =
-    typeof row.success_rate === "string"
-      ? Number.parseFloat(row.success_rate)
-      : row.success_rate;
+    typeof row.success_rate === "string" ? Number.parseFloat(row.success_rate) : row.success_rate;
   return {
     ...row,
     success_rate: Number.isFinite(rate) ? rate : 0,
@@ -91,11 +87,10 @@ function normalizePipelineRun(row: PipelineRunRow): PipelineRunRow {
   };
 }
 
-export type RefreshFeedbackKind = "idle" | "success" | "noop" | "error";
-
 const TRIAGE_STATES_PARAM =
   "ready_for_review,duplicate_candidate,new,needs_page_ingest,needs_classification";
 const EVERGREEN_STATES_PARAM = `${TRIAGE_STATES_PARAM},shortlisted`;
+const QUEUE_POLL_INTERVAL_MS = 60_000;
 
 export interface JobFinderData {
   queue: ReviewQueueRow[];
@@ -106,82 +101,53 @@ export interface JobFinderData {
   toggleSource: (sourceId: string) => void;
   selectAllSources: () => void;
   deselectAllSources: () => void;
-  /** Checked sources that Update queue will POST to /api/refresh/fast. */
-  refreshTargets: SourceCatalogEntry[];
   sourceHealth: SourceHealthRow[];
   pipelineRuns: PipelineRunRow[];
   lastRefreshRun: RefreshRunRow | null;
   meta: ApiMeta | null;
   live: boolean;
   loading: boolean;
-  grabbing: boolean;
-  refreshing: boolean;
-  /** Debounced — spinners/overlays only; buttons use grabbing/refreshing for disable */
-  syncingUi: boolean;
-  grabbingUi: boolean;
-  refreshingUi: boolean;
-  refreshError: string | null;
-  lastFastRefresh: FastRefreshResult | null;
-  lastGrabbedAt: string | null;
-  refreshFeedback: { kind: RefreshFeedbackKind; message: string } | null;
-  refresh: () => Promise<void>;
-  grabLatest: () => Promise<void>;
-  runFastRefresh: () => Promise<void>;
+  loadError: string | null;
+  lastUpdatedAt: string | null;
   submitReview: (jobId: string, toState: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function useJobFinderData(): JobFinderData {
   const [queue, setQueue] = useState<ReviewQueueRow[]>(MOCK_QUEUE);
-  const [sourceHealth, setSourceHealth] =
-    useState<SourceHealthRow[]>(MOCK_SOURCE_HEALTH);
-  const [pipelineRuns, setPipelineRuns] =
-    useState<PipelineRunRow[]>(MOCK_PIPELINE_RUNS);
+  const [sourceHealth, setSourceHealth] = useState<SourceHealthRow[]>(MOCK_SOURCE_HEALTH);
+  const [pipelineRuns, setPipelineRuns] = useState<PipelineRunRow[]>(MOCK_PIPELINE_RUNS);
   const [lastRefreshRun, setLastRefreshRun] = useState<RefreshRunRow | null>(null);
   const [meta, setMeta] = useState<ApiMeta | null>(null);
   const [live, setLive] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [grabbing, setGrabbing] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [lastFastRefresh, setLastFastRefresh] = useState<FastRefreshResult | null>(null);
-  const [lastGrabbedAt, setLastGrabbedAt] = useState<string | null>(null);
-  const [refreshFeedback, setRefreshFeedback] = useState<{
-    kind: RefreshFeedbackKind;
-    message: string;
-  } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const [refreshSources, setRefreshSources] = useState<FastRefreshSourceInfo[]>([]);
-  const [refreshableSourceIds, setRefreshableSourceIds] = useState<string[]>([]);
   const [enabledSourceIds, setEnabledSourceIds] = useState<string[]>([]);
 
-  const queueIdsBeforeRefresh = useRef<Set<string>>(new Set());
+  const hasPersistedSourceSelection = useRef<boolean | null>(null);
 
   const sourceCatalog = useMemo(
-    () => buildSourceCatalog(sourceHealth, refreshSources, refreshableSourceIds),
-    [sourceHealth, refreshSources, refreshableSourceIds],
+    () => buildSourceCatalog(sourceHealth, refreshSources),
+    [sourceHealth, refreshSources],
   );
 
-  const enabledSourceSet = useMemo(
-    () => new Set(enabledSourceIds),
-    [enabledSourceIds],
-  );
+  const enabledSourceSet = useMemo(() => new Set(enabledSourceIds), [enabledSourceIds]);
 
   const visibleQueue = useMemo(
     () => filterQueueBySources(queue, enabledSourceSet),
     [queue, enabledSourceSet],
   );
 
-  const refreshTargetList = useMemo(
-    () => refreshTargets(enabledSourceIds, sourceCatalog),
-    [enabledSourceIds, sourceCatalog],
-  );
-
   const persistEnabled = useCallback((ids: string[]) => {
+    hasPersistedSourceSelection.current = true;
     saveEnabledSourceIds(ids);
     setEnabledSourceIds(ids);
   }, []);
 
   const toggleSource = useCallback(
     (sourceId: string) => {
+      hasPersistedSourceSelection.current = true;
       setEnabledSourceIds((prev) => {
         const next = toggleSourceId(prev, sourceId, sourceCatalog);
         saveEnabledSourceIds(next);
@@ -202,10 +168,14 @@ export function useJobFinderData(): JobFinderData {
   useEffect(() => {
     if (sourceCatalog.length === 0) return;
     setEnabledSourceIds((prev) => {
+      if (hasPersistedSourceSelection.current === null) {
+        hasPersistedSourceSelection.current = hasSavedSourceSelection();
+        return loadEnabledSourceIds(sourceCatalog);
+      }
+      if (!hasPersistedSourceSelection.current) return allSourceIds(sourceCatalog);
       const valid = new Set(sourceCatalog.map((s) => s.id));
       const kept = prev.filter((id) => valid.has(id));
-      if (kept.length > 0) return kept;
-      return loadEnabledSourceIds(sourceCatalog);
+      return kept;
     });
   }, [sourceCatalog]);
 
@@ -218,8 +188,6 @@ export function useJobFinderData(): JobFinderData {
       runsData: FetchResult<PipelineRunRow[]>,
       metaData: FetchResult<ApiMeta>,
       latestRun: FetchResult<RefreshRunRow>,
-      prevCount: number,
-      prevIds: Set<string>,
     ) => {
       const isLive = health.data?.status === "ok";
       setLive(isLive);
@@ -228,15 +196,14 @@ export function useJobFinderData(): JobFinderData {
       if (health.error) errors.push(`Health: ${health.error}`);
       if (queueData.error) errors.push(`Queue: ${queueData.error}`);
       if (shortlistedData.error) errors.push(`Shortlist: ${shortlistedData.error}`);
+      const queueLoaded = isLive && queueData.data !== null && shortlistedData.data !== null;
 
-      let newQueue = queue;
       if (isLive && (queueData.data || shortlistedData.data)) {
         const triage = asArray<ReviewQueueRow>(queueData.data ?? []).map(normalizeQueueRow);
         const shortlisted = asArray<ReviewQueueRow>(shortlistedData.data ?? []).map(
           normalizeQueueRow,
         );
-        newQueue = mergeQueueRows(triage, shortlisted);
-        setQueue(newQueue);
+        setQueue(mergeQueueRows(triage, shortlisted));
       } else if (!isLive) {
         setQueue(MOCK_QUEUE);
       }
@@ -257,197 +224,82 @@ export function useJobFinderData(): JobFinderData {
 
       setLastRefreshRun(isLive && latestRun.data ? latestRun.data : null);
       setMeta(metaData.data ?? null);
-
-      const added = newQueue.filter((j) => !prevIds.has(j.id)).length;
-      const now = new Date().toISOString();
-      setLastGrabbedAt(isLive ? now : null);
+      if (queueLoaded) setLastUpdatedAt(new Date().toISOString());
 
       if (errors.length > 0) {
-        setRefreshError(errors.join(" · "));
-        setRefreshFeedback({
-          kind: "error",
-          message: errors[0] ?? "Refresh failed",
-        });
+        setLoadError(errors.join(" · "));
       } else if (!isLive) {
-        setRefreshFeedback({
-          kind: "error",
-          message: "API offline — start with: bun run api",
-        });
-      } else if (added > 0) {
-        setRefreshFeedback({
-          kind: "success",
-          message: `Loaded ${newQueue.length} jobs (+${added} new)`,
-        });
-        queueIdsBeforeRefresh.current = new Set(newQueue.map((j) => j.id));
-      } else if (newQueue.length !== prevCount) {
-        setRefreshFeedback({
-          kind: "success",
-          message: `Loaded ${newQueue.length} jobs (was ${prevCount})`,
-        });
+        setLoadError("API offline — start with: bun run api");
       } else {
-        setRefreshError(null);
-        // Quiet success — timestamp updates via lastGrabbedAt; no banner flash.
+        setLoadError(null);
       }
     },
     [],
   );
 
-  const loadFromApi = useCallback(
-    async (opts: { fullPageLoad: boolean }) => {
-      if (opts.fullPageLoad) setLoading(true);
-      else setGrabbing(true);
-      setRefreshError(null);
+  const loadFromApi = useCallback(async () => {
+    const evergreenFetches = [...EVERGREEN_SOURCE_IDS].map((sourceId) =>
+      fetchApi<ReviewQueueRow[]>(
+        `/jobs/queue?limit=40&source=${encodeURIComponent(sourceId)}&state=${EVERGREEN_STATES_PARAM}`,
+      ),
+    );
 
-      const prevCount = queue.length;
-      const prevIds = new Set(queue.map((j) => j.id));
+    const [health, queueData, shortlistedData, ...evergreenResults] = await Promise.all([
+      fetchApi<{ status: string }>("/health"),
+      fetchApi<ReviewQueueRow[]>(`/jobs/queue?limit=80&state=${TRIAGE_STATES_PARAM}`),
+      fetchApi<ReviewQueueRow[]>("/jobs/queue?limit=50&state=shortlisted"),
+      ...evergreenFetches,
+    ]);
 
-      const evergreenFetches = [...EVERGREEN_SOURCE_IDS].map((sourceId) =>
-        fetchApi<ReviewQueueRow[]>(
-          `/jobs/queue?limit=40&source=${encodeURIComponent(sourceId)}&state=${EVERGREEN_STATES_PARAM}`,
-        ),
-      );
+    const [healthData, runsData, metaData, latestRun] = await Promise.all([
+      fetchApi<SourceHealthRow[]>("/source-health"),
+      fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
+      fetchApi<ApiMeta>("/meta"),
+      fetchApi<RefreshRunRow>("/runs/latest"),
+    ]);
 
-      const [health, queueData, shortlistedData, ...evergreenResults] =
-        await Promise.all([
-          fetchApi<{ status: string }>("/health"),
-          fetchApi<ReviewQueueRow[]>(`/jobs/queue?limit=80&state=${TRIAGE_STATES_PARAM}`),
-          fetchApi<ReviewQueueRow[]>("/jobs/queue?limit=50&state=shortlisted"),
-          ...evergreenFetches,
-        ]);
-
-      const [healthData, runsData, metaData, latestRun] = await Promise.all([
-        fetchApi<SourceHealthRow[]>("/source-health"),
-        fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
-        fetchApi<ApiMeta>("/meta"),
-        fetchApi<RefreshRunRow>("/runs/latest"),
-      ]);
-
-      let mergedTriage = queueData;
-      for (const row of evergreenResults) {
-        if (row.data) {
-          mergedTriage = {
-            data: mergeQueueRows(
-              asArray<ReviewQueueRow>(mergedTriage.data ?? []),
-              asArray<ReviewQueueRow>(row.data),
-            ),
-            error: mergedTriage.error ?? row.error,
-          };
-        }
+    let mergedTriage = queueData;
+    for (const row of evergreenResults) {
+      if (row.data) {
+        mergedTriage = {
+          data: mergeQueueRows(
+            asArray<ReviewQueueRow>(mergedTriage.data ?? []),
+            asArray<ReviewQueueRow>(row.data),
+          ),
+          error: mergedTriage.error ?? row.error,
+        };
       }
-      const queueDataMerged = mergedTriage;
-
-      applyLoadResult(
-        health,
-        queueDataMerged,
-        shortlistedData,
-        healthData,
-        runsData,
-        metaData,
-        latestRun,
-        prevCount,
-        prevIds,
-      );
-
-      setLoading(false);
-      setGrabbing(false);
-    },
-    [queue.length, applyLoadResult],
-  );
-
-  const refresh = useCallback(async () => {
-    await loadFromApi({ fullPageLoad: true });
-  }, [loadFromApi]);
-
-  const grabLatest = useCallback(async () => {
-    await loadFromApi({ fullPageLoad: false });
-  }, [loadFromApi]);
-
-  const runFastRefresh = useCallback(async () => {
-    const targets = refreshTargets(enabledSourceIds, sourceCatalog);
-    if (targets.length === 0) {
-      setRefreshFeedback({
-        kind: "noop",
-        message: "No sources checked — enable sources in the sidebar to refresh.",
-      });
-      return;
     }
+    const queueDataMerged = mergedTriage;
 
-    setRefreshing(true);
-    setRefreshError(null);
-    try {
-      const sourceIds = targets.map((s) => s.id);
-      const result = await fetchApi<FastRefreshResult>("/refresh/fast", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          limit: 20,
-          classifyLimit: 250,
-          sourceIds,
-        }),
-      });
-      if (result.error) {
-        setRefreshError(result.error);
-        setRefreshFeedback({ kind: "error", message: result.error });
-        return;
-      }
-      if (!result.data) {
-        setRefreshError("Find new jobs failed");
-        setRefreshFeedback({ kind: "error", message: "Find new jobs failed" });
-        return;
-      }
-      setLastFastRefresh(result.data);
-      const breakdown = result.data.sources
-        .map((s) => {
-          const added = s.imported > 0 ? s.imported : s.discovered;
-          return `${s.source.id} +${added}`;
-        })
-        .join(" · ");
-      const addedTotal = result.data.sources.reduce(
-        (sum, s) => sum + (s.imported > 0 ? s.imported : s.discovered),
-        0,
-      );
-      setRefreshFeedback({
-        kind: addedTotal > 0 ? "success" : "noop",
-        message:
-          addedTotal > 0
-            ? `Refreshed ${targets.map((t) => t.id).join(", ")} — ${breakdown}`
-            : `Refreshed ${targets.map((t) => t.id).join(", ")} — no new candidates`,
-      });
-      await loadFromApi({ fullPageLoad: false });
-    } finally {
-      setRefreshing(false);
-    }
-  }, [loadFromApi, enabledSourceIds, sourceCatalog]);
+    applyLoadResult(
+      health,
+      queueDataMerged,
+      shortlistedData,
+      healthData,
+      runsData,
+      metaData,
+      latestRun,
+    );
+
+    setLoading(false);
+  }, [applyLoadResult]);
 
   useEffect(() => {
     void (async () => {
       const sourcesResult = await fetchApi<SourcesApiData>("/sources");
-      const refreshList =
-        sourcesResult.data?.queueRefresh ?? sourcesResult.data?.fastRefresh;
+      const refreshList = sourcesResult.data?.queueRefresh ?? sourcesResult.data?.fastRefresh;
       if (refreshList) {
         setRefreshSources(refreshList);
-      }
-      if (sourcesResult.data?.refreshableSourceIds) {
-        setRefreshableSourceIds(sourcesResult.data.refreshableSourceIds);
-      } else if (refreshList) {
-        setRefreshableSourceIds(refreshList.map((s) => s.id));
       }
     })();
   }, []);
 
   useEffect(() => {
-    void grabLatest();
-  }, [grabLatest]);
-
-  const grabbingUi = useDelayedBusy(grabbing);
-  const refreshingUi = useDelayedBusy(refreshing);
-  const syncingUi = grabbingUi || refreshingUi;
-
-  useEffect(() => {
-    if (!refreshFeedback || refreshFeedback.kind === "error") return;
-    const timer = setTimeout(() => setRefreshFeedback(null), 4500);
-    return () => clearTimeout(timer);
-  }, [refreshFeedback]);
+    void loadFromApi();
+    const timer = window.setInterval(() => void loadFromApi(), QUEUE_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [loadFromApi]);
 
   const submitReview = useCallback(
     async (jobId: string, toState: string) => {
@@ -455,10 +307,7 @@ export function useJobFinderData(): JobFinderData {
         const job = rows.find((j) => j.id === jobId);
         if (!job) return rows;
         const updated = { ...job, review_state: toState };
-        return sortByLastSeen([
-          updated,
-          ...rows.filter((j) => j.id !== jobId),
-        ]);
+        return sortByLastSeen([updated, ...rows.filter((j) => j.id !== jobId)]);
       };
 
       if (!live) {
@@ -481,25 +330,14 @@ export function useJobFinderData(): JobFinderData {
     toggleSource,
     selectAllSources,
     deselectAllSources,
-    refreshTargets: refreshTargetList,
     sourceHealth,
     pipelineRuns,
     lastRefreshRun,
     meta,
     live,
     loading,
-    grabbing,
-    refreshing,
-    syncingUi,
-    grabbingUi,
-    refreshingUi,
-    refreshError,
-    lastFastRefresh,
-    lastGrabbedAt,
-    refreshFeedback,
-    refresh,
-    grabLatest,
-    runFastRefresh,
+    loadError,
+    lastUpdatedAt,
     submitReview,
   };
 }

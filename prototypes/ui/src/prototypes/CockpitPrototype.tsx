@@ -246,14 +246,21 @@ function JobTable({
                       {initials(company)}
                     </div>
                     <div className="min-w-0">
-                      <a
-                        href={job.canonical_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block truncate font-semibold text-[var(--rq-text)] hover:text-emerald-500 hover:underline"
-                      >
-                        {job.title}
-                      </a>
+                      <div className="flex items-center gap-1.5">
+                        <a
+                          href={job.canonical_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-w-0 truncate font-semibold text-[var(--rq-text)] hover:text-emerald-500 hover:underline"
+                        >
+                          {job.title}
+                        </a>
+                        {view.employmentType === "contract" && (
+                          <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-medium text-blue-500">
+                            Contract
+                          </span>
+                        )}
+                      </div>
                       <span className="mt-0.5 block truncate text-[10px] text-[var(--rq-muted)]">
                         {company}
                       </span>

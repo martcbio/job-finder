@@ -157,6 +157,9 @@ function FacetMenu({
 }
 
 const QUICK_FILTERS: Array<{ id: QuickFilterId; label: string }> = [
+  { id: "non_it", label: "Non-IT" },
+  { id: "contract", label: "Contract" },
+  { id: "permanent", label: "Permanent" },
   { id: "outside", label: "Outside IR35" },
   { id: "inside", label: "Inside IR35" },
   { id: "remote", label: "Remote" },
@@ -212,6 +215,7 @@ export default function ReviewQueueFilters({
       ),
     [jobs],
   );
+  const defaultVisibleCount = useMemo(() => filterQueueJobs(jobs, "", [], []).length, [jobs]);
 
   const addFilter = (filter: QueueFilter) => {
     if (
@@ -370,13 +374,14 @@ export default function ReviewQueueFilters({
             onClick={() => onQuickChange([])}
             className={`rq-quick ${quick.length === 0 ? "rq-quick-active" : ""}`}
           >
-            All <span>({jobs.length})</span>
+            All <span>({defaultVisibleCount})</span>
           </button>
           {QUICK_FILTERS.map((item) => (
             <button
               key={item.id}
               type="button"
               onClick={() => toggleQuick(item.id)}
+              title={item.id === "non_it" ? "Non-IT jobs are hidden by default" : undefined}
               className={`rq-quick ${quick.includes(item.id) ? "rq-quick-active" : ""}`}
             >
               {item.label} <span>({quickCounts.get(item.id) ?? 0})</span>

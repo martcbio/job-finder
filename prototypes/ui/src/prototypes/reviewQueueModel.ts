@@ -1,7 +1,10 @@
+import { parseIr35Metadata, stripIr35MetadataLines } from "../../../../src/pipeline/ir35Signals";
 import { deriveIr35Status, deriveJobSignals, extractPostedDate } from "../jobSignals";
 import type { ReviewQueueRow } from "../types";
 
 export type FacetId =
+  | "it_relevance"
+  | "type"
   | "location"
   | "workplace"
   | "seniority"
@@ -14,6 +17,9 @@ export type FacetId =
   | "ir35";
 
 export type QuickFilterId =
+  | "non_it"
+  | "contract"
+  | "permanent"
   | "outside"
   | "inside"
   | "remote"
@@ -49,10 +55,17 @@ export interface QueueJobView {
   postedAt: Date;
   postedAgeDays: number;
   ir35: "inside" | "outside" | "unknown";
+  itRelevance: ItRelevance;
+  employmentType: EmploymentType;
   searchText: string;
 }
 
+export type ItRelevance = "it" | "non_it" | "unclear";
+export type EmploymentType = "contract" | "permanent" | "unknown";
+
 export const FACETS: Array<{ id: Exclude<FacetId, "ir35">; label: string }> = [
+  { id: "it_relevance", label: "IT relevance" },
+  { id: "type", label: "Type" },
   { id: "location", label: "Location / country" },
   { id: "workplace", label: "Workplace" },
   { id: "seniority", label: "Seniority" },
@@ -65,6 +78,8 @@ export const FACETS: Array<{ id: Exclude<FacetId, "ir35">; label: string }> = [
 ];
 
 export const FACET_LABELS: Record<FacetId, string> = {
+  it_relevance: "IT relevance",
+  type: "Type",
   location: "Location",
   workplace: "Workplace",
   seniority: "Seniority",
@@ -76,6 +91,136 @@ export const FACET_LABELS: Record<FacetId, string> = {
   source: "Source",
   ir35: "IR35",
 };
+
+const IT_TITLE_PATTERNS = [
+  /\bsoftware\b/i,
+  /\b(?:web|application|mobile) developer\b/i,
+  /\b(?:front[ -]?end|back[ -]?end|full[ -]?stack)\b/i,
+  /\bdata (?:engineer|scientist|analyst|architect|platform)\b/i,
+  /\bplatform engineer\b/i,
+  /\bdevops\b/i,
+  /\bcloud (?:engineer|architect|developer|consultant)\b/i,
+  /\b(?:ai|ml|machine learning) (?:engineer|developer|scientist|architect)\b/i,
+  /\b(?:qa|test automation|automation test)\b/i,
+  /\b(?:sre|site reliability)\b/i,
+  /\b(?:cyber|information|application|cloud) security\b/i,
+  /\b(?:security|network|infrastructure|systems) engineer\b/i,
+  /\b(?:solutions?|software|data|cloud) architect\b/i,
+  /\b(?:it|technical) support\b/i,
+] as const;
+
+const IT_TITLE_ONLY_PATTERNS = [/\b(?:ai|ml|artificial intelligence|machine learning)\b/i] as const;
+
+const NON_IT_TITLE_PATTERNS = [
+  /\b(?:mechanical|civil|structural|maintenance|electrical) engineer\b/i,
+  /\bfield service engineer\b/i,
+  /\bservice engineer\b/i,
+  /\bshift engineer\b/i,
+  /\bgas engineer\b/i,
+  /\bmulti[ -]?skilled engineer\b/i,
+  /\b(?:hvac|plumbing|automotive|fabrication|cnc|hydraulic)\b/i,
+  /\baerospace stress\b/i,
+  /\bquantity surveyor\b/i,
+] as const;
+
+const IT_SUPPORTING_PATTERNS = [
+  ...IT_TITLE_PATTERNS,
+  /\b(?:developer|programming|coding|source code|data platform|data engineering)\b/i,
+  /\b(?:aws|azure|gcp|kubernetes|docker|terraform|react|typescript|javascript|python|java)\b/i,
+  /\b(?:\.net|sql|database|microservices?|rest api|ci\/cd|github|gitlab)\b/i,
+  /\b(?:artificial intelligence|machine learning|large language model|llm)\b/i,
+] as const;
+
+const NON_IT_SUPPORTING_PATTERNS = [
+  ...NON_IT_TITLE_PATTERNS,
+  /\b(?:mechanical|civil|structural|maintenance|hvac|plumbing|automotive)\b/i,
+  /\b(?:aerospace stress|quantity surveyor|fabrication|cnc|hydraulic|pneumatic)\b/i,
+  /\b(?:electrical installation|electrical maintenance|electrical systems?)\b/i,
+  /\b(?:field service|shift engineer|service engineer|gas engineer|multi[ -]?skilled)\b/i,
+] as const;
+
+const CONTRACT_PATTERNS = [
+  /\bcontract(?:or|ing)?\b/i,
+  /\b(?:inside|outside|in[ -]?scope of)\s*ir3[45]\b/i,
+  /\bday rate\b/i,
+  /(?:£|\$|€)\s?\d[\d,.]*\s*(?:\/|per\s+)(?:day|daily)\b/i,
+  /\b\d[\d,.]*\s*(?:pd|p\/d)\b/i,
+  /\bfixed[ -]?term\b/i,
+] as const;
+
+const PERMANENT_PATTERNS = [
+  /\bpermanent\b/i,
+  /\bperm\b/i,
+  /\bfull[ -]?time\b/i,
+  /\bsalar(?:y|ied)\b/i,
+  /(?:£|\$|€)\s?\d[\d,.]*\s*(?:k|000)?\s*(?:per annum|p\.?\s*a\.?)\b/i,
+] as const;
+
+function queueJobText(job: ReviewQueueRow): {
+  title: string;
+  body: string;
+  metadata: string;
+  all: string;
+} {
+  const metadata = [
+    job.category,
+    job.rag_focus,
+    job.enterprise_focus,
+    ...job.classification_labels.map((label) => label.label),
+  ]
+    .map((value) => value.replace(/[_-]+/g, " "))
+    .join("\n");
+  const description = job.description_sample ?? "";
+  const body = description
+    .split("\n")
+    .filter(
+      (line) =>
+        !/^-\s*(?:source|job url|source url|search|search term|location|employment type|posted date|reference|jobserve id|apply url|detail url):/i.test(
+          line,
+        ),
+    )
+    .join("\n");
+  return {
+    title: job.title,
+    body,
+    metadata,
+    all: [job.title, description, metadata].join("\n"),
+  };
+}
+
+function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+export function deriveItRelevance(job: ReviewQueueRow): ItRelevance {
+  const text = queueJobText(job);
+  if (matchesAny(text.title, IT_TITLE_PATTERNS) || matchesAny(text.title, IT_TITLE_ONLY_PATTERNS)) {
+    return "it";
+  }
+  if (matchesAny(text.title, NON_IT_TITLE_PATTERNS)) return "non_it";
+  if (matchesAny(text.body, IT_SUPPORTING_PATTERNS)) return "it";
+  if (matchesAny(text.body, NON_IT_SUPPORTING_PATTERNS)) return "non_it";
+  if (matchesAny(text.metadata, IT_SUPPORTING_PATTERNS)) return "it";
+  if (matchesAny(text.metadata, NON_IT_SUPPORTING_PATTERNS)) return "non_it";
+  return "unclear";
+}
+
+export function deriveEmploymentType(job: ReviewQueueRow): EmploymentType {
+  const { all } = queueJobText(job);
+  if (matchesAny(job.title, CONTRACT_PATTERNS)) return "contract";
+
+  const employmentMetadata = all.match(/^-\s*Employment type:\s*([^\n]+)/im)?.[1]?.trim() ?? "";
+  if (/\bcontract\b/i.test(employmentMetadata)) return "contract";
+  if (/\b(?:permanent|perm|full[ -]?time)\b/i.test(employmentMetadata)) return "permanent";
+
+  const ir35Metadata = parseIr35Metadata(all);
+  if (ir35Metadata.inside === true || ir35Metadata.outside === true) return "contract";
+
+  const body = stripIr35MetadataLines(all);
+  if (matchesAny(body, CONTRACT_PATTERNS)) return "contract";
+  if (matchesAny(all, PERMANENT_PATTERNS)) return "permanent";
+  return "unknown";
+}
 
 function titleCase(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -154,6 +299,8 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
   const salary = deriveSalary(job.description_sample);
   const confidence = deriveConfidence(job.classification_confidence);
   const ir35 = deriveIr35Status(job);
+  const itRelevance = deriveItRelevance(job);
+  const employmentType = deriveEmploymentType(job);
   const postedAgeDays = Math.max(0, (now - postedAt.getTime()) / 86_400_000);
   const searchText = [
     job.title,
@@ -182,11 +329,17 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
     postedAt,
     postedAgeDays,
     ir35,
+    itRelevance,
+    employmentType,
     searchText,
   };
 }
 
 function facetValues(job: QueueJobView, facet: FacetId): string[] {
+  if (facet === "it_relevance") {
+    return [job.itRelevance === "it" ? "IT" : job.itRelevance === "non_it" ? "Non-IT" : "Unclear"];
+  }
+  if (facet === "type") return [titleCase(job.employmentType)];
   if (facet === "tech") return job.tech;
   if (facet === "confidence") {
     if (job.confidence >= 90) return ["90%+"];
@@ -214,6 +367,9 @@ function matchesFilter(job: QueueJobView, filter: QueueFilter): boolean {
 }
 
 function matchesQuick(job: QueueJobView, quick: QuickFilterId): boolean {
+  if (quick === "non_it") return job.itRelevance === "non_it";
+  if (quick === "contract") return job.employmentType === "contract";
+  if (quick === "permanent") return job.employmentType === "permanent";
   if (quick === "outside") return job.ir35 === "outside";
   if (quick === "inside") return job.ir35 === "inside";
   if (quick === "remote") return job.workplace === "Remote";
@@ -230,8 +386,14 @@ export function filterQueueJobs(
   quick: QuickFilterId[],
 ): QueueJobView[] {
   const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const nonItRequested =
+    quick.includes("non_it") ||
+    filters.some(
+      (filter) => filter.facet === "it_relevance" && filter.value.toLowerCase() === "non-it",
+    );
   return jobs.filter(
     (job) =>
+      (job.itRelevance !== "non_it" || nonItRequested) &&
       terms.every((term) => job.searchText.includes(term)) &&
       filters.every((filter) => matchesFilter(job, filter)) &&
       quick.every((filter) => matchesQuick(job, filter)),
@@ -240,7 +402,8 @@ export function filterQueueJobs(
 
 export function facetCounts(jobs: QueueJobView[], facet: FacetId): Array<[string, number]> {
   const counts = new Map<string, number>();
-  for (const job of jobs) {
+  const countedJobs = facet === "it_relevance" ? jobs : filterQueueJobs(jobs, "", [], []);
+  for (const job of countedJobs) {
     for (const value of new Set(facetValues(job, facet))) {
       if (value === "—") continue;
       counts.set(value, (counts.get(value) ?? 0) + 1);

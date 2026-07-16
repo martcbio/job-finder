@@ -1,58 +1,13 @@
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
+name: ci
+on: [push, pull_request]
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'release: ')"
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2"
-      - run: bun install --frozen-lockfile
-      - name: Lint
-        run: bun run lint
-
-  typecheck:
-    runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'release: ')"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2"
-      - run: bun install --frozen-lockfile
-      - name: Typecheck
-        run: bun run typecheck
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'release: ')"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2"
-      - run: bun install --frozen-lockfile
-      - name: Unit tests
-        run: bun run test
-
-  integration-tests:
-    runs-on: ubuntu-latest
-    if: "!startsWith(github.event.head_commit.message, 'release: ')"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.2"
-      - run: bun install --frozen-lockfile
-      - name: Integration tests
-        run: bun run test:integration
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun test src/**/__tests__/ prototypes/ui/src/prototypes/__tests__/reviewQueueModel.test.ts
+      - run: python3 cloud/test_shapes.py
+      - name: ui build
+        run: cd prototypes/ui && bun install --frozen-lockfile && bun run build

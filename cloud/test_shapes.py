@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from modal_app import shape_rows
+from modal_app import ids_sha256, shape_rows
 
 
 STATUS = {
@@ -71,6 +71,28 @@ class ShapeRowsTest(unittest.TestCase):
 
         self.assertEqual(run["health"], "failed")
         self.assertEqual(openings, [])
+
+
+class IdsSha256Test(unittest.TestCase):
+    def test_matches_precomputed_fixture(self) -> None:
+        jsonl = """{"org":"anthropic","ats":"greenhouse","id":"job-2"}
+{"org":"openai","ats":"ashby","id":"job-1"}
+"""
+
+        self.assertEqual(
+            ids_sha256(jsonl),
+            "f736a1dd2844e784abdce240a6e81838a5d00f78684c5003b486a33b15077d37",
+        )
+
+    def test_is_independent_of_jsonl_order(self) -> None:
+        forward = """{"org":"anthropic","ats":"greenhouse","id":"job-2"}
+{"org":"openai","ats":"ashby","id":"job-1"}
+"""
+        reverse = """{"org":"openai","ats":"ashby","id":"job-1"}
+{"org":"anthropic","ats":"greenhouse","id":"job-2"}
+"""
+
+        self.assertEqual(ids_sha256(forward), ids_sha256(reverse))
 
 
 if __name__ == "__main__":

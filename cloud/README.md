@@ -1,6 +1,10 @@
 # Lab-openings cloud shadow
 
-This Modal arm runs the existing scanner every three hours in UTC and writes only to a container scratch directory plus the estate Supabase project. It never mounts or writes `/Users/mcb/Claudelocal/careers/market`; local launchd remains the production arm. `cloud/targets.json` is the baked shadow copy of the local target configuration and must be kept in parity deliberately.
+This Modal arm runs the existing scanner every three hours in UTC and writes only to a container scratch directory plus the estate Supabase project. It never mounts or writes `/Users/mcb/Claudelocal/careers/market`; local launchd remains the production arm. Active targets come from `careers.targets`; `cloud/targets.json` is the fallback used when that read is empty or fails.
+
+## Parity digest contract
+
+Both arms parse the run JSONL into `org:ats:id` triples, sort those complete UTF-8 strings bytewise (`LC_ALL=C` order), join them with one LF byte between entries and no trailing LF, then SHA-256 the resulting bytes. An empty run hashes the empty byte string. `openings_count` is the number of parsed JSONL rows.
 
 ## Deploy and verify
 
@@ -9,6 +13,7 @@ Run these from the repository root, in order:
 ```sh
 cd /Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party
 supabase db query --linked -f cloud/schema.sql
+supabase db query --linked -f cloud/schema_additions.sql
 ```
 
 In the linked Supabase project's **Settings → API → Exposed schemas**, add `careers` if it is not already present. Do not add an anonymous policy. No Storage bucket is used.

@@ -101,4 +101,37 @@ describe("live JobServe parsing", () => {
     expect(normalized.description).toContain("- Build real agent systems");
     expect(normalized.description).not.toBe(role.summary_snippet);
   });
+
+  test("does not label permanent per-annum roles as IR35", () => {
+    const [role] = parseJobServeRolesFromClassicHtml(
+      classicHtml
+        .replace("£800 - 900 Daily Outside IR35", "£85k - £90k per annum + Bonus, Outside IR35")
+        .replace(">Contract<", ">Permanent<"),
+      { pageUrl: "https://www.jobserve.com/gb/en/JobListing.aspx?page=1" },
+    );
+
+    expect(role?.outside_ir35).toBe(false);
+    expect(role?.inside_ir35).toBe(false);
+    expect(role?.priority_notes).not.toContain("outside_ir35");
+  });
+
+  test("labels affirmative outside-IR35 day-rate contracts", () => {
+    const [role] = parseJobServeRolesFromClassicHtml(
+      classicHtml.replace("£800 - 900 Daily Outside IR35", "£600 per day outside IR35"),
+      { pageUrl: "https://www.jobserve.com/gb/en/JobListing.aspx?page=1" },
+    );
+
+    expect(role?.outside_ir35).toBe(true);
+    expect(role?.priority_notes).toContain("outside_ir35");
+  });
+
+  test("does not treat negated IR35 metadata as affirmative", () => {
+    const [role] = parseJobServeRolesFromClassicHtml(
+      classicHtml.replace("£800 - 900 Daily Outside IR35", "£600 per day, Outside IR35: no"),
+      { pageUrl: "https://www.jobserve.com/gb/en/JobListing.aspx?page=1" },
+    );
+
+    expect(role?.outside_ir35).toBe(false);
+    expect(role?.priority_notes).not.toContain("outside_ir35");
+  });
 });

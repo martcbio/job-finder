@@ -378,6 +378,12 @@ function parseJobServeRoleBlock(
   ]
     .filter(Boolean)
     .join(" ");
+  const hasPermanentEvidence =
+    /\bpermanent\b/i.test(labels.get("type") ?? "") ||
+    /\b(?:per[\s-]+annum|annual(?:ly)?|p\.?\s*a\.?)\b/i.test(labels.get("rate") ?? "");
+  const isContractRole = !hasPermanentEvidence && /\bcontract(?:or|ing)?\b/i.test(roleText);
+  const outsideIr35 = isContractRole && hasPositiveIr35Signal(roleText, "outside");
+  const insideIr35 = isContractRole && hasPositiveIr35Signal(roleText, "inside");
 
   return {
     job_id: jobId,
@@ -401,12 +407,12 @@ function parseJobServeRoleBlock(
     detail_markdown: "",
     detail_status: detailUrl ? "skipped" : "error",
     detail_error: detailUrl ? "" : "No JobServe detail URL was present in the search result.",
-    outside_ir35: /\boutside[\s-]*ir3[45]\b/i.test(roleText),
-    inside_ir35: /\binside[\s-]*ir3[45]\b/i.test(roleText),
+    outside_ir35: outsideIr35,
+    inside_ir35: insideIr35,
     remote_signal: /\bremote\b/i.test(roleText),
     security_clearance_required:
       /\b(?:sc cleared|security clearance|dv clearance|clearance required)\b/i.test(roleText),
-    priority_notes: priorityNotes(roleText),
+    priority_notes: priorityNotes(roleText, outsideIr35),
   };
 }
 
@@ -481,15 +487,21 @@ function extractEmployer(labels: Map<string, string>): { kind: string; name: str
   return { kind: "", name: "" };
 }
 
-function priorityNotes(text: string): string[] {
+function priorityNotes(text: string, outsideIr35: boolean): string[] {
   const notes: string[] = [];
   if (/\bcontract(?:or|ing)?\b/i.test(text)) notes.push("contract");
-  if (/\boutside[\s-]*ir3[45]\b/i.test(text)) notes.push("outside_ir35");
+  if (outsideIr35) notes.push("outside_ir35");
   if (/\bforward[\s-]+deployed\b/i.test(text)) notes.push("forward_deployed");
   if (/\bagentic\b/i.test(text)) notes.push("agentic");
   if (/\blangchain\b/i.test(text)) notes.push("langchain");
   if (/\binference\b/i.test(text)) notes.push("inference");
   return notes;
+}
+
+function hasPositiveIr35Signal(text: string, polarity: "outside" | "inside"): boolean {
+  const negated = new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\s*:\\s*no\\b`, "i");
+  if (negated.test(text)) return false;
+  return new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\b`, "i").test(text);
 }
 
 function splitSetCookieHeader(value: string | null): string[] {

@@ -93,6 +93,22 @@ def _parse_jsonl(content: str) -> list[dict[str, Any]]:
     return rows
 
 
+def ids_sha256(jsonl_content: str) -> str:
+    """Hash LC_ALL=C-sorted org:ats:id triples joined by LF, without a trailing LF."""
+    triples = [
+        ":".join(
+            (
+                _required_string(opening, "org"),
+                _required_string(opening, "ats"),
+                _required_string(opening, "id"),
+            )
+        )
+        for opening in _parse_jsonl(jsonl_content)
+    ]
+    triples.sort(key=lambda item: item.encode("utf-8"))
+    return hashlib.sha256("\n".join(triples).encode("utf-8")).hexdigest()
+
+
 def shape_rows(
     status: dict[str, Any],
     jsonl_content: str,
@@ -303,6 +319,35 @@ def _career_headers(*, representation: bool) -> dict[str, str]:
     }
 
 
+def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path) -> str | None:
+    try:
+        response = client.get(
+            f"{base_url}/rest/v1/targets",
+            params={"active": "eq.true", "select": "org,ats,company", "order": "org.asc"},
+            headers={"Accept-Profile": "careers"},
+        )
+        response.raise_for_status()
+        rows = response.json()
+        if not isinstance(rows, list) or not rows:
+            raise ValueError("careers.targets returned no active rows")
+        targets: dict[str, dict[str, str | None]] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError("careers.targets returned a non-object row")
+            org = _required_string(row, "org")
+            ats = _optional_string(row, "ats")
+            company = _required_string(row, "company")
+            targets[org] = {"ats": ats, "company": company}
+        (market_dir / "targets.json").write_text(
+            f"{json.dumps(targets, indent=2, sort_keys=True)}\n",
+            encoding="utf-8",
+        )
+        return None
+    except Exception as error:
+        shutil.copyfile(TARGETS_PATH, market_dir / "targets.json")
+        return f"careers.targets fallback: {type(error).__name__}: {error}"
+
+
 def _upsert_scan_rows(
     client: httpx.Client,
     base_url: str,
@@ -325,6 +370,27 @@ def _upsert_scan_rows(
         json=opening_rows,
     )
     openings_response.raise_for_status()
+
+
+def _upsert_parity_run(
+    client: httpx.Client,
+    base_url: str,
+    status: dict[str, Any],
+    jsonl_content: str,
+) -> None:
+    response = client.post(
+        f"{base_url}/rest/v1/parity_runs",
+        params={"on_conflict": "run_date,substrate"},
+        headers=_career_headers(representation=True),
+        json={
+            "run_date": _required_string(status, "date"),
+            "substrate": SUBSTRATE,
+            "run_id": _required_string(status, "runId"),
+            "openings_count": len(_parse_jsonl(jsonl_content)),
+            "ids_sha256": ids_sha256(jsonl_content),
+        },
+    )
+    _expect_one(response, "careers parity run upsert")
 
 
 def _run_scanner(
@@ -373,11 +439,12 @@ def _execute_once() -> dict[str, Any]:
         effective_exit_status = 1
         notes: dict[str, Any] = {"scanner_exit_status": scanner_exit_status}
         caught: Exception | None = None
+        targets_diagnostic: str | None = None
 
         try:
             with tempfile.TemporaryDirectory(prefix="careers-lab-openings-") as temp_dir:
                 market_dir = Path(temp_dir)
-                shutil.copyfile(TARGETS_PATH, market_dir / "targets.json")
+                targets_diagnostic = _write_runtime_targets(client, base_url, market_dir)
                 try:
                     scanner_exit_status = _run_scanner(
                         client,
@@ -406,6 +473,7 @@ def _execute_once() -> dict[str, Any]:
 
                 run_row, opening_rows = shape_rows(status, jsonl_content)
                 _upsert_scan_rows(client, base_url, run_row, opening_rows)
+                _upsert_parity_run(client, base_url, status, jsonl_content)
                 effective_exit_status = (
                     scanner_exit_status
                     if scanner_exit_status != 0
@@ -417,6 +485,8 @@ def _execute_once() -> dict[str, Any]:
                     "matched_openings_count": run_row["matched_openings_count"],
                     "persisted_openings": len(opening_rows),
                 }
+                if targets_diagnostic is not None:
+                    notes["targets_diagnostic"] = targets_diagnostic
         except Exception as error:
             caught = caught or error
             effective_exit_status = scanner_exit_status if scanner_exit_status != 0 else 1
@@ -424,6 +494,8 @@ def _execute_once() -> dict[str, Any]:
                 "scanner_exit_status": scanner_exit_status,
                 "wrapper_error": type(error).__name__,
             }
+            if targets_diagnostic is not None:
+                notes["targets_diagnostic"] = targets_diagnostic
             failure_status = _fallback_status(
                 scheduled_at=scheduled_at,
                 started_at=started_at,

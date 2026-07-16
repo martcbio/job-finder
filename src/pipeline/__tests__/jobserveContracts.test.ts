@@ -86,4 +86,38 @@ describe("JobServe contract ranking", () => {
 
     expect(ranked).toEqual([]);
   });
+
+  test("does not rank permanent per-annum rows as outside IR35", () => {
+    const ranked = rankJobServeContracts(
+      [
+        row({
+          title: "Agentic AI Contractor",
+          markdown: [
+            "- Rate: £85k - £90k per annum + Bonus",
+            "- Outside IR35: yes",
+            "- Employment type: Permanent",
+          ].join("\n"),
+        }),
+      ],
+      { limit: 20 },
+    );
+
+    expect(ranked).toEqual([]);
+  });
+
+  test("ranks affirmative outside-IR35 day-rate contracts", () => {
+    const ranked = rankJobServeContracts(
+      [
+        row({
+          title: "Agentic AI Engineer",
+          markdown: "- Rate: £600 per day outside IR35\n- Employment type: Contract",
+        }),
+      ],
+      { limit: 20 },
+    );
+
+    expect(ranked.map((item) => [item.tier, item.whyMatched])).toEqual([
+      [1, ["outside IR35", "contract", "agentic"]],
+    ]);
+  });
 });

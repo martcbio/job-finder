@@ -78,6 +78,11 @@ export function rankJobServeContract(row: JobServeContractRow): RankedJobServeCo
   const hasOutsideIr35 = hasPositiveIr35Signal(haystack, "outside");
   const hasInsideIr35 = hasPositiveIr35Signal(haystack, "inside");
   const hasContract = /\bcontract(?:or|ing)?\b/i.test(haystack);
+  const hasPermanentEvidence =
+    /\bemployment\s+type:\s*permanent\b/i.test(haystack) ||
+    /\b(?:per[\s-]+annum|annual(?:ly)?|p\.?\s*a\.?)\b/i.test(haystack);
+
+  if (hasPermanentEvidence) return null;
 
   if (hasOutsideIr35 && hasContract && strictMatches.length > 0) {
     return ranked(row, 1, ["outside IR35", "contract", ...strictMatches], null);

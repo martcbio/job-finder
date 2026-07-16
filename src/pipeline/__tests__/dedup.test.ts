@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkFuzzyDuplicate, type DedupResult } from "../dedup";
+import { checkFuzzyDuplicate, type DedupResult, normalizeCrossSourceIdentity } from "../dedup";
 
 describe("dedup module exports", () => {
   test("exports checkFuzzyDuplicate function", () => {
@@ -10,6 +10,32 @@ describe("dedup module exports", () => {
     const result: DedupResult = { isDuplicate: true, matchedTitle: "test" };
     expect(result.isDuplicate).toBe(true);
     expect(result.matchedTitle).toBe("test");
+  });
+});
+
+describe("normalizeCrossSourceIdentity", () => {
+  test("normalizes company, title, and a concrete location city", () => {
+    expect(
+      normalizeCrossSourceIdentity({
+        company: "Acme Technologies Ltd.",
+        title: "Senior AI Engineer",
+        location: "London (Hybrid), England, United Kingdom",
+      }),
+    ).toEqual({
+      company: "acme technologies",
+      title: "senior ai engineer",
+      city: "london",
+    });
+  });
+
+  test("rejects identities without a concrete city", () => {
+    expect(
+      normalizeCrossSourceIdentity({
+        company: "Acme",
+        title: "Senior AI Engineer",
+        location: "Remote, UK",
+      }),
+    ).toBeNull();
   });
 });
 

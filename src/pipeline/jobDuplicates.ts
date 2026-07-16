@@ -1,4 +1,5 @@
 import { quoteSqlLiteral } from "../db/config";
+import { normalizeCrossSourceIdentity } from "./dedup";
 import type { ReviewActor } from "./jobReview";
 
 export interface DuplicateJobRow {
@@ -7,6 +8,8 @@ export interface DuplicateJobRow {
   company_hint: string | null;
   canonical_url: string;
   category: string;
+  location_hint?: string | null;
+  source_ids?: string[];
 }
 
 export interface DuplicateCandidate {
@@ -53,7 +56,34 @@ FROM (
     title_normalized AS title,
     company_hint,
     canonical_url,
-    category
+    category,
+    COALESCE(
+      (
+        SELECT array_agg(DISTINCT sq.source_id ORDER BY sq.source_id)
+        FROM job_search.job_observations jo
+        JOIN job_search.search_results sr ON sr.id = jo.search_result_id
+        JOIN job_search.search_queries sq ON sq.id = sr.query_id
+        WHERE jo.job_id = jobs.id
+      ),
+      ARRAY[]::text[]
+    ) AS source_ids,
+    COALESCE(
+      (
+        SELECT (regexp_match(jp.markdown, '(?im)^-\\s*Location:\\s*([^\\n]+)'))[1]
+        FROM job_search.job_pages jp
+        WHERE jp.job_id = jobs.id AND jp.markdown IS NOT NULL
+        ORDER BY jp.fetched_at DESC, jp.id DESC
+        LIMIT 1
+      ),
+      (
+        SELECT (regexp_match(sr.description_raw, '(?im)^Location:\\s*([^\\n]+)'))[1]
+        FROM job_search.job_observations jo
+        JOIN job_search.search_results sr ON sr.id = jo.search_result_id
+        WHERE jo.job_id = jobs.id
+        ORDER BY jo.observed_at DESC, jo.id DESC
+        LIMIT 1
+      )
+    ) AS location_hint
   FROM job_search.jobs
   WHERE review_state <> 'rejected_by_us'
   ORDER BY last_seen_at DESC, id DESC
@@ -173,6 +203,9 @@ function compareJobs(
   right: DuplicateJobRow,
   threshold: number,
 ): DuplicateCandidate | null {
+  const crossSource = compareCrossSourceIdentity(left, right);
+  if (crossSource) return crossSource;
+
   const companyMatch =
     normalizeCompany(left.company_hint) !== "" &&
     normalizeCompany(left.company_hint) === normalizeCompany(right.company_hint);
@@ -206,6 +239,47 @@ function compareJobs(
     ...ordered,
     confidence,
     reason: reasons.join("; "),
+  };
+}
+
+function compareCrossSourceIdentity(
+  left: DuplicateJobRow,
+  right: DuplicateJobRow,
+): DuplicateCandidate | null {
+  const leftSources = new Set(left.source_ids ?? []);
+  const rightSources = new Set(right.source_ids ?? []);
+  if (
+    leftSources.size === 0 ||
+    rightSources.size === 0 ||
+    [...leftSources].some((source) => rightSources.has(source))
+  ) {
+    return null;
+  }
+
+  const leftIdentity = normalizeCrossSourceIdentity({
+    company: left.company_hint,
+    title: left.title,
+    location: left.location_hint ?? null,
+  });
+  const rightIdentity = normalizeCrossSourceIdentity({
+    company: right.company_hint,
+    title: right.title,
+    location: right.location_hint ?? null,
+  });
+  if (!leftIdentity || !rightIdentity) return null;
+  if (
+    leftIdentity.company !== rightIdentity.company ||
+    leftIdentity.title !== rightIdentity.title ||
+    leftIdentity.city !== rightIdentity.city
+  ) {
+    return null;
+  }
+
+  const ordered = orderJobIds(left.id, right.id);
+  return {
+    ...ordered,
+    confidence: 0.99,
+    reason: `cross_source_exact; company=${leftIdentity.company}; title=${leftIdentity.title}; city=${leftIdentity.city}; sources=${[...leftSources, ...rightSources].join(",")}`,
   };
 }
 

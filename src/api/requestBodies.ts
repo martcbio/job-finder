@@ -33,7 +33,9 @@ export function savedSweepInputFromBody(body: Record<string, unknown>): SavedSwe
   };
 }
 
-export function fastRefreshOptionsFromBody(body: Record<string, unknown>): Partial<FastRefreshOptions> {
+export function fastRefreshOptionsFromBody(
+  body: Record<string, unknown>,
+): Partial<FastRefreshOptions> {
   return {
     limit: positiveIntValue(body.limit, "limit", 20, 250),
     sourceIds:

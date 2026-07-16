@@ -117,7 +117,8 @@ export async function listOrgJobs(
       const all = job.categories?.allLocations ?? [];
       const locations = primary && !all.includes(primary) ? [primary, ...all] : all;
       const stableId = job.id || job.hostedUrl;
-      if (!stableId) throw new Error("Lever list entry passed validation without a stable identity");
+      if (!stableId)
+        throw new Error("Lever list entry passed validation without a stable identity");
 
       return {
         source: "lever",

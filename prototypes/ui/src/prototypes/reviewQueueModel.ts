@@ -64,6 +64,13 @@ export interface QueueJobView {
 export type ItRelevance = "it" | "non_it" | "unclear";
 export type EmploymentType = "contract" | "permanent" | "unknown";
 
+export function isCrossSourceDuplicate(job: ReviewQueueRow): boolean {
+  return job.duplicate_candidates.some(
+    (candidate) =>
+      candidate.kind === "cross_source" || candidate.reason.startsWith("cross_source_exact;"),
+  );
+}
+
 export const FACETS: Array<{ id: Exclude<FacetId, "ir35">; label: string }> = [
   { id: "it_relevance", label: "IT relevance" },
   { id: "type", label: "Type" },

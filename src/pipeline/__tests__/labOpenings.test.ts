@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AtsOrgAcquisition, AtsOrgJob } from "../../services/ats/types";
 import { exitCodeForRecordStatus } from "../labBoards";
 import { createLabOpeningsModule, resolveLabOpeningsPaths } from "../labOpenings";
@@ -16,7 +16,9 @@ async function temporaryMarket(): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -38,10 +40,7 @@ function job(source: AtsOrgJob["source"], org: string, id: string): AtsOrgJob {
   };
 }
 
-function success(
-  endpoint: string,
-  jobs: AtsOrgJob[] = [],
-): AtsOrgAcquisition {
+function success(endpoint: string, jobs: AtsOrgJob[] = []): AtsOrgAcquisition {
   return {
     status: "success",
     endpoint,
@@ -220,9 +219,7 @@ describe("lab openings freshness", () => {
     const legacyBefore = await readFile(join(marketDir, "openings-2026-07-12.md"), "utf8");
     const degradedResult = await degraded.record();
     expect(degradedResult.status).toBe("degraded");
-    expect(await readFile(join(marketDir, "openings-2026-07-12.md"), "utf8")).toBe(
-      legacyBefore,
-    );
+    expect(await readFile(join(marketDir, "openings-2026-07-12.md"), "utf8")).toBe(legacyBefore);
 
     const inspection = (await degraded.inspect(["lab-openings"])).projections[0];
     expect(inspection?.diagnosis.code).toBe("degraded");

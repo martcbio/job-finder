@@ -1,13 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { z } from "zod";
@@ -15,11 +7,7 @@ import { logger } from "../logger";
 import { listOrgJobs as listAshbyOrgJobs } from "../services/ats/ashby";
 import { listOrgJobs as listGreenhouseOrgJobs } from "../services/ats/greenhouse";
 import { listOrgJobs as listLeverOrgJobs } from "../services/ats/lever";
-import type {
-  AtsAcquisitionFailure,
-  AtsOrgAcquisition,
-  AtsOrgJob,
-} from "../services/ats/types";
+import type { AtsAcquisitionFailure, AtsOrgAcquisition, AtsOrgJob } from "../services/ats/types";
 import {
   createFreshnessStore,
   type FreshnessReport,
@@ -224,7 +212,8 @@ function defaultProcessState(pid: number): ProcessState {
 
 function parseTimestamp(value: string, label: string): string {
   const timestamp = new Date(value);
-  if (!Number.isFinite(timestamp.getTime())) throw new Error(`${label} must be an ISO-8601 timestamp`);
+  if (!Number.isFinite(timestamp.getTime()))
+    throw new Error(`${label} must be an ISO-8601 timestamp`);
   return timestamp.toISOString();
 }
 
@@ -250,7 +239,12 @@ function failureMessage(failure: AtsAcquisitionFailure): string {
   }
 }
 
-function markdownFor(date: string, runId: string, runs: LabBoardRun[], openings: Opening[]): string {
+function markdownFor(
+  date: string,
+  runId: string,
+  runs: LabBoardRun[],
+  openings: Opening[],
+): string {
   const lines = [
     `# AI Lab Openings - ${date}`,
     "",
@@ -390,7 +384,9 @@ async function acquireLock(input: {
   cwd: string;
   argv: string[];
   processState: (pid: number) => ProcessState;
-}): Promise<{ status: "acquired"; handle: LockHandle } | { status: "locked"; owner: LockOwner | null }> {
+}): Promise<
+  { status: "acquired"; handle: LockHandle } | { status: "locked"; owner: LockOwner | null }
+> {
   const ownerPath = join(input.lockDir, "owner.json");
 
   const create = async (): Promise<LockHandle | null> => {
@@ -781,8 +777,8 @@ export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}):
             : new Date(new Date(completedAt).getTime() + FRESH_FOR_MS).toISOString();
         const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
         const diagnostics = boardRuns
-          .filter((run): run is Extract<LabBoardRun, { status: "failure" }> =>
-            run.status === "failure",
+          .filter(
+            (run): run is Extract<LabBoardRun, { status: "failure" }> => run.status === "failure",
           )
           .map((run) => `${run.company}: ${failureMessage(run.failure)}`);
         if (summary.successfulBoards === 0) {
@@ -852,7 +848,10 @@ export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}):
 
         const finalOutputs = outputs.map((output) => ({
           ...output,
-          path: output.path.replace(relative(marketDir, stagingDir), relative(marketDir, generationDir)),
+          path: output.path.replace(
+            relative(marketDir, stagingDir),
+            relative(marketDir, generationDir),
+          ),
         }));
         const record: ProjectionRunRecord = {
           schemaVersion: 1,

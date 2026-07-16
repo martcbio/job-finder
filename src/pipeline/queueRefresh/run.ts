@@ -1,6 +1,10 @@
-import { runFastRefresh, type FastRefreshOptions, type FastRefreshResult } from "../fastRefresh/run";
+import { runFastRefresh } from "../fastRefresh/run";
 import { sourceAdapterFor } from "../fastRefresh/summaries";
-import type { FastRefreshSourceSummary } from "../fastRefresh/types";
+import type {
+  FastRefreshOptions,
+  FastRefreshResult,
+  FastRefreshSourceSummary,
+} from "../fastRefresh/types";
 import { DEFAULT_FAST_REFRESH_OPTIONS, ZERO_COSTS } from "../fastRefresh/types";
 import { sourceAttemptStatus } from "../sourceAdapterContract";
 import { runJobspyLaneRefresh } from "./jobspyRefresh";
@@ -51,7 +55,7 @@ async function runPostProcessSteps(input: {
 }
 
 function skippedSourceSummary(sourceId: string, reason: string): FastRefreshSourceSummary {
-  const source = sourceAdapterFor(sourceId, null, null);
+  const source = sourceAdapterFor(sourceId, "", "");
   return {
     source,
     keyword: sourceId,
@@ -69,11 +73,8 @@ function skippedSourceSummary(sourceId: string, reason: string): FastRefreshSour
   };
 }
 
-export async function runQueueRefresh(
-  input: QueueRefreshOptions = {},
-): Promise<FastRefreshResult> {
-  const requestedIds =
-    input.sourceIds && input.sourceIds.length > 0 ? input.sourceIds : undefined;
+export async function runQueueRefresh(input: QueueRefreshOptions = {}): Promise<FastRefreshResult> {
+  const requestedIds = input.sourceIds && input.sourceIds.length > 0 ? input.sourceIds : undefined;
   const { fastRefreshIds, searchSiteIds, laneImportIds, unsupportedIds } =
     partitionQueueRefreshSourceIds(requestedIds ?? ["jobserve", "linear-careers"]);
 
@@ -116,8 +117,7 @@ export async function runQueueRefresh(
     skippedSourceSummary(id, `No refresh adapter for "${id}"`),
   );
 
-  const fastImported =
-    fastResult?.sources.reduce((sum, source) => sum + source.imported, 0) ?? 0;
+  const fastImported = fastResult?.sources.reduce((sum, source) => sum + source.imported, 0) ?? 0;
   const laneImported = laneSummaries.reduce((sum, source) => sum + source.imported, 0);
   const searchResults = searchResult?.totalResults ?? 0;
 

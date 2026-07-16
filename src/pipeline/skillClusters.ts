@@ -97,7 +97,9 @@ FROM (
 
 export function buildClusterJobStatsSql(clusters: { name: string; signals: string[] }[]): string {
   const mappings = clusters.flatMap((cluster) =>
-    cluster.signals.map((signal) => `(${quoteSqlLiteral(signal)}, ${quoteSqlLiteral(cluster.name)})`),
+    cluster.signals.map(
+      (signal) => `(${quoteSqlLiteral(signal)}, ${quoteSqlLiteral(cluster.name)})`,
+    ),
   );
   return `SELECT COALESCE(json_agg(row_to_json(cluster_row)), '[]'::json)
 FROM (
@@ -194,8 +196,7 @@ export function clusterSignals(
       return { name: sorted[0] as string, signals: sorted };
     })
     .sort(
-      (left, right) =>
-        (jobsBySignal.get(right.name) ?? 0) - (jobsBySignal.get(left.name) ?? 0),
+      (left, right) => (jobsBySignal.get(right.name) ?? 0) - (jobsBySignal.get(left.name) ?? 0),
     );
 }
 

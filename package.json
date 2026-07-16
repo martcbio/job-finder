@@ -35,6 +35,7 @@
     "db:migrate": "bun scripts/db-migrate.ts",
     "jobs:classify": "bun scripts/classify-jobs.ts",
     "jobs:duplicates": "bun scripts/find-duplicate-candidates.ts",
+    "jobs:expire": "bun scripts/expire-jobs.ts",
     "jobs:duplicate-review": "bun scripts/review-duplicate-candidate.ts",
     "jobs:export": "bun scripts/export-jobs.ts",
     "jobs:blog-lint": "bun scripts/job-market-blog-lint.ts",

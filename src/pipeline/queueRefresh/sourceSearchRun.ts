@@ -1,6 +1,10 @@
 import { SEARCH_KEYWORDS } from "../../config/search";
 import { planMigrations } from "../../db/migrations";
 import { fetchDiscoveryWithUsage } from "../discovery";
+import { sourceAdapterFor } from "../fastRefresh/summaries";
+import type { FastRefreshSourceSummary } from "../fastRefresh/types";
+import { ZERO_COSTS } from "../fastRefresh/types";
+import type { TimeFilter } from "../searchEngines";
 import {
   completeSearchQuery,
   completeSearchRun,
@@ -9,13 +13,9 @@ import {
   persistSearchResult,
 } from "../searchPersistence";
 import { buildSearchTargets } from "../searchTargets";
-import type { TimeFilter } from "../searchEngines";
-import { resolveJobSourceSites } from "../sourceSites";
-import { sourceAdapterFor } from "../fastRefresh/summaries";
-import type { FastRefreshSourceSummary } from "../fastRefresh/types";
-import { ZERO_COSTS } from "../fastRefresh/types";
-import { sourceAttemptStatus } from "../sourceAdapterContract";
 import type { SourceOutcome } from "../sourceAdapterContract";
+import { sourceAttemptStatus } from "../sourceAdapterContract";
+import { resolveJobSourceSites } from "../sourceSites";
 
 export interface SourceSearchRunOptions {
   siteIds: string[];
@@ -145,12 +145,7 @@ export async function runSourceSearchForSites(
       if (call.usage.tokens !== null) totalReportedTokens += call.usage.tokens;
       totalResults += items.length;
       successfulQueries += 1;
-      bumpSite(
-        perSite,
-        siteId,
-        items.length,
-        items.length > 0 ? "success" : "zero_results",
-      );
+      bumpSite(perSite, siteId, items.length, items.length > 0 ? "success" : "zero_results");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.push({ label: target.label, error: message });
@@ -171,8 +166,7 @@ export async function runSourceSearchForSites(
     runId,
     status,
     totalReportedTokens,
-    errorSummary:
-      errors.length > 0 ? errors.map((e) => `${e.label}: ${e.error}`).join("\n") : null,
+    errorSummary: errors.length > 0 ? errors.map((e) => `${e.label}: ${e.error}`).join("\n") : null,
   });
 
   return {
@@ -204,11 +198,9 @@ function bumpSite(
   });
 }
 
-export function searchRunToSourceSummaries(
-  run: SourceSearchRunResult,
-): FastRefreshSourceSummary[] {
+export function searchRunToSourceSummaries(run: SourceSearchRunResult): FastRefreshSourceSummary[] {
   return run.perSite.map((site) => {
-    const adapter = sourceAdapterFor(site.sourceId, null, null);
+    const adapter = sourceAdapterFor(site.sourceId, "", "");
     const errors = run.errors
       .filter((e) => e.label.toLowerCase().includes(site.sourceId.replace(/-/g, " ")))
       .map((e) => e.error);

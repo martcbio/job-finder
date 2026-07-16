@@ -48,7 +48,8 @@ describe("fetchAtsJson", () => {
     const result = await fetchAtsJson(
       endpoint,
       jobsSchema,
-      async () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }),
+      async () =>
+        new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }),
       () => undefined,
     );
 
@@ -82,13 +83,9 @@ describe("fetchAtsJson", () => {
     const failingFetcher: Fetcher = async () => {
       throw Object.assign(new Error("network down"), { code: "ENETDOWN" });
     };
-    const result = await fetchAtsJson(
-      endpoint,
-      jobsSchema,
-      failingFetcher,
-      () => undefined,
-      { baseDelayMs: 1 },
-    );
+    const result = await fetchAtsJson(endpoint, jobsSchema, failingFetcher, () => undefined, {
+      baseDelayMs: 1,
+    });
 
     expect(result).toMatchObject({
       status: "failure",

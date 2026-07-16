@@ -68,31 +68,36 @@ const LEXICON: LexiconEntry[] = [
     signal: "context engineering and memory design",
     kind: "required_skill",
     confidence: "high",
-    pattern: /\b(?:context engineering|context window|prompt engineering|memory (?:design|systems?|management) for)\b/i,
+    pattern:
+      /\b(?:context engineering|context window|prompt engineering|memory (?:design|systems?|management) for)\b/i,
   },
   {
     signal: "mlops deployment and model serving",
     kind: "required_skill",
     confidence: "medium",
-    pattern: /\b(?:mlops|model serving|model deployment|inference (?:stack|pipeline|optimi[sz]ation|speed)|vllm|tensorrt|triton)\b/i,
+    pattern:
+      /\b(?:mlops|model serving|model deployment|inference (?:stack|pipeline|optimi[sz]ation|speed)|vllm|tensorrt|triton)\b/i,
   },
   {
     signal: "fine-tuning and model training",
     kind: "required_skill",
     confidence: "medium",
-    pattern: /\b(?:fine[- ]?tun(?:e|ing)|lora\b|model training|training pipeline|post[- ]training)\b/i,
+    pattern:
+      /\b(?:fine[- ]?tun(?:e|ing)|lora\b|model training|training pipeline|post[- ]training)\b/i,
   },
   {
     signal: "python backend engineering",
     kind: "required_skill",
     confidence: "medium",
-    pattern: /\b(?:python (?:developer|engineer|backend)|backend.{0,40}python|python.{0,40}(?:fastapi|django|flask))\b/i,
+    pattern:
+      /\b(?:python (?:developer|engineer|backend)|backend.{0,40}python|python.{0,40}(?:fastapi|django|flask))\b/i,
   },
   {
     signal: "typescript full-stack engineering",
     kind: "required_skill",
     confidence: "medium",
-    pattern: /\b(?:typescript|node\.?js|react|next\.?js)\b.{0,60}\b(?:engineer|developer|full[- ]?stack)\b|\b(?:full[- ]?stack)\b.{0,60}\b(?:typescript|node\.?js|react)\b/i,
+    pattern:
+      /\b(?:typescript|node\.?js|react|next\.?js)\b.{0,60}\b(?:engineer|developer|full[- ]?stack)\b|\b(?:full[- ]?stack)\b.{0,60}\b(?:typescript|node\.?js|react)\b/i,
   },
   {
     signal: "c++ performance systems",
@@ -140,7 +145,8 @@ const LEXICON: LexiconEntry[] = [
     signal: "api integration and enterprise systems",
     kind: "responsibility",
     confidence: "medium",
-    pattern: /\b(?:api integrations?|integrat(?:e|ing|ion) (?:with )?(?:enterprise|existing|legacy) (?:systems|platforms)|rest apis?\b)\b/i,
+    pattern:
+      /\b(?:api integrations?|integrat(?:e|ing|ion) (?:with )?(?:enterprise|existing|legacy) (?:systems|platforms)|rest apis?\b)\b/i,
   },
   {
     signal: "client facing solutions delivery",
@@ -160,13 +166,15 @@ const LEXICON: LexiconEntry[] = [
     signal: "internal tools and developer workflows",
     kind: "responsibility",
     confidence: "medium",
-    pattern: /\b(?:internal (?:tools?|tooling|platforms?)|developer (?:experience|productivity|workflows?)|devex\b)\b/i,
+    pattern:
+      /\b(?:internal (?:tools?|tooling|platforms?)|developer (?:experience|productivity|workflows?)|devex\b)\b/i,
   },
   {
     signal: "security compliance governance",
     kind: "domain_context",
     confidence: "medium",
-    pattern: /\b(?:security (?:review|compliance|governance)|gdpr|iso 27001|soc ?2|ai governance|responsible ai)\b/i,
+    pattern:
+      /\b(?:security (?:review|compliance|governance)|gdpr|iso 27001|soc ?2|ai governance|responsible ai)\b/i,
   },
   {
     signal: "financial services regulated domain",
@@ -196,7 +204,10 @@ function evidenceFor(text: string, pattern: RegExp): string {
  * "vague ai mention" signal when AI language appears without any concrete
  * lexicon hit, mirroring the manual baseline's noise bucket.
  */
-export function extractSkillSignals(input: { title: string; description: string }): SkillSignalMatch[] {
+export function extractSkillSignals(input: {
+  title: string;
+  description: string;
+}): SkillSignalMatch[] {
   const text = `${input.title}\n${input.description}`;
   const matches: SkillSignalMatch[] = [];
 
@@ -223,7 +234,10 @@ export function extractSkillSignals(input: { title: string; description: string 
   return matches;
 }
 
-export function buildExtractableJobsSql(limit: number, extractor = SKILL_EXTRACTOR_VERSION): string {
+export function buildExtractableJobsSql(
+  limit: number,
+  extractor = SKILL_EXTRACTOR_VERSION,
+): string {
   return `SELECT COALESCE(json_agg(row_to_json(extract_row)), '[]'::json)
 FROM (
   SELECT

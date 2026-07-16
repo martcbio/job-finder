@@ -7,6 +7,7 @@ import ReviewQueueSidebar from "./ReviewQueueSidebar";
 import {
   defaultSavedViews,
   filterQueueJobs,
+  isCrossSourceDuplicate,
   type QueueFilter,
   type QueueJobView,
   type QueueSavedView,
@@ -260,6 +261,11 @@ function JobTable({
                         {view.employmentType === "contract" && (
                           <span className="shrink-0 rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-medium text-blue-500">
                             Contract
+                          </span>
+                        )}
+                        {isCrossSourceDuplicate(job) && (
+                          <span className="shrink-0 rounded bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-medium text-rose-500">
+                            Cross-dup
                           </span>
                         )}
                       </div>

@@ -80,7 +80,10 @@ export function extractMarkdownMetadata(markdown: string | null, label: string):
   return match?.[1]?.trim() ?? null;
 }
 
-export function extractLocation(markdown: string | null, description: string | null): string | null {
+export function extractLocation(
+  markdown: string | null,
+  description: string | null,
+): string | null {
   const location = extractMarkdownMetadata(markdown, "Location");
   if (location) return location;
   return description?.match(/\bLocation:\s*([^\n]+)/i)?.[1]?.trim() ?? null;

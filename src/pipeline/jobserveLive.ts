@@ -1,4 +1,5 @@
 import { htmlToReadableMarkdown } from "./httpPageExtract";
+import { classifyIr35Signals } from "./ir35Signals";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
 
 export interface LiveJobServeOptions {
@@ -378,12 +379,11 @@ function parseJobServeRoleBlock(
   ]
     .filter(Boolean)
     .join(" ");
-  const hasPermanentEvidence =
-    /\bpermanent\b/i.test(labels.get("type") ?? "") ||
-    /\b(?:per[\s-]+annum|annual(?:ly)?|p\.?\s*a\.?)\b/i.test(labels.get("rate") ?? "");
-  const isContractRole = !hasPermanentEvidence && /\bcontract(?:or|ing)?\b/i.test(roleText);
-  const outsideIr35 = isContractRole && hasPositiveIr35Signal(roleText, "outside");
-  const insideIr35 = isContractRole && hasPositiveIr35Signal(roleText, "inside");
+  const ir35 = classifyIr35Signals({
+    text: roleText,
+    employmentType: labels.get("type") ?? null,
+    compensation: labels.get("rate") ?? null,
+  });
 
   return {
     job_id: jobId,
@@ -407,12 +407,12 @@ function parseJobServeRoleBlock(
     detail_markdown: "",
     detail_status: detailUrl ? "skipped" : "error",
     detail_error: detailUrl ? "" : "No JobServe detail URL was present in the search result.",
-    outside_ir35: outsideIr35,
-    inside_ir35: insideIr35,
+    outside_ir35: ir35.outside,
+    inside_ir35: ir35.inside,
     remote_signal: /\bremote\b/i.test(roleText),
     security_clearance_required:
       /\b(?:sc cleared|security clearance|dv clearance|clearance required)\b/i.test(roleText),
-    priority_notes: priorityNotes(roleText, outsideIr35),
+    priority_notes: priorityNotes(roleText, ir35.outside),
   };
 }
 
@@ -496,12 +496,6 @@ function priorityNotes(text: string, outsideIr35: boolean): string[] {
   if (/\blangchain\b/i.test(text)) notes.push("langchain");
   if (/\binference\b/i.test(text)) notes.push("inference");
   return notes;
-}
-
-function hasPositiveIr35Signal(text: string, polarity: "outside" | "inside"): boolean {
-  const negated = new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\s*:\\s*no\\b`, "i");
-  if (negated.test(text)) return false;
-  return new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\b`, "i").test(text);
 }
 
 function splitSetCookieHeader(value: string | null): string[] {

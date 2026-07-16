@@ -1,11 +1,6 @@
-import {
-  FAST_REFRESH_SOURCE_IDS,
-  LANE_IMPORT_SOURCE_IDS,
-  normalizeQueueRefreshSourceId,
-  queueRefreshKindFor,
-} from "./registry";
+import { normalizeQueueRefreshSourceId, queueRefreshKindFor } from "./registry";
 
-export { FAST_REFRESH_SOURCE_IDS, allQueueRefreshSourceIds } from "./registry";
+export { allQueueRefreshSourceIds, FAST_REFRESH_SOURCE_IDS } from "./registry";
 
 export function partitionQueueRefreshSourceIds(sourceIds: readonly string[]): {
   fastRefreshIds: string[];

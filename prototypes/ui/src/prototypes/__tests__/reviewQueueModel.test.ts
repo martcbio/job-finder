@@ -5,6 +5,7 @@ import {
   deriveItRelevance,
   facetCounts,
   filterQueueJobs,
+  isCrossSourceDuplicate,
   toQueueJobView,
 } from "../reviewQueueModel";
 
@@ -54,6 +55,26 @@ describe("deriveItRelevance", () => {
 
   test("leaves a bare engineer without evidence unclear", () => {
     expect(deriveItRelevance(job("Engineer", "Join our growing team"))).toBe("unclear");
+  });
+});
+
+describe("isCrossSourceDuplicate", () => {
+  test("detects the cross-source duplicate kind", () => {
+    const row = job("Senior AI Engineer");
+    row.duplicate_candidates = [
+      {
+        candidate_id: "1",
+        other_job_id: "2",
+        other_title: "Senior AI Engineer",
+        other_company_hint: "Acme",
+        confidence: 0.99,
+        reason: "cross_source_exact; sources=jobserve,greenhouse",
+        state: "suggested",
+        kind: "cross_source",
+      },
+    ];
+
+    expect(isCrossSourceDuplicate(row)).toBe(true);
   });
 });
 

@@ -41,9 +41,9 @@ describe("extractSkillSignals", () => {
       title: "AI Engineer - Trading Analytics",
       description: "An exciting AI opportunity in a fast-paced environment.",
     });
-    expect(signals.some((signal) => signal.signal === "vague ai mention without concrete system")).toBe(
-      true,
-    );
+    expect(
+      signals.some((signal) => signal.signal === "vague ai mention without concrete system"),
+    ).toBe(true);
   });
 
   test("emits no vague fallback when text has no AI language", () => {
@@ -59,10 +59,12 @@ describe("extractSkillSignals", () => {
       title: "AI Lead",
       description: "Join a top hedge fund using AI.",
     });
-    expect(signals.some((signal) => signal.signal === "vague ai mention without concrete system")).toBe(
+    expect(
+      signals.some((signal) => signal.signal === "vague ai mention without concrete system"),
+    ).toBe(true);
+    expect(signals.some((signal) => signal.signal === "financial services regulated domain")).toBe(
       true,
     );
-    expect(signals.some((signal) => signal.signal === "financial services regulated domain")).toBe(true);
   });
 });
 
@@ -77,7 +79,9 @@ describe("buildRecordSkillSignalsSql", () => {
       },
     ]);
     expect(sql).toContain("you''ll build LLM apps");
-    expect(sql).toContain("ON CONFLICT (job_id, normalized_signal, signal_kind, extractor) DO NOTHING");
+    expect(sql).toContain(
+      "ON CONFLICT (job_id, normalized_signal, signal_kind, extractor) DO NOTHING",
+    );
     expect(sql).toContain("job_skill_extractions");
     expect(sql).toContain(SKILL_EXTRACTOR_VERSION);
   });

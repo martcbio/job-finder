@@ -18,7 +18,11 @@ const COUNTS: SignalCountRow[] = [
 describe("computeOverlaps", () => {
   test("computes jaccard from counts and shared jobs", () => {
     const overlaps = computeOverlaps(COUNTS, [
-      { signal_a: "agentic workflow orchestration", signal_b: "llm application development", shared_jobs: 12 },
+      {
+        signal_a: "agentic workflow orchestration",
+        signal_b: "llm application development",
+        shared_jobs: 12,
+      },
     ]);
     expect(overlaps).toHaveLength(1);
     const overlap = overlaps[0];
@@ -31,8 +35,16 @@ describe("computeOverlaps", () => {
 describe("clusterSignals", () => {
   test("merges signals above both floors and names cluster by frequency", () => {
     const overlaps = computeOverlaps(COUNTS, [
-      { signal_a: "agentic workflow orchestration", signal_b: "llm application development", shared_jobs: 12 },
-      { signal_a: "llm application development", signal_b: "retrieval and grounding systems", shared_jobs: 7 },
+      {
+        signal_a: "agentic workflow orchestration",
+        signal_b: "llm application development",
+        shared_jobs: 12,
+      },
+      {
+        signal_a: "llm application development",
+        signal_b: "retrieval and grounding systems",
+        shared_jobs: 7,
+      },
     ]);
     const clusters = clusterSignals(COUNTS, overlaps, { minShared: 3, minJaccard: 0.3 });
     const main = clusters[0];
@@ -40,12 +52,18 @@ describe("clusterSignals", () => {
     expect(main?.signals).toContain("agentic workflow orchestration");
     expect(main?.signals).toContain("retrieval and grounding systems");
     // databricks had no qualifying overlap: stays a singleton cluster
-    expect(clusters.some((cluster) => cluster.name === "snowflake databricks medallion")).toBe(true);
+    expect(clusters.some((cluster) => cluster.name === "snowflake databricks medallion")).toBe(
+      true,
+    );
   });
 
   test("keeps weak overlaps apart", () => {
     const overlaps = computeOverlaps(COUNTS, [
-      { signal_a: "llm application development", signal_b: "snowflake databricks medallion", shared_jobs: 3 },
+      {
+        signal_a: "llm application development",
+        signal_b: "snowflake databricks medallion",
+        shared_jobs: 3,
+      },
     ]);
     // jaccard = 3 / (20+5-3) = 0.136 < 0.3 → no merge
     const clusters = clusterSignals(COUNTS, overlaps, { minShared: 3, minJaccard: 0.3 });
@@ -53,7 +71,10 @@ describe("clusterSignals", () => {
   });
 
   test("excludes the vague-keyword noise signal from clustering", () => {
-    const counts = [...COUNTS, { signal: "vague ai mention without concrete system", jobs: 30, companies: 20 }];
+    const counts = [
+      ...COUNTS,
+      { signal: "vague ai mention without concrete system", jobs: 30, companies: 20 },
+    ];
     const clusters = clusterSignals(counts, [], { minShared: 3, minJaccard: 0.3 });
     expect(clusters.some((cluster) => cluster.name.includes("vague"))).toBe(false);
   });
@@ -62,7 +83,10 @@ describe("clusterSignals", () => {
 describe("buildClusterJobStatsSql", () => {
   test("maps signals to clusters via VALUES and escapes literals", () => {
     const sql = buildClusterJobStatsSql([
-      { name: "llm application development", signals: ["llm application development", "agentic workflow orchestration"] },
+      {
+        name: "llm application development",
+        signals: ["llm application development", "agentic workflow orchestration"],
+      },
     ]);
     expect(sql).toContain("VALUES ('llm application development', 'llm application development')");
     expect(sql).toContain("COUNT(DISTINCT s.job_id)");
@@ -78,7 +102,11 @@ describe("renderSkillClustersMarkdown", () => {
       signalledJobs: 80,
       signals: COUNTS,
       overlaps: computeOverlaps(COUNTS, [
-        { signal_a: "agentic workflow orchestration", signal_b: "llm application development", shared_jobs: 12 },
+        {
+          signal_a: "agentic workflow orchestration",
+          signal_b: "llm application development",
+          shared_jobs: 12,
+        },
       ]),
       clusters: [
         {

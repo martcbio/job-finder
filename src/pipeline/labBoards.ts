@@ -51,11 +51,15 @@ function parseArgs(argv: string[]): CliOptions {
   return { command, json, help, scheduledAt };
 }
 
-export function exitCodeForRecordStatus(status: "complete" | "degraded" | "failed" | "locked"): 0 | 1 {
+export function exitCodeForRecordStatus(
+  status: "complete" | "degraded" | "failed" | "locked",
+): 0 | 1 {
   return status === "complete" || status === "degraded" ? 0 : 1;
 }
 
-function renderInspection(report: Awaited<ReturnType<ReturnType<typeof createLabOpeningsModule>["inspect"]>>): string {
+function renderInspection(
+  report: Awaited<ReturnType<ReturnType<typeof createLabOpeningsModule>["inspect"]>>,
+): string {
   const lines = [`Lab openings checked at ${report.checkedAt}`];
   for (const projection of report.projections) {
     lines.push(

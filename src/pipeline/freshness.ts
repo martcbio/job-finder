@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 export const PROJECTION_IDS = ["lab-openings"] as const;
@@ -203,7 +203,8 @@ function diagnose(
     };
   }
 
-  const stale = current.freshUntil !== null && new Date(current.freshUntil).getTime() < now.getTime();
+  const stale =
+    current.freshUntil !== null && new Date(current.freshUntil).getTime() < now.getTime();
   if (latestAttempt?.status === "failed" && latestAttempt.runId !== current.runId) {
     const causes = [...latestAttempt.diagnostics];
     if (stale) causes.push(`The current generation expired at ${current.freshUntil}.`);
@@ -310,8 +311,7 @@ export function createFreshnessStore(options: FreshnessStoreOptions): FreshnessS
         updatedAt: now().toISOString(),
         latestAttempt: reference,
         current: run.status === "complete" ? reference : (previousState?.current ?? null),
-        lastHealthy:
-          run.status === "complete" ? reference : (previousState?.lastHealthy ?? null),
+        lastHealthy: run.status === "complete" ? reference : (previousState?.lastHealthy ?? null),
       };
       await writeJsonAtomic(statePath, nextState);
     },
@@ -333,14 +333,7 @@ export function createFreshnessStore(options: FreshnessStoreOptions): FreshnessS
               readRun(options.rootDir, state.current),
               readRun(options.rootDir, state.lastHealthy),
             ]);
-            return diagnose(
-              projectionId,
-              repair,
-              now(),
-              latestAttempt,
-              current,
-              lastHealthy,
-            );
+            return diagnose(projectionId, repair, now(), latestAttempt, current, lastHealthy);
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return corruptInspection(

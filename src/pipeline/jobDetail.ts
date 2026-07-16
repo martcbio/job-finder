@@ -1,6 +1,6 @@
 import { quoteSqlLiteral } from "../db/config";
-import type { FastRefreshJobRow } from "./fastRefresh/types";
 import { jobRowToSummary } from "./fastRefresh/summaries";
+import type { FastRefreshJobRow } from "./fastRefresh/types";
 
 export interface JobDetailRow {
   id: string;

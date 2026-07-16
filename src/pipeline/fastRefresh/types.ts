@@ -1,8 +1,4 @@
-import type {
-  SourceAdapter,
-  SourceAttemptStatus,
-  SourceOutcome,
-} from "../sourceAdapterContract";
+import type { SourceAdapter, SourceAttemptStatus, SourceOutcome } from "../sourceAdapterContract";
 
 export {
   type FastRefreshSourceAdapter,

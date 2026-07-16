@@ -1,4 +1,4 @@
-import { screenJob, type JobScreeningDecision } from "../jobScreening";
+import { type JobScreeningDecision, screenJob } from "../jobScreening";
 import {
   type JobServeContractRow,
   type RankedJobServeContract,

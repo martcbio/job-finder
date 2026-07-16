@@ -12,6 +12,7 @@ export interface ReviewQueueDuplicate {
   confidence: string | number;
   reason: string;
   state: string;
+  kind?: "cross_source" | "similar";
 }
 
 export interface ReviewQueueEvent {

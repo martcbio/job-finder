@@ -1,13 +1,13 @@
 import { SEARCH_KEYWORDS } from "../config/search";
 import { listFastRefreshSources } from "../pipeline/fastRefresh";
 import { sourceAdapterFor } from "../pipeline/fastRefresh/summaries";
-import type { SourceAdapterDescriptor } from "../pipeline/sourceAdapterContract";
-import { JOB_SOURCE_SITES } from "../pipeline/sourceSites";
 import {
   allQueueRefreshSourceIds,
   FAST_REFRESH_SOURCE_IDS,
   LANE_IMPORT_SOURCE_IDS,
 } from "../pipeline/queueRefresh/registry";
+import type { SourceAdapterDescriptor } from "../pipeline/sourceAdapterContract";
+import { JOB_SOURCE_SITES } from "../pipeline/sourceSites";
 import { ApiError } from "./errors";
 
 export function uniqueFastRefreshSources(): ReturnType<typeof listFastRefreshSources> {
@@ -39,7 +39,7 @@ export function listQueueRefreshSources(): SourceAdapterDescriptor[] {
   for (const site of JOB_SOURCE_SITES) {
     if (seen.has(site.id)) continue;
     seen.add(site.id);
-    const adapter = sourceAdapterFor(site.id, site.label, null);
+    const adapter = sourceAdapterFor(site.id, site.label, "");
     siteDescriptors.push({
       id: adapter.id,
       label: adapter.label,
@@ -55,7 +55,7 @@ export function listQueueRefreshSources(): SourceAdapterDescriptor[] {
   for (const laneId of LANE_IMPORT_SOURCE_IDS) {
     if (seen.has(laneId)) continue;
     seen.add(laneId);
-    const adapter = sourceAdapterFor(laneId, null, null);
+    const adapter = sourceAdapterFor(laneId, "", "");
     laneDescriptors.push({
       id: adapter.id,
       label: adapter.label,

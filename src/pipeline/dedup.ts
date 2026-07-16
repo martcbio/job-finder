@@ -8,7 +8,54 @@ export interface DedupResult {
   matchedTitle?: string;
 }
 
+export interface CrossSourceIdentityInput {
+  company: string | null;
+  title: string;
+  location: string | null;
+}
+
+export interface CrossSourceIdentity {
+  company: string;
+  title: string;
+  city: string;
+}
+
 const log = logger.child({ component: "dedup" });
+
+export function normalizeCrossSourceIdentity(
+  input: CrossSourceIdentityInput,
+): CrossSourceIdentity | null {
+  const company = normalizeIdentityText(input.company ?? "").replace(
+    /\b(?:incorporated|inc|limited|ltd|llc|plc|corporation|corp)\b/g,
+    "",
+  );
+  const title = normalizeIdentityText(input.title);
+  const city = normalizeLocationCity(input.location);
+  const normalizedCompany = company.replace(/\s+/g, " ").trim();
+  if (!normalizedCompany || !title || !city) return null;
+  return { company: normalizedCompany, title, city };
+}
+
+function normalizeIdentityText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9+#]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeLocationCity(value: string | null): string | null {
+  if (!value) return null;
+  const firstPart = value.split(/[,;|/]/, 1)[0] ?? "";
+  const city = normalizeIdentityText(
+    firstPart.replace(/\([^)]*\)/g, " ").replace(/\b(?:hybrid|on[ -]?site)\b/gi, " "),
+  ).replace(/^greater\s+/, "");
+  if (!city || /^(?:remote|uk|united kingdom|england|europe|emea)$/.test(city)) return null;
+  return city;
+}
 
 const DEDUP_TOOL: OpenAI.ChatCompletionTool = {
   type: "function",

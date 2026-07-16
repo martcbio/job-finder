@@ -12,10 +12,7 @@ export function normalizeQueueRefreshSourceId(value: string): string {
 let cachedIds: Set<string> | null = null;
 
 export function allQueueRefreshSourceIds(): string[] {
-  const ids = new Set<string>([
-    ...FAST_REFRESH_SOURCE_IDS,
-    ...LANE_IMPORT_SOURCE_IDS,
-  ]);
+  const ids = new Set<string>([...FAST_REFRESH_SOURCE_IDS, ...LANE_IMPORT_SOURCE_IDS]);
   for (const site of JOB_SOURCE_SITES) ids.add(site.id);
   return [...ids];
 }

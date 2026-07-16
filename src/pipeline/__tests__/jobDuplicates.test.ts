@@ -8,6 +8,74 @@ import {
 } from "../jobDuplicates";
 
 describe("findDuplicateCandidates", () => {
+  test("marks exact normalized identities from different sources as cross-source duplicates", () => {
+    const candidates = findDuplicateCandidates(
+      [
+        {
+          id: "10",
+          title: "Senior AI Engineer",
+          company_hint: "Acme Ltd",
+          canonical_url: "https://jobserve.example/10",
+          category: "agentic_engineer",
+          location_hint: "London, England",
+          source_ids: ["jobserve"],
+        },
+        {
+          id: "12",
+          title: "Senior AI Engineer",
+          company_hint: "Acme",
+          canonical_url: "https://boards.greenhouse.io/acme/12",
+          category: "agentic_engineer",
+          location_hint: "London (Hybrid), UK",
+          source_ids: ["greenhouse"],
+        },
+      ],
+      0.82,
+    );
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ jobIdA: "10", jobIdB: "12", confidence: 0.99 });
+    expect(candidates[0]?.reason).toContain("cross_source_exact");
+  });
+
+  test("does not mark same-source or different-city identities as cross-source duplicates", () => {
+    const base = {
+      title: "Senior AI Engineer",
+      company_hint: "Acme",
+      category: "agentic_engineer",
+    };
+    const candidates = findDuplicateCandidates(
+      [
+        {
+          ...base,
+          id: "10",
+          canonical_url: "https://example.com/10",
+          location_hint: "London",
+          source_ids: ["jobserve"],
+        },
+        {
+          ...base,
+          id: "11",
+          canonical_url: "https://example.com/11",
+          location_hint: "London",
+          source_ids: ["jobserve"],
+        },
+        {
+          ...base,
+          id: "12",
+          canonical_url: "https://example.com/12",
+          location_hint: "Manchester",
+          source_ids: ["greenhouse"],
+        },
+      ],
+      0.82,
+    );
+
+    expect(candidates.some((candidate) => candidate.reason.includes("cross_source_exact"))).toBe(
+      false,
+    );
+  });
+
   test("suggests same-company similar-title candidates without suppressing jobs", () => {
     const candidates = findDuplicateCandidates(
       [
@@ -73,6 +141,8 @@ describe("duplicate SQL builders", () => {
 
     expect(sql).toContain("FROM job_search.jobs");
     expect(sql).toContain("review_state <> 'rejected_by_us'");
+    expect(sql).toContain("source_ids");
+    expect(sql).toContain("location_hint");
     expect(sql).toContain("LIMIT 50");
   });
 

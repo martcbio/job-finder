@@ -108,6 +108,14 @@ DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:queue -- --limit 25
 DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:review -- --job-id 42 --state shortlisted --reason strong_match
 ```
 
+Close active queue rows that have stopped appearing at their source. This is
+never scheduled automatically and defaults to a dry run; only `--apply` writes:
+
+```bash
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:expire
+DATABASE_URL=postgres://mcb@localhost:5432/jobs bun run jobs:expire -- --days 21 --apply
+```
+
 Generate and review CV/application support:
 
 ```bash

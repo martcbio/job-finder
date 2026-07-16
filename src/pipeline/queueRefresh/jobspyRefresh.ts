@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { ingestNormalizedJobs, normalizeExternalJobPayload } from "../normalizedJobIngest";
 import { sourceAdapterFor } from "../fastRefresh/summaries";
 import type { FastRefreshSourceSummary } from "../fastRefresh/types";
 import { ZERO_COSTS } from "../fastRefresh/types";
+import { ingestNormalizedJobs, normalizeExternalJobPayload } from "../normalizedJobIngest";
 import { sourceAttemptStatus } from "../sourceAdapterContract";
 
 const DEFAULT_SNAPSHOT_CANDIDATES = [
@@ -12,10 +12,9 @@ const DEFAULT_SNAPSHOT_CANDIDATES = [
 ];
 
 export function resolveJobspySnapshotPath(): string | null {
-  const candidates = [
-    process.env.JOBSPY_SNAPSHOT_FILE,
-    ...DEFAULT_SNAPSHOT_CANDIDATES,
-  ].filter((value): value is string => Boolean(value));
+  const candidates = [process.env.JOBSPY_SNAPSHOT_FILE, ...DEFAULT_SNAPSHOT_CANDIDATES].filter(
+    (value): value is string => Boolean(value),
+  );
   return candidates.find((path) => existsSync(path)) ?? null;
 }
 

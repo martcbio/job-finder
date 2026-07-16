@@ -22,6 +22,7 @@ export interface ReviewQueueDuplicate {
   confidence: string | number;
   reason: string;
   state: string;
+  kind: "cross_source" | "similar";
 }
 
 export interface ReviewQueueEvent {
@@ -97,7 +98,11 @@ FROM (
             'other_company_hint', other_job.company_hint,
             'confidence', dc.confidence,
             'reason', dc.reason,
-            'state', dc.state
+            'state', dc.state,
+            'kind', CASE
+              WHEN dc.reason LIKE 'cross_source_exact;%' THEN 'cross_source'
+              ELSE 'similar'
+            END
           )
           ORDER BY dc.confidence DESC, dc.id DESC
         )
@@ -106,6 +111,7 @@ FROM (
           ON other_job.id = CASE WHEN dc.job_id_a = j.id THEN dc.job_id_b ELSE dc.job_id_a END
         WHERE (dc.job_id_a = j.id OR dc.job_id_b = j.id)
           AND dc.state = 'suggested'
+          AND (dc.reason NOT LIKE 'cross_source_exact;%' OR dc.job_id_b = j.id)
       ),
       '[]'::json
     ) AS duplicate_candidates,
@@ -219,7 +225,7 @@ function formatDuplicates(duplicates: ReviewQueueDuplicate[]): string {
   return duplicates
     .map(
       (duplicate) =>
-        `candidate ${duplicate.candidate_id}: #${duplicate.other_job_id} ${duplicate.other_title} (${formatConfidence(duplicate.confidence)}; ${duplicate.reason})`,
+        `${duplicate.kind === "cross_source" ? "Cross-dup " : ""}candidate ${duplicate.candidate_id}: #${duplicate.other_job_id} ${duplicate.other_title} (${formatConfidence(duplicate.confidence)}; ${duplicate.reason})`,
     )
     .join("; ");
 }

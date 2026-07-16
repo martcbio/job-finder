@@ -16,6 +16,8 @@ describe("buildReviewQueueSql", () => {
     expect(sql).toContain("FROM job_search.job_classification_labels jcl");
     expect(sql).toContain("FROM job_search.duplicate_candidates dc");
     expect(sql).toContain("FROM job_search.review_events re");
+    expect(sql).toContain("'kind'");
+    expect(sql).toContain("dc.job_id_b = j.id");
     expect(sql).toContain(
       "WHERE j.review_state = ANY(ARRAY['ready_for_review', 'duplicate_candidate']::text[])",
     );
@@ -69,6 +71,7 @@ describe("renderReviewQueueMarkdown", () => {
           confidence: "0.8800",
           reason: "same_company",
           state: "suggested",
+          kind: "similar",
         },
       ],
       latest_review_event: {

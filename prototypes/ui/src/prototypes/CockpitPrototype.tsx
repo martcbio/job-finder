@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { isShortlistedJob, isTriageQueueJob } from "../queueViews";
 import type { PrototypeId, PrototypeInfo, ReviewQueueRow } from "../types";
+import OpsOverview from "./OpsOverview";
 import ReviewQueueFilters from "./ReviewQueueFilters";
 import ReviewQueueSidebar from "./ReviewQueueSidebar";
 import {
@@ -19,6 +20,7 @@ const PAGE_SIZE = 25;
 
 interface Props {
   queue: ReviewQueueRow[];
+  qualityQueue: ReviewQueueRow[];
   live: boolean;
   loadError: string | null;
   lastUpdatedAt: string | null;
@@ -365,6 +367,7 @@ function Pagination({
 
 export default function CockpitPrototype({
   queue,
+  qualityQueue,
   live,
   loadError,
   lastUpdatedAt,
@@ -379,6 +382,7 @@ export default function CockpitPrototype({
   const [page, setPage] = useState(1);
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [activePage, setActivePage] = useState<"overview" | "queue">("overview");
 
   const queueRows = useMemo(() => queue.filter(isTriageQueueJob), [queue]);
   const jobs = useMemo(() => queueRows.map((job) => toQueueJobView(job, now)), [queueRows, now]);
@@ -420,6 +424,7 @@ export default function CockpitPrototype({
     return () => window.clearInterval(timer);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: every queue constraint change resets pagination
   useEffect(() => setPage(1), [query, filters, quick, sortMode]);
 
   const saveView = () => {
@@ -489,6 +494,7 @@ export default function CockpitPrototype({
       data-theme={theme}
     >
       <ReviewQueueSidebar
+        activePage={activePage}
         queueCount={queueRows.length}
         shortlistCount={shortlistCount}
         duplicateCount={duplicateCount}
@@ -496,6 +502,7 @@ export default function CockpitPrototype({
         savedCounts={savedCounts}
         prototypes={prototypes}
         onApplyView={applyView}
+        onSelectPage={setActivePage}
         onSaveView={saveView}
         onSelectPrototype={onSelectPrototype}
       />
@@ -505,24 +512,28 @@ export default function CockpitPrototype({
           <header className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="mb-2 text-[10px] text-[var(--rq-muted)] lg:hidden">
-                Signal Cockpit · Review Queue
+                Signal Cockpit · {activePage === "overview" ? "Overview" : "Review Queue"}
               </p>
               <h1 className="text-[27px] font-bold tracking-[-0.035em] text-[var(--rq-text)]">
-                Review Queue
+                {activePage === "overview" ? "Operations overview" : "Review Queue"}
               </h1>
               <p className="mt-1 text-[12px] text-[var(--rq-muted)]">
-                Review and manage job applications from your local job database.
+                {activePage === "overview"
+                  ? "Pipeline health, operational alerts, parity, and queue quality."
+                  : "Review and manage job applications from your local job database."}
               </p>
-              <p
-                className={`mt-1.5 text-[9px] ${loadError ? "text-rose-500" : "text-[var(--rq-faint)]"}`}
-              >
-                {loadError ??
-                  (updatedLabel
-                    ? `updated ${updatedLabel} · refreshes every minute`
-                    : live
-                      ? "loading latest queue…"
-                      : "connecting to local API…")}
-              </p>
+              {activePage === "queue" && (
+                <p
+                  className={`mt-1.5 text-[9px] ${loadError ? "text-rose-500" : "text-[var(--rq-faint)]"}`}
+                >
+                  {loadError ??
+                    (updatedLabel
+                      ? `updated ${updatedLabel} · refreshes every minute`
+                      : live
+                        ? "loading latest queue…"
+                        : "connecting to local API…")}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -540,95 +551,103 @@ export default function CockpitPrototype({
             </div>
           </header>
 
-          <section
-            className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-            aria-label="Queue statistics"
-          >
-            {statCards.map((card) => (
-              <article
-                key={card.label}
-                className={`rq-stat flex min-h-[124px] items-center justify-between rounded-xl border p-5 shadow-[var(--rq-shadow)] ${card.primary ? "rq-stat-primary" : "border-[var(--rq-border)] bg-[var(--rq-surface)]"}`}
+          {activePage === "overview" ? (
+            <OpsOverview queue={qualityQueue} now={now} />
+          ) : (
+            <>
+              <section
+                className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+                aria-label="Queue statistics"
               >
-                <div>
-                  <p
-                    className={`text-[11px] font-semibold ${card.primary ? "text-emerald-400" : "text-[var(--rq-muted)]"}`}
+                {statCards.map((card) => (
+                  <article
+                    key={card.label}
+                    className={`rq-stat flex min-h-[124px] items-center justify-between rounded-xl border p-5 shadow-[var(--rq-shadow)] ${card.primary ? "rq-stat-primary" : "border-[var(--rq-border)] bg-[var(--rq-surface)]"}`}
                   >
-                    {card.label}
-                  </p>
-                  <p className="mt-1 text-[29px] font-bold tracking-[-0.04em] tabular-nums">
-                    {card.value}
-                  </p>
-                  <p
-                    className={`mt-0.5 text-[10px] ${card.primary ? "text-slate-400" : "text-[var(--rq-muted)]"}`}
-                  >
-                    {card.sub}
-                  </p>
-                </div>
-                <StatIcon kind={card.kind} />
-              </article>
-            ))}
-          </section>
+                    <div>
+                      <p
+                        className={`text-[11px] font-semibold ${card.primary ? "text-emerald-400" : "text-[var(--rq-muted)]"}`}
+                      >
+                        {card.label}
+                      </p>
+                      <p className="mt-1 text-[29px] font-bold tracking-[-0.04em] tabular-nums">
+                        {card.value}
+                      </p>
+                      <p
+                        className={`mt-0.5 text-[10px] ${card.primary ? "text-slate-400" : "text-[var(--rq-muted)]"}`}
+                      >
+                        {card.sub}
+                      </p>
+                    </div>
+                    <StatIcon kind={card.kind} />
+                  </article>
+                ))}
+              </section>
 
-          <ReviewQueueFilters
-            jobs={jobs}
-            query={query}
-            filters={filters}
-            quick={quick}
-            onQueryChange={setQuery}
-            onFiltersChange={setFilters}
-            onQuickChange={setQuick}
-            onSaveView={saveView}
-          />
-
-          <div className="mb-3 mt-4 flex items-center justify-between gap-3">
-            <span className="text-[10px] tabular-nums text-[var(--rq-muted)]">
-              {filtered.length} matches
-            </span>
-            <label className="flex items-center gap-2 text-[10px] text-[var(--rq-text-soft)]">
-              Sort by
-              <select
-                value={sortMode}
-                onChange={(event) => setSortMode(event.target.value as SortMode)}
-                className="rounded-lg border border-[var(--rq-border)] bg-[var(--rq-surface)] px-3 py-2 text-[10px] font-medium text-[var(--rq-text)] outline-none focus:border-emerald-500/50"
-              >
-                <option value="latest">Latest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="confidence">Confidence</option>
-              </select>
-            </label>
-          </div>
-
-          <section
-            className="overflow-hidden rounded-xl border border-[var(--rq-border)] bg-[var(--rq-surface)] shadow-[var(--rq-shadow)]"
-            aria-label="Review queue results"
-          >
-            {pageJobs.length > 0 ? (
-              <JobTable
-                jobs={pageJobs}
-                now={now}
-                selected={selected}
-                onToggle={toggleSelected}
-                onTogglePage={togglePage}
+              <ReviewQueueFilters
+                jobs={jobs}
+                query={query}
+                filters={filters}
+                quick={quick}
+                onQueryChange={setQuery}
+                onFiltersChange={setFilters}
+                onQuickChange={setQuick}
+                onSaveView={saveView}
               />
-            ) : (
-              <div className="grid min-h-64 place-items-center px-6 text-center">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--rq-text)]">No matching jobs</p>
-                  <p className="mt-1 text-xs text-[var(--rq-muted)]">
-                    Remove a filter or broaden the search.
-                  </p>
-                </div>
-              </div>
-            )}
-          </section>
 
-          <footer className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[11px] text-[var(--rq-muted)]">
-              Showing {filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1} to{" "}
-              {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} results
-            </p>
-            <Pagination page={safePage} pages={pages} onPage={setPage} />
-          </footer>
+              <div className="mb-3 mt-4 flex items-center justify-between gap-3">
+                <span className="text-[10px] tabular-nums text-[var(--rq-muted)]">
+                  {filtered.length} matches
+                </span>
+                <label className="flex items-center gap-2 text-[10px] text-[var(--rq-text-soft)]">
+                  Sort by
+                  <select
+                    value={sortMode}
+                    onChange={(event) => setSortMode(event.target.value as SortMode)}
+                    className="rounded-lg border border-[var(--rq-border)] bg-[var(--rq-surface)] px-3 py-2 text-[10px] font-medium text-[var(--rq-text)] outline-none focus:border-emerald-500/50"
+                  >
+                    <option value="latest">Latest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="confidence">Confidence</option>
+                  </select>
+                </label>
+              </div>
+
+              <section
+                className="overflow-hidden rounded-xl border border-[var(--rq-border)] bg-[var(--rq-surface)] shadow-[var(--rq-shadow)]"
+                aria-label="Review queue results"
+              >
+                {pageJobs.length > 0 ? (
+                  <JobTable
+                    jobs={pageJobs}
+                    now={now}
+                    selected={selected}
+                    onToggle={toggleSelected}
+                    onTogglePage={togglePage}
+                  />
+                ) : (
+                  <div className="grid min-h-64 place-items-center px-6 text-center">
+                    <div>
+                      <p className="text-sm font-semibold text-[var(--rq-text)]">
+                        No matching jobs
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--rq-muted)]">
+                        Remove a filter or broaden the search.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <footer className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-[11px] text-[var(--rq-muted)]">
+                  Showing {filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1} to{" "}
+                  {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} results
+                </p>
+                <Pagination page={safePage} pages={pages} onPage={setPage} />
+              </footer>
+            </>
+          )}
         </div>
       </main>
     </div>

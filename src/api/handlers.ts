@@ -59,6 +59,7 @@ import {
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { SOURCE_LANES } from "../pipeline/sourceLanes";
 import { listCloudOpenings, listCloudRuns, parseCloudSince } from "./cloudOpenings";
+import { getCloudOps } from "./cloudOps";
 import type { ApiContext, ApiRoute } from "./context";
 import { ApiError, jsonResponse } from "./errors";
 import { matchPath, pathParam } from "./http";
@@ -137,6 +138,10 @@ export async function handleApiRequest(
   if (route.method === "GET" && route.path === "/api/cloud/runs") {
     const data = await listCloudRuns(context, positiveIntParam(route.search, "limit", 30, 500));
     return jsonResponse({ ok: true, data });
+  }
+
+  if (route.method === "GET" && route.path === "/api/cloud/ops") {
+    return jsonResponse({ ok: true, data: await getCloudOps(context) });
   }
 
   if (route.method === "GET" && route.path === "/api/jobs") {

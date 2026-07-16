@@ -153,6 +153,72 @@ export type CloudRowsResult<T> =
       reason: { code: CloudUnavailableCode; message: string; upstreamStatus?: number };
     };
 
+export interface OpsDoctorRow {
+  task: string;
+  substrate: string | null;
+  cadence_seconds: number | null;
+  latest_success_at: string | null;
+  latest_run_at?: string | null;
+  last_exit_status?: number | null;
+  runs_24h?: number | null;
+  failures_24h?: number | null;
+  failure_rate_24h?: number | null;
+  expected_beats_24h?: number | null;
+  missed_beats_24h?: number | null;
+  stale: boolean;
+  unhealthy?: boolean;
+}
+
+export interface OpsRunRow {
+  task: string;
+  substrate: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_status: number | null;
+}
+
+export interface OpsAlertRow {
+  id: number | string;
+  fingerprint: string;
+  severity: "warn" | "critical";
+  task: string | null;
+  substrate: string | null;
+  message: string;
+  first_seen: string;
+  last_seen: string;
+  occurrences: number;
+  delivered_at: string | null;
+}
+
+export interface OpsParityRow {
+  run_date: string;
+  substrate: "mac" | "modal";
+  run_id: string;
+  openings_count: number;
+  ids_sha256: string;
+  created_at: string;
+}
+
+interface OpsUnavailable {
+  status: "unavailable";
+  reason: { code: string; message: string; upstreamStatus?: number };
+}
+
+export interface CloudOpsPayload {
+  doctor:
+    | { status: "available"; source: "doctor_v2"; rows: OpsDoctorRow[] }
+    | { status: "doctor_not_deployed"; source: "doctor"; rows: OpsDoctorRow[] }
+    | OpsUnavailable;
+  runs: { status: "available"; rows: OpsRunRow[] } | OpsUnavailable;
+  alerts:
+    | { status: "available"; rows: OpsAlertRow[] }
+    | {
+        status: "alerts_unavailable";
+        reason: { code: string; message: string; upstreamStatus?: number };
+      };
+  parity: { status: "available"; rows: OpsParityRow[] } | OpsUnavailable;
+}
+
 export type PrototypeId = "cockpit" | "cloud" | "swipe" | "bento" | "timeline";
 
 export interface PrototypeInfo {

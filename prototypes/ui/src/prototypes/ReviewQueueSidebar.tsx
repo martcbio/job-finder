@@ -62,6 +62,7 @@ function Brand() {
 }
 
 interface Props {
+  activePage: "overview" | "queue";
   queueCount: number;
   shortlistCount: number;
   duplicateCount: number;
@@ -69,11 +70,13 @@ interface Props {
   savedCounts: Map<string, number>;
   prototypes: readonly PrototypeInfo[];
   onApplyView: (view: QueueSavedView) => void;
+  onSelectPage: (page: "overview" | "queue") => void;
   onSaveView: () => void;
   onSelectPrototype: (id: PrototypeId) => void;
 }
 
 export default function ReviewQueueSidebar({
+  activePage,
   queueCount,
   shortlistCount,
   duplicateCount,
@@ -81,13 +84,19 @@ export default function ReviewQueueSidebar({
   savedCounts,
   prototypes,
   onApplyView,
+  onSelectPage,
   onSaveView,
   onSelectPrototype,
 }: Props) {
   const [showAllViews, setShowAllViews] = useState(false);
   const nav = [
-    { label: "Overview", icon: "overview" as const },
-    { label: "Review Queue", icon: "queue" as const, count: queueCount, active: true },
+    { label: "Overview", icon: "overview" as const, page: "overview" as const },
+    {
+      label: "Review Queue",
+      icon: "queue" as const,
+      count: queueCount,
+      page: "queue" as const,
+    },
     { label: "Shortlist", icon: "shortlist" as const, count: shortlistCount },
     { label: "Duplicates", icon: "duplicates" as const, count: duplicateCount },
     { label: "Analytics", icon: "analytics" as const },
@@ -104,21 +113,26 @@ export default function ReviewQueueSidebar({
           <button
             key={item.label}
             type="button"
-            disabled={!item.active}
+            disabled={!item.page}
+            onClick={() => item.page && onSelectPage(item.page)}
             className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] transition ${
-              item.active
+              item.page === activePage
                 ? "bg-emerald-400/10 font-semibold text-white ring-1 ring-inset ring-emerald-400/5"
-                : "cursor-default text-[#aab5c0]"
+                : item.page
+                  ? "text-[#aab5c0] hover:bg-white/5 hover:text-white"
+                  : "cursor-default text-[#aab5c0]"
             }`}
           >
             <Icon
               name={item.icon}
-              className={item.active ? "h-[18px] w-[18px] text-[#35df87]" : "h-[18px] w-[18px]"}
+              className={
+                item.page === activePage ? "h-[18px] w-[18px] text-[#35df87]" : "h-[18px] w-[18px]"
+              }
             />
             <span>{item.label}</span>
             {item.count !== undefined && (
               <span
-                className={`ml-auto rounded-md px-2 py-0.5 text-[11px] tabular-nums ${item.active ? "bg-emerald-400/10 text-emerald-200" : "bg-white/7 text-[#b9c2cb]"}`}
+                className={`ml-auto rounded-md px-2 py-0.5 text-[11px] tabular-nums ${item.page === activePage ? "bg-emerald-400/10 text-emerald-200" : "bg-white/7 text-[#b9c2cb]"}`}
               >
                 {item.count}
               </span>

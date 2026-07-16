@@ -19,6 +19,7 @@ export default function App() {
     return (
       <CockpitPrototype
         queue={data.visibleQueue}
+        qualityQueue={data.queue}
         live={data.live}
         loadError={data.loadError}
         lastUpdatedAt={data.lastUpdatedAt}

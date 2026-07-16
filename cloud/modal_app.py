@@ -29,6 +29,7 @@ REPO_SOURCE = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path("/opt/job-finder-cursor-party")
 TARGETS_PATH = REPO_ROOT / "cloud" / "targets.json"
 SCAN_TIMEOUT_SECONDS = 1_650
+PARITY_CONFLICT_COLUMNS = "run_date,substrate,run_id"
 
 
 def _ignore_repo_path(path: Path) -> bool:
@@ -380,7 +381,7 @@ def _upsert_parity_run(
 ) -> None:
     response = client.post(
         f"{base_url}/rest/v1/parity_runs",
-        params={"on_conflict": "run_date,substrate"},
+        params={"on_conflict": PARITY_CONFLICT_COLUMNS},
         headers=_career_headers(representation=True),
         json={
             "run_date": _required_string(status, "date"),

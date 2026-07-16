@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from modal_app import ids_sha256, shape_rows
+from modal_app import PARITY_CONFLICT_COLUMNS, ids_sha256, shape_rows
 
 
 STATUS = {
@@ -93,6 +93,11 @@ class IdsSha256Test(unittest.TestCase):
 """
 
         self.assertEqual(ids_sha256(forward), ids_sha256(reverse))
+
+
+class ParityPersistenceTest(unittest.TestCase):
+    def test_keeps_every_scanner_run(self) -> None:
+        self.assertEqual(PARITY_CONFLICT_COLUMNS, "run_date,substrate,run_id")
 
 
 if __name__ == "__main__":

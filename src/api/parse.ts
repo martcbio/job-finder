@@ -1,12 +1,10 @@
+import { z } from "zod/v4";
 import {
   APPLICATION_STATUSES,
-  isApplicationStatus,
   type ApplicationStatus,
+  isApplicationStatus,
 } from "../pipeline/jobApplications";
-import {
-  isDuplicateCandidateState,
-  type DuplicateCandidateState,
-} from "../pipeline/jobDuplicates";
+import { type DuplicateCandidateState, isDuplicateCandidateState } from "../pipeline/jobDuplicates";
 import {
   isReviewActor,
   isReviewState,
@@ -15,15 +13,15 @@ import {
   type ReviewActor,
   type ReviewState,
 } from "../pipeline/jobReview";
-import {
-  isPipelineStepName,
-  type PipelineStepName,
-} from "../pipeline/pipelinePlan";
+import { isPipelineStepName, type PipelineStepName } from "../pipeline/pipelinePlan";
 import { isTimeFilter, type TimeFilter } from "../pipeline/searchEngines";
 import { parseSourceLaneIds, SOURCE_LANES } from "../pipeline/sourceLanes";
 import { DEFAULT_QUEUE_STATES } from "./constants";
 import { ApiError } from "./errors";
 import { fastRefreshSourceId } from "./refreshApi";
+
+const MAX_POSTGRES_BIGINT = 9_223_372_036_854_775_807n;
+const isoTimestamp = z.iso.datetime({ offset: true });
 
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   const contentType = request.headers.get("content-type") ?? "";
@@ -110,7 +108,10 @@ export function nullableApplicationStatus(value: string | null): ApplicationStat
   return optionalApplicationStatus(value, "applied");
 }
 
-export function optionalApplicationStatus(value: unknown, fallback: ApplicationStatus): ApplicationStatus {
+export function optionalApplicationStatus(
+  value: unknown,
+  fallback: ApplicationStatus,
+): ApplicationStatus {
   if (value === undefined || value === null || value === "") return fallback;
   const text = requiredString(value, "status");
   if (!isApplicationStatus(text)) {
@@ -152,7 +153,10 @@ export function requiredDuplicateReviewState(
   return state;
 }
 
-export function optionalTimeFilter(value: string | null | undefined, fallback: TimeFilter): TimeFilter {
+export function optionalTimeFilter(
+  value: string | null | undefined,
+  fallback: TimeFilter,
+): TimeFilter {
   const timeFilter = value ?? fallback;
   if (!isTimeFilter(timeFilter)) {
     throw new ApiError(400, "invalid_time_filter", `Unsupported time filter "${timeFilter}"`);
@@ -203,7 +207,12 @@ export function nullablePositiveInt(value: string | null, name: string): number 
   return positiveIntValue(value, name, 1, Number.MAX_SAFE_INTEGER);
 }
 
-export function positiveIntValue(value: unknown, name: string, fallback: number, max: number): number {
+export function positiveIntValue(
+  value: unknown,
+  name: string,
+  fallback: number,
+  max: number,
+): number {
   if (value === undefined || value === null || value === "") return fallback;
   const parsed =
     typeof value === "number" ? value : Number.parseInt(requiredString(value, name), 10);
@@ -241,6 +250,26 @@ export function nullableString(value: unknown, field: string): string | null {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string") {
     throw new ApiError(400, "invalid_field", `${field} must be a string when provided`);
+  }
+  return value;
+}
+
+export function nullableIntegerString(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") {
+    throw new ApiError(400, "invalid_field", `${field} must be an integer string when provided`);
+  }
+  const text = value.trim();
+  if (!/^[1-9]\d*$/.test(text) || BigInt(text) > MAX_POSTGRES_BIGINT) {
+    throw new ApiError(400, "invalid_field", `${field} must be a positive bigint string`);
+  }
+  return text;
+}
+
+export function nullableIsoTimestamp(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !isoTimestamp.safeParse(value).success) {
+    throw new ApiError(400, "invalid_field", `${field} must be an ISO timestamp when provided`);
   }
   return value;
 }

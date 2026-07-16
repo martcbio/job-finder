@@ -66,6 +66,8 @@ import { matchPath, pathParam } from "./http";
 import { buildMeta, readHealth } from "./meta";
 import {
   nullableApplicationStatus,
+  nullableIntegerString,
+  nullableIsoTimestamp,
   nullablePositiveInt,
   nullableReviewState,
   nullableString,
@@ -351,10 +353,10 @@ export async function handleApiRequest(
         jobId,
         status,
         actor,
-        cvDraftId: nullableString(body.cvDraftId, "cvDraftId"),
+        cvDraftId: nullableIntegerString(body.cvDraftId, "cvDraftId"),
         channel: nullableString(body.channel, "channel"),
         externalUrl: nullableString(body.externalUrl, "externalUrl"),
-        appliedAt: nullableString(body.appliedAt, "appliedAt"),
+        appliedAt: nullableIsoTimestamp(body.appliedAt, "appliedAt"),
         note: nullableString(body.note, "note"),
       }),
     );

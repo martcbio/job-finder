@@ -7,8 +7,42 @@ CREATE TABLE IF NOT EXISTS careers.parity_runs (
     openings_count integer NOT NULL,
     ids_sha256 text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (run_date, substrate)
+    PRIMARY KEY (run_date, substrate, run_id)
 );
+
+DO $$
+DECLARE
+    primary_key_columns text[];
+    primary_key_name text;
+BEGIN
+    SELECT
+        constraint_row.conname,
+        array_agg(attribute_row.attname ORDER BY key_column.ordinality)
+    INTO primary_key_name, primary_key_columns
+    FROM pg_constraint constraint_row
+    CROSS JOIN LATERAL unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+    JOIN pg_attribute attribute_row
+      ON attribute_row.attrelid = constraint_row.conrelid
+     AND attribute_row.attnum = key_column.attnum
+    WHERE constraint_row.conrelid = 'careers.parity_runs'::regclass
+      AND constraint_row.contype = 'p'
+    GROUP BY constraint_row.conname;
+
+    IF primary_key_columns IS DISTINCT FROM ARRAY['run_date', 'substrate', 'run_id'] THEN
+        IF primary_key_name IS NOT NULL THEN
+            EXECUTE format(
+                'ALTER TABLE careers.parity_runs DROP CONSTRAINT %I',
+                primary_key_name
+            );
+        END IF;
+        ALTER TABLE careers.parity_runs
+            ADD PRIMARY KEY (run_date, substrate, run_id);
+    END IF;
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS parity_runs_created_at_idx
+    ON careers.parity_runs (created_at DESC);
 
 CREATE TABLE IF NOT EXISTS careers.targets (
     org text PRIMARY KEY,

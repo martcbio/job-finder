@@ -23,6 +23,9 @@ readonly SCHEDULED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 readonly RUN_DATE="${SCHEDULED_AT%%T*}"
 readonly AUTHORIZATION="Authorization: Bearer ${SUPABASE_SERVICE_KEY}"
 
+# shellcheck source=lib/resolve-openings-artifacts.sh
+source "${REPO_ROOT}/scripts/lib/resolve-openings-artifacts.sh"
+
 start_payload="$(jq -cn \
   --arg task "careers-lab-openings" \
   --arg substrate "mac" \
@@ -78,27 +81,20 @@ set +e
 scanner_status=$?
 set -e
 
-status_path="${MARKET_DIR}/openings-${RUN_DATE}.status.json"
-jsonl_path="${MARKET_DIR}/openings-${RUN_DATE}.jsonl"
-if [[ ! -r "${status_path}" || ! -r "${jsonl_path}" ]]; then
-  printf 'lab-openings-scheduled: missing artifacts: %s or %s\n' "${status_path}" "${jsonl_path}" >&2
-  exit 1
-fi
-
-scanner_run_id="$(jq -er '.runId | strings | select(length > 0)' "${status_path}")"
-openings_count="$(jq -s 'length' "${jsonl_path}")"
-ids_payload="$(jq -r '[.org, .ats, .id] | if all(.[]; type == "string" and length > 0) then join(":") else error("org, ats, and id must be non-empty strings") end' "${jsonl_path}" | LC_ALL=C sort)"
+resolve_openings_artifacts "${MARKET_DIR}" "${RUN_DATE}"
+openings_count="$(jq -s 'length' "${OPENINGS_JSONL_PATH}")"
+ids_payload="$(jq -r '[.org, .ats, .id] | if all(.[]; type == "string" and length > 0) then join(":") else error("org, ats, and id must be non-empty strings") end' "${OPENINGS_JSONL_PATH}" | LC_ALL=C sort)"
 ids_sha256="$(printf '%s' "${ids_payload}" | shasum -a 256 | cut -d ' ' -f 1)"
 
 parity_payload="$(jq -cn \
   --arg run_date "${RUN_DATE}" \
   --arg substrate "mac" \
-  --arg run_id "${scanner_run_id}" \
+  --arg run_id "${OPENINGS_RUN_ID}" \
   --argjson openings_count "${openings_count}" \
   --arg ids_sha256 "${ids_sha256}" \
   '{run_date: $run_date, substrate: $substrate, run_id: $run_id, openings_count: $openings_count, ids_sha256: $ids_sha256}')"
 curl --fail-with-body --silent --show-error \
-  -X POST "${SUPABASE_URL}/rest/v1/parity_runs?on_conflict=run_date%2Csubstrate" \
+  -X POST "${SUPABASE_URL}/rest/v1/parity_runs?on_conflict=run_date%2Csubstrate%2Crun_id" \
   -H "apikey: ${SUPABASE_SERVICE_KEY}" \
   -H "${AUTHORIZATION}" \
   -H "Content-Type: application/json" \

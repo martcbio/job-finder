@@ -7,6 +7,7 @@ import type {
   OpsRunRow,
   ReviewQueueRow,
 } from "../types";
+import { deriveParityComparisons } from "./parityModel";
 import { toQueueJobView } from "./reviewQueueModel";
 
 const POLL_INTERVAL_MS = 60_000;
@@ -161,31 +162,37 @@ function RunHistory({ rows }: { rows: OpsRunRow[] }) {
 }
 
 function ParityPanel({ rows }: { rows: OpsParityRow[] }) {
-  const groups = useMemo(() => {
-    const byDate = new Map<string, Partial<Record<"mac" | "modal", OpsParityRow>>>();
-    for (const row of rows)
-      byDate.set(row.run_date, { ...byDate.get(row.run_date), [row.substrate]: row });
-    return [...byDate.entries()].sort(([a], [b]) => b.localeCompare(a));
-  }, [rows]);
-  if (groups.length === 0) return <EmptyState>No parity checks reported.</EmptyState>;
+  const comparisons = useMemo(() => deriveParityComparisons(rows), [rows]);
+  if (comparisons.length === 0) return <EmptyState>No parity checks reported.</EmptyState>;
   return (
     <div className="divide-y divide-[var(--rq-border)] overflow-hidden rounded-xl border border-[var(--rq-border)] bg-[var(--rq-surface)] shadow-[var(--rq-shadow)]">
-      {groups.map(([date, pair]) => {
-        const missing = pair.mac ? (pair.modal ? null : "modal") : "mac";
-        const matches = pair.mac?.ids_sha256 === pair.modal?.ids_sha256;
+      {comparisons.map((comparison) => {
+        const awaiting = comparison.status.startsWith("awaiting_")
+          ? comparison.status.replace("awaiting_", "")
+          : null;
         return (
-          <div key={date} className="flex items-center justify-between gap-4 px-4 py-3">
+          <div
+            key={comparison.runDate}
+            className="flex items-center justify-between gap-4 px-4 py-3"
+          >
             <div>
-              <p className="text-[10px] font-semibold text-[var(--rq-text)]">{date}</p>
+              <p className="text-[10px] font-semibold text-[var(--rq-text)]">
+                {comparison.runDate}
+              </p>
               <p className="mt-0.5 text-[9px] tabular-nums text-[var(--rq-muted)]">
-                mac {pair.mac?.openings_count ?? "—"} · modal {pair.modal?.openings_count ?? "—"}
+                mac {comparison.mac?.openings_count ?? "—"} · modal{" "}
+                {comparison.modal?.openings_count ?? "—"}
               </p>
             </div>
-            {missing ? (
+            {awaiting ? (
               <span className="text-[9px] font-medium text-[var(--rq-muted)]">
-                awaiting {missing}
+                awaiting {awaiting}
               </span>
-            ) : matches ? (
+            ) : comparison.status === "no_comparable_window" ? (
+              <span className="text-[9px] font-medium text-[var(--rq-muted)]">
+                no comparable window
+              </span>
+            ) : comparison.status === "in_sync" ? (
               <span className="text-[9px] font-semibold text-emerald-500">✓ in sync</span>
             ) : (
               <span className="text-[9px] font-semibold text-amber-500">divergence</span>

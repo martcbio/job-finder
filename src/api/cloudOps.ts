@@ -301,7 +301,7 @@ export async function getCloudOps(context: ApiContext) {
         table: "parity_runs",
         select: "run_date,substrate,run_id,openings_count,ids_sha256,created_at",
         order: "run_date.desc,created_at.desc",
-        limit: 6,
+        limit: 100,
         profile: "careers",
       },
       z.array(ParityRunSchema),

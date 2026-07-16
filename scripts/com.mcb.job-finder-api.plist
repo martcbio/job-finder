@@ -2,30 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>
-  <string>com.mcb.job-finder-api</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/bun</string>
-    <string>run</string>
-    <string>api</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>DATABASE_URL</key>
-    <string>postgres://mcb@localhost:5432/jobs</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>/Users/mcb/Library/Logs/job-finder-api.out.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/mcb/Library/Logs/job-finder-api.err.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DATABASE_URL</key>
+		<string>postgres://mcb@localhost:5432/jobs</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.mcb.job-finder-api</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>-c</string>
+		<string>set -a; source "$HOME/.config/estate-control-plane.env"; set +a; exec /opt/homebrew/bin/bun run api</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/mcb/Library/Logs/job-finder-api.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/mcb/Library/Logs/job-finder-api.out.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party</string>
 </dict>
 </plist>

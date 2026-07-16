@@ -74,7 +74,7 @@ finish_beacon() {
 trap finish_beacon EXIT
 
 set +e
-(cd "${REPO_ROOT}" && bun run labs:openings -- record --scheduled-at "${SCHEDULED_AT}")
+(cd "${REPO_ROOT}" && PATH="/opt/homebrew/bin:${PATH}" /opt/homebrew/bin/bun run labs:openings -- record --scheduled-at "${SCHEDULED_AT}")
 scanner_status=$?
 set -e
 

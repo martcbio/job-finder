@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { isShortlistedJob, isTriageQueueJob } from "../queueViews";
-import type { PrototypeId, PrototypeInfo, ReviewQueueRow } from "../types";
+import type {
+  ApplicationActor,
+  ApplicationRow,
+  ApplicationStatus,
+  PrototypeId,
+  PrototypeInfo,
+  ReviewQueueRow,
+} from "../types";
+import type { ApplicationLifecycleState } from "../useApplicationLifecycle";
+import ApplicationPipelineBoard from "./ApplicationPipelineBoard";
+import { findApplicationForQueueRow } from "./applicationBoardModel";
 import OpsOverview from "./OpsOverview";
 import ReviewQueueFilters from "./ReviewQueueFilters";
 import ReviewQueueSidebar from "./ReviewQueueSidebar";
@@ -27,6 +37,18 @@ interface Props {
   lastUpdatedAt: string | null;
   prototypes: readonly PrototypeInfo[];
   onSelectPrototype: (id: PrototypeId) => void;
+  applications: ApplicationRow[];
+  applicationState: ApplicationLifecycleState;
+  applicationError: string | null;
+  applicationUpdatedAt: string | null;
+  onTrackApplication: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
+  onShortlistApplication: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
+  onTransitionApplication: (
+    id: string,
+    to: ApplicationStatus,
+    by: ApplicationActor,
+    note?: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type Theme = "light" | "dark";
@@ -185,16 +207,41 @@ function JobTable({
   selected,
   onToggle,
   onTogglePage,
+  applications,
+  applicationState,
+  onTrack,
+  onShortlist,
 }: {
   jobs: QueueJobView[];
   now: number;
   selected: Set<string>;
   onToggle: (id: string) => void;
   onTogglePage: () => void;
+  applications: ApplicationRow[];
+  applicationState: ApplicationLifecycleState;
+  onTrack: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
+  onShortlist: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const allSelected = jobs.length > 0 && jobs.every((job) => selected.has(job.job.id));
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const run = async (
+    job: ReviewQueueRow,
+    action: (row: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>,
+  ) => {
+    setBusyId(job.id);
+    setActionError(null);
+    const result = await action(job);
+    setBusyId(null);
+    if (!result.ok) setActionError(result.error ?? "Application action failed");
+  };
   return (
     <div className="overflow-x-auto">
+      {actionError && (
+        <p className="border-b border-rose-500/20 bg-rose-500/8 px-4 py-2 text-[10px] text-rose-500" aria-live="polite">
+          {actionError}
+        </p>
+      )}
       <table className="w-full min-w-[1270px] border-collapse text-left">
         <thead>
           <tr className="border-b border-[var(--rq-border)] text-[10px] font-semibold text-[var(--rq-muted)]">
@@ -225,6 +272,9 @@ function JobTable({
             const company = job.company_hint ?? "Unknown company";
             const status = statusLabel(view);
             const duplicate = status === "Duplicate candidate";
+            const application = findApplicationForQueueRow(applications, job);
+            const applicationUnavailable = applicationState !== "available";
+            const busy = busyId === job.id;
             return (
               <tr
                 key={job.id}
@@ -296,12 +346,33 @@ function JobTable({
                   {relativeTime(view.postedAt, now)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3.5">
-                  <button
-                    type="button"
-                    className={`rounded-md border px-3 py-2 text-[10px] font-semibold ${duplicate ? "border-amber-500/65 text-amber-500" : "border-emerald-500/55 text-emerald-500"}`}
-                  >
-                    {status}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy || applicationUnavailable || Boolean(application)}
+                      onClick={() => void run(job, onTrack)}
+                      className={`rounded-md border px-2.5 py-2 text-[9px] font-semibold disabled:opacity-55 ${
+                        duplicate
+                          ? "border-amber-500/55 text-amber-500"
+                          : "border-emerald-500/45 text-emerald-600"
+                      }`}
+                      title={applicationUnavailable ? "Application cloud is unavailable" : undefined}
+                    >
+                      {application ? `Tracked · ${application.status.replace(/_/g, " ")}` : "Track"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        applicationUnavailable ||
+                        (application !== undefined && application.status !== "interested")
+                      }
+                      onClick={() => void run(job, onShortlist)}
+                      className="rounded-md border border-blue-500/45 px-2.5 py-2 text-[9px] font-semibold text-blue-500 disabled:opacity-55"
+                    >
+                      {application && application.status !== "interested" ? "Shortlisted" : "Shortlist"}
+                    </button>
+                  </div>
                 </td>
                 <td className="px-3 py-3.5">
                   <button
@@ -379,6 +450,13 @@ export default function CockpitPrototype({
   lastUpdatedAt,
   prototypes,
   onSelectPrototype,
+  applications,
+  applicationState,
+  applicationError,
+  applicationUpdatedAt,
+  onTrackApplication,
+  onShortlistApplication,
+  onTransitionApplication,
 }: Props) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [query, setQuery] = useState("");
@@ -388,7 +466,7 @@ export default function CockpitPrototype({
   const [page, setPage] = useState(1);
   const [now, setNow] = useState(Date.now());
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [activePage, setActivePage] = useState<"overview" | "queue">("overview");
+  const [activePage, setActivePage] = useState<"overview" | "queue" | "shortlist">("overview");
 
   const queueRows = useMemo(() => queue.filter(isTriageQueueJob), [queue]);
   const jobs = useMemo(() => queueRows.map((job) => toQueueJobView(job, now)), [queueRows, now]);
@@ -401,7 +479,10 @@ export default function CockpitPrototype({
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const pageJobs = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const shortlistCount = queue.filter(isShortlistedJob).length;
+  const reviewShortlistCount = queue.filter(isShortlistedJob).length;
+  const shortlistCount = applications.filter(
+    (application) => application.status !== "closed" && application.status !== "offer",
+  ).length;
   const duplicateCount = queueRows.filter(
     (job) => job.review_state === "duplicate_candidate" || job.duplicate_candidates.length > 0,
   ).length;
@@ -485,7 +566,12 @@ export default function CockpitPrototype({
       sub: "currently in review",
       kind: "review" as const,
     },
-    { label: "Shortlisted", value: shortlistCount, sub: "shortlisted", kind: "shortlist" as const },
+    {
+      label: "Shortlisted",
+      value: reviewShortlistCount,
+      sub: "shortlisted",
+      kind: "shortlist" as const,
+    },
     {
       label: "Duplicate Flags",
       value: duplicateCount,
@@ -518,15 +604,21 @@ export default function CockpitPrototype({
           <header className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="mb-2 text-[10px] text-[var(--rq-muted)] lg:hidden">
-                Signal Cockpit · {activePage === "overview" ? "Overview" : "Review Queue"}
+                Signal Cockpit · {activePage === "overview" ? "Overview" : activePage === "queue" ? "Review Queue" : "Shortlist"}
               </p>
               <h1 className="text-[27px] font-bold tracking-[-0.035em] text-[var(--rq-text)]">
-                {activePage === "overview" ? "Operations overview" : "Review Queue"}
+                {activePage === "overview"
+                  ? "Operations overview"
+                  : activePage === "queue"
+                    ? "Review Queue"
+                    : "Application pipeline"}
               </h1>
               <p className="mt-1 text-[12px] text-[var(--rq-muted)]">
                 {activePage === "overview"
-                  ? "Pipeline health, operational alerts, parity, and queue quality."
-                  : "Review and manage job applications from your local job database."}
+                  ? "Pipeline health, operational alerts, parity, and application outcomes."
+                  : activePage === "queue"
+                    ? "Review and track jobs from your local job database."
+                    : "Move tracked applications forward while keeping send authority with the owner."}
               </p>
               {activePage === "queue" && (
                 <p
@@ -558,7 +650,22 @@ export default function CockpitPrototype({
           </header>
 
           {activePage === "overview" ? (
-            <OpsOverview queue={qualityQueue} now={now} />
+            <OpsOverview
+              queue={qualityQueue}
+              now={now}
+              applications={applications}
+              applicationState={applicationState}
+              applicationError={applicationError}
+            />
+          ) : activePage === "shortlist" ? (
+            <ApplicationPipelineBoard
+              applications={applications}
+              state={applicationState}
+              error={applicationError}
+              updatedAt={applicationUpdatedAt}
+              now={now}
+              onTransition={onTransitionApplication}
+            />
           ) : (
             <>
               <section
@@ -630,6 +737,10 @@ export default function CockpitPrototype({
                     selected={selected}
                     onToggle={toggleSelected}
                     onTogglePage={togglePage}
+                    applications={applications}
+                    applicationState={applicationState}
+                    onTrack={onTrackApplication}
+                    onShortlist={onShortlistApplication}
                   />
                 ) : (
                   <div className="grid min-h-64 place-items-center px-6 text-center">

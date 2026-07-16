@@ -375,31 +375,50 @@ includes the plan in the error details.
 
 `GET /api/applications`
 
-Returns local application records.
+Returns the cloud-durable application lifecycle from `careers.applications`, newest first. If
+Supabase is unreachable, unconfigured, or the schema has not been applied/exposed, `data` is an
+explicit `cloud_unavailable` result rather than a local fallback.
 
 Query parameters:
 
 - `status`: optional application status
-- `limit`: positive integer, default `50`, max `250`
 
 `POST /api/applications`
 
-Records a local application audit event and moves the job to the matching review
-state. This does not submit externally.
+Tracks an opening at `interested`. Creates are idempotent when `org`, `ats`, and `external_id` are
+all present. This records lifecycle data only; it never submits externally.
 
 Body:
 
 ```json
 {
-  "jobId": "1",
-  "status": "waiting",
-  "cvDraftId": "2",
-  "channel": "greenhouse",
-  "externalUrl": "https://example.com/application",
-  "note": "Submitted manually",
-  "actor": "human"
+  "org": "acme",
+  "ats": "greenhouse",
+  "external_id": "12345",
+  "source": "lab-openings",
+  "title": "AI Engineer",
+  "company": "Acme",
+  "url": "https://job-boards.greenhouse.io/acme/jobs/12345"
 }
 ```
+
+`POST /api/applications/:id/transition`
+
+Moves one application over a legal lifecycle edge and appends `{status, at, by}` to
+`status_history`. Forward edges are
+`interested → shortlisted → cv_staged → sent → response → interview → offer`; `closed` is reachable
+from any active status and requires `note` as the closing reason.
+
+```json
+{
+  "to": "shortlisted",
+  "by": "agent",
+  "note": "Strong match"
+}
+```
+
+The `sent` transition is rejected unless `by` is `owner`. The endpoint only records a send the
+owner already performed.
 
 ### CV Support
 

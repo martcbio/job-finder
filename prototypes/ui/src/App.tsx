@@ -7,11 +7,13 @@ import CockpitPrototype from "./prototypes/CockpitPrototype";
 import SwipeTriagePrototype from "./prototypes/SwipeTriagePrototype";
 import TimelinePrototype from "./prototypes/TimelinePrototype";
 import type { PrototypeId } from "./types";
+import { useApplicationLifecycle } from "./useApplicationLifecycle";
 import { useJobFinderData } from "./useJobFinderData";
 
 export default function App() {
   const [active, setActive] = useState<PrototypeId>("cockpit");
   const data = useJobFinderData();
+  const lifecycle = useApplicationLifecycle();
 
   const current = PROTOTYPES.find((p) => p.id === active) ?? PROTOTYPES[0];
 
@@ -25,6 +27,13 @@ export default function App() {
         lastUpdatedAt={data.lastUpdatedAt}
         prototypes={PROTOTYPES}
         onSelectPrototype={setActive}
+        applications={lifecycle.applications}
+        applicationState={lifecycle.state}
+        applicationError={lifecycle.error}
+        applicationUpdatedAt={lifecycle.updatedAt}
+        onTrackApplication={lifecycle.track}
+        onShortlistApplication={lifecycle.shortlist}
+        onTransitionApplication={lifecycle.transition}
       />
     );
   }

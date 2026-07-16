@@ -98,6 +98,61 @@ export interface ApiMeta {
   reviewActors: string[];
 }
 
+export const APPLICATION_STATUSES = [
+  "interested",
+  "shortlisted",
+  "cv_staged",
+  "sent",
+  "response",
+  "interview",
+  "offer",
+  "closed",
+] as const;
+
+export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
+export type ApplicationActor = "agent" | "owner";
+export type ApplicationSource = "lab-openings" | "jobserve" | "manual";
+
+export interface ApplicationHistoryEntry {
+  status: ApplicationStatus;
+  at: string;
+  by: ApplicationActor;
+}
+
+export interface ApplicationRow {
+  id: string;
+  org: string | null;
+  ats: string | null;
+  external_id: string | null;
+  source: ApplicationSource;
+  title: string;
+  company: string;
+  url: string | null;
+  status: ApplicationStatus;
+  status_history: ApplicationHistoryEntry[];
+  cv_ref: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CreateApplicationInput {
+  org: string;
+  ats: string;
+  external_id: string;
+  source: ApplicationSource;
+  title: string;
+  company: string;
+  url: string;
+}
+
+export type ApplicationCloudResult<T> =
+  | { status: "available"; data: T }
+  | {
+      status: "cloud_unavailable";
+      reason: { code: string; message: string; upstreamStatus?: number };
+    };
+
 export interface FastRefreshSourceInfo {
   id: string;
   label: string;

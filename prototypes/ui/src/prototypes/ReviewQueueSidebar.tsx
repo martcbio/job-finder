@@ -62,7 +62,7 @@ function Brand() {
 }
 
 interface Props {
-  activePage: "overview" | "queue";
+  activePage: "overview" | "queue" | "shortlist";
   queueCount: number;
   shortlistCount: number;
   duplicateCount: number;
@@ -70,7 +70,7 @@ interface Props {
   savedCounts: Map<string, number>;
   prototypes: readonly PrototypeInfo[];
   onApplyView: (view: QueueSavedView) => void;
-  onSelectPage: (page: "overview" | "queue") => void;
+  onSelectPage: (page: "overview" | "queue" | "shortlist") => void;
   onSaveView: () => void;
   onSelectPrototype: (id: PrototypeId) => void;
 }
@@ -97,7 +97,12 @@ export default function ReviewQueueSidebar({
       count: queueCount,
       page: "queue" as const,
     },
-    { label: "Shortlist", icon: "shortlist" as const, count: shortlistCount },
+    {
+      label: "Shortlist",
+      icon: "shortlist" as const,
+      count: shortlistCount,
+      page: "shortlist" as const,
+    },
     { label: "Duplicates", icon: "duplicates" as const, count: duplicateCount },
     { label: "Analytics", icon: "analytics" as const },
   ];

@@ -16,12 +16,6 @@ import {
   SOURCE_ATTEMPT_STATUSES,
 } from "../pipeline/fastRefresh";
 import {
-  type ApplicationListRow,
-  buildListApplicationsSql,
-  buildRecordApplicationSql,
-  type RecordedApplicationRow,
-} from "../pipeline/jobApplications";
-import {
   buildJobDetailSql,
   buildJobFullTextSql,
   type JobDetailRow,
@@ -58,6 +52,11 @@ import {
 } from "../pipeline/skillClusters";
 import { buildSourceHealthSql, type SourceHealthRow } from "../pipeline/sourceHealth";
 import { SOURCE_LANES } from "../pipeline/sourceLanes";
+import {
+  createCloudApplication,
+  listCloudApplications,
+  transitionCloudApplication,
+} from "./cloudApplications";
 import { listCloudOpenings, listCloudRuns, parseCloudSince } from "./cloudOpenings";
 import { getCloudOps } from "./cloudOps";
 import type { ApiContext, ApiRoute } from "./context";
@@ -65,14 +64,10 @@ import { ApiError, jsonResponse } from "./errors";
 import { matchPath, pathParam } from "./http";
 import { buildMeta, readHealth } from "./meta";
 import {
-  nullableApplicationStatus,
-  nullableIntegerString,
-  nullableIsoTimestamp,
   nullablePositiveInt,
   nullableReviewState,
   nullableString,
   optionalActor,
-  optionalApplicationStatus,
   positiveIntParam,
   positiveIntValue,
   readJsonObject,
@@ -333,35 +328,31 @@ export async function handleApiRequest(
   }
 
   if (route.method === "GET" && route.path === "/api/applications") {
-    const status = nullableApplicationStatus(route.search.get("status"));
-    const rows = await context.query<ApplicationListRow[]>(
-      buildListApplicationsSql({
-        status: status ?? undefined,
-        limit: positiveIntParam(route.search, "limit", 50, 250),
-      }),
-    );
-    return jsonResponse({ ok: true, data: rows });
+    return jsonResponse({
+      ok: true,
+      data: await listCloudApplications(context, route.search.get("status")),
+    });
   }
 
   if (route.method === "POST" && route.path === "/api/applications") {
     const body = await readJsonObject(request);
-    const jobId = requiredString(body.jobId, "jobId");
-    const status = optionalApplicationStatus(body.status, "applied");
-    const actor = optionalActor(body.actor, "human");
-    const row = await context.query<RecordedApplicationRow | null>(
-      buildRecordApplicationSql({
-        jobId,
-        status,
-        actor,
-        cvDraftId: nullableIntegerString(body.cvDraftId, "cvDraftId"),
-        channel: nullableString(body.channel, "channel"),
-        externalUrl: nullableString(body.externalUrl, "externalUrl"),
-        appliedAt: nullableIsoTimestamp(body.appliedAt, "appliedAt"),
-        note: nullableString(body.note, "note"),
-      }),
+    const data = await createCloudApplication(context, body);
+    const responseStatus = data.status === "available" && data.data.created ? 201 : 200;
+    return jsonResponse({ ok: true, data }, responseStatus);
+  }
+
+  const applicationTransitionMatch = matchPath(
+    route.path,
+    "/api/applications/:applicationId/transition",
+  );
+  if (route.method === "POST" && applicationTransitionMatch) {
+    const body = await readJsonObject(request);
+    const data = await transitionCloudApplication(
+      context,
+      pathParam(applicationTransitionMatch, "applicationId"),
+      body,
     );
-    if (row === null) throw new ApiError(404, "job_not_found", `No job found with id ${jobId}`);
-    return jsonResponse({ ok: true, data: row }, 201);
+    return jsonResponse({ ok: true, data });
   }
 
   const duplicateReviewMatch = matchPath(route.path, "/api/duplicates/:candidateId/review");

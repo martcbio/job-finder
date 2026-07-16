@@ -46,7 +46,8 @@ describe("job-finder API", () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(data.reviewStates).toContain("ready_for_review");
-    expect(data.applicationStatuses).toContain("waiting");
+    expect(data.applicationStatuses).toContain("interested");
+    expect(data.applicationStatuses).toContain("interview");
     expect(sourceLanes.map((lane) => lane.id)).toContain("jobspy");
     expect(integrations.jina?.requiredForSearch).toBe(false);
     expect(integrations.jina?.configured).toBe(false);

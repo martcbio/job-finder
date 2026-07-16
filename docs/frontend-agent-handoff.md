@@ -146,8 +146,9 @@ CV draft routes exist, but they should stay behind human review:
 - `GET /api/applications`
 - `POST /api/applications`
 
-`POST /api/applications` records local state only. It must not submit an external
-application.
+`POST /api/applications` records cloud-durable lifecycle state only. It must not submit an
+external application; only the owner-gated transition endpoint may record a send the owner
+already performed.
 
 ## Notion Boundary
 

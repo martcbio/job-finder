@@ -1,7 +1,7 @@
-import { APPLICATION_STATUSES } from "../pipeline/jobApplications";
 import { DUPLICATE_CANDIDATE_STATES } from "../pipeline/jobDuplicates";
 import { REVIEW_ACTORS, REVIEW_STATES } from "../pipeline/jobReview";
 import { SOURCE_LANES } from "../pipeline/sourceLanes";
+import { CLOUD_APPLICATION_STATUSES } from "./cloudApplications";
 import { RUN_CONFIRMATION } from "./constants";
 import type { ApiContext } from "./context";
 import { ApiError } from "./errors";
@@ -52,7 +52,7 @@ export function buildMeta(env: NodeJS.ProcessEnv): unknown {
   return {
     reviewStates: REVIEW_STATES,
     reviewActors: REVIEW_ACTORS,
-    applicationStatuses: APPLICATION_STATUSES,
+    applicationStatuses: CLOUD_APPLICATION_STATUSES,
     duplicateCandidateStates: DUPLICATE_CANDIDATE_STATES,
     pipeline: {
       runConfirmation: RUN_CONFIRMATION,

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ApplicationRow,
   ApiEnvelope,
   CloudOpsPayload,
   OpsDoctorRow,
@@ -7,6 +8,8 @@ import type {
   OpsRunRow,
   ReviewQueueRow,
 } from "../types";
+import type { ApplicationLifecycleState } from "../useApplicationLifecycle";
+import { deriveApplicationFunnel } from "./applicationBoardModel";
 import { deriveParityComparisons } from "./parityModel";
 import { toQueueJobView } from "./reviewQueueModel";
 
@@ -236,7 +239,70 @@ function DataQuality({ queue }: { queue: ReviewQueueRow[] }) {
   );
 }
 
-export default function OpsOverview({ queue, now }: { queue: ReviewQueueRow[]; now: number }) {
+function ApplicationFunnel({ applications, now }: { applications: ApplicationRow[]; now: number }) {
+  const funnel = useMemo(
+    () => deriveApplicationFunnel(applications, new Date(now)),
+    [applications, now],
+  );
+  const statuses = [
+    "interested",
+    "shortlisted",
+    "cv_staged",
+    "sent",
+    "response",
+    "interview",
+    "offer",
+    "closed",
+  ] as const;
+  return (
+    <div className="overflow-hidden rounded-xl border border-[var(--rq-border)] bg-[var(--rq-surface)] shadow-[var(--rq-shadow)]">
+      <div className="grid grid-cols-2 border-b border-[var(--rq-border)] sm:grid-cols-4 lg:grid-cols-8">
+        {statuses.map((status) => (
+          <div key={status} className="border-r border-[var(--rq-border)] px-3 py-4 last:border-r-0">
+            <p className="text-xl font-bold tabular-nums text-[var(--rq-text)]">
+              {funnel.counts[status]}
+            </p>
+            <p className="mt-1 truncate text-[8px] uppercase tracking-[0.07em] text-[var(--rq-muted)]">
+              {status.replace(/_/g, " ")}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-px bg-[var(--rq-border)]">
+        <div className="bg-[var(--rq-surface)] px-5 py-5">
+          <p className="text-3xl font-bold tabular-nums text-emerald-500">
+            {funnel.interviewsAllTime}
+          </p>
+          <p className="mt-1 text-[9px] font-semibold text-[var(--rq-text-soft)]">
+            Interviews booked · all time
+          </p>
+        </div>
+        <div className="bg-[var(--rq-surface)] px-5 py-5">
+          <p className="text-3xl font-bold tabular-nums text-emerald-500">
+            {funnel.interviews30d}
+          </p>
+          <p className="mt-1 text-[9px] font-semibold text-[var(--rq-text-soft)]">
+            Interviews booked · 30 days
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function OpsOverview({
+  queue,
+  now,
+  applications,
+  applicationState,
+  applicationError,
+}: {
+  queue: ReviewQueueRow[];
+  now: number;
+  applications: ApplicationRow[];
+  applicationState: ApplicationLifecycleState;
+  applicationError: string | null;
+}) {
   const [ops, setOps] = useState<CloudOpsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -283,6 +349,15 @@ export default function OpsOverview({ queue, now }: { queue: ReviewQueueRow[]; n
             ? `updated ${relativeTime(updatedAt, now)} · refreshes every minute`
             : "loading operations data…")}
       </p>
+
+      <section className="mb-7" aria-label="Application funnel">
+        <SectionHeader title="Application funnel" detail="interviews derive from status history" />
+        {applicationState === "cloud_unavailable" ? (
+          <EmptyState>{applicationError ?? "Application lifecycle is unavailable."}</EmptyState>
+        ) : (
+          <ApplicationFunnel applications={applications} now={now} />
+        )}
+      </section>
 
       <section className="mb-7" aria-label="Pipeline health">
         <SectionHeader

@@ -49,6 +49,7 @@ interface Props {
     by: ApplicationActor,
     note?: string,
   ) => Promise<{ ok: boolean; error?: string }>;
+  onStageApplicationCv: (id: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type Theme = "light" | "dark";
@@ -489,6 +490,7 @@ export default function CockpitPrototype({
   onTrackApplication,
   onShortlistApplication,
   onTransitionApplication,
+  onStageApplicationCv,
 }: Props) {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [query, setQuery] = useState("");
@@ -702,6 +704,7 @@ export default function CockpitPrototype({
               updatedAt={applicationUpdatedAt}
               now={now}
               onTransition={onTransitionApplication}
+              onStageCv={onStageApplicationCv}
             />
           ) : (
             <>

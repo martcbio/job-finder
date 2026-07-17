@@ -156,6 +156,19 @@ export interface CreateApplicationInput {
   url: string;
 }
 
+export interface CvStageResult {
+  application: ApplicationRow;
+  caseRef: string;
+  caseDir: string;
+  sourcePath: string;
+  htmlPaths: string[];
+  pdfPaths: string[];
+  renderStatus: "dummy_rendered";
+  identity: "dummy";
+  description: { available: boolean; source: string };
+  fragments: { available: number; selected: number };
+}
+
 export type ApplicationCloudResult<T> =
   | { status: "available"; data: T }
   | {

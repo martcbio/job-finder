@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   createApplication,
   fetchApplications,
+  stageApplicationCv,
   transitionApplication,
 } from "./applicationApi";
 import {
@@ -26,6 +27,7 @@ export interface ApplicationLifecycle {
   updatedAt: string | null;
   track: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
   shortlist: (job: ReviewQueueRow) => Promise<{ ok: boolean; error?: string }>;
+  stageCv: (id: string) => Promise<{ ok: boolean; error?: string }>;
   transition: (
     id: string,
     to: ApplicationStatus,
@@ -151,5 +153,25 @@ export function useApplicationLifecycle(): ApplicationLifecycle {
     [applications, transition],
   );
 
-  return { applications, state, error, updatedAt, track, shortlist, transition };
+  const stageCv = useCallback(async (id: string) => {
+    try {
+      const result = await stageApplicationCv(id);
+      const updated = result.application;
+      setApplications((current) => [
+        updated,
+        ...current.filter((application) => application.id !== updated.id),
+      ]);
+      setUpdatedAt(new Date().toISOString());
+      setState("available");
+      setError(null);
+      return { ok: true };
+    } catch (caught) {
+      return {
+        ok: false,
+        error: caught instanceof Error ? caught.message : "Unable to stage CV",
+      };
+    }
+  }, []);
+
+  return { applications, state, error, updatedAt, track, shortlist, stageCv, transition };
 }

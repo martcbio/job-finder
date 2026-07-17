@@ -420,6 +420,14 @@ from any active status and requires `note` as the closing reason.
 The `sent` transition is rejected unless `by` is `owner`. The endpoint only records a send the
 owner already performed.
 
+`POST /api/applications/:id/stage-cv`
+
+Stages a dummy-rendered resume3 CV for a shortlisted application using the same deterministic core
+as `bun run cv:stage -- <id>`. The route writes only inside the application's resume3 per-case
+directory, sets `cv_ref`, and transitions to `cv_staged` as `agent`. It fails if the application is
+not shortlisted or if resume3 sync/render fails. See [CV staging](cv-staging.md) for selection and
+identity-safety details.
+
 ### CV Support
 
 `POST /api/cv/bullets`

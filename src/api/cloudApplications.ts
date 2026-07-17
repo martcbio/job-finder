@@ -266,6 +266,59 @@ export async function listCloudApplications(
   return fetchRows(context, { status: parsedStatus });
 }
 
+export async function getCloudApplication(
+  context: ApiContext,
+  idValue: string,
+): Promise<CloudApplicationResult<CloudApplication>> {
+  const id = validateId(idValue);
+  const rows = await fetchRows(context, { id });
+  if (rows.status !== "available") return rows;
+  const application = rows.data[0];
+  if (!application) {
+    throw new ApiError(404, "application_not_found", `No application found with id ${id}`);
+  }
+  return { status: "available", data: application };
+}
+
+export async function updateCloudApplicationCvRef(
+  context: ApiContext,
+  idValue: string,
+  cvRef: string,
+): Promise<CloudApplicationResult<{ application: CloudApplication }>> {
+  const id = validateId(idValue);
+  const url = applicationsUrl(context.cloudConfig);
+  if (!url) {
+    return unavailable(
+      "cloud_not_configured",
+      "Application lifecycle cloud credentials are not configured on this API server.",
+    );
+  }
+  url.searchParams.set("select", SELECT_FIELDS);
+  filter(url, "id", id);
+  filter(url, "status", "shortlisted");
+  const result = await cloudRequest(context, url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Profile": "careers",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({ cv_ref: cvRef, updated_at: context.now().toISOString() }),
+  });
+  if (result.status !== "available") return result;
+  const rows = parseRows(result.data.body, result.data.response.status);
+  if (rows.status !== "available") return rows;
+  const application = rows.data[0];
+  if (!application) {
+    throw new ApiError(
+      409,
+      "application_cv_stage_conflict",
+      "The application is no longer shortlisted, so cv_ref was not updated.",
+    );
+  }
+  return { status: "available", data: { application } };
+}
+
 export async function createCloudApplication(
   context: ApiContext,
   body: unknown,

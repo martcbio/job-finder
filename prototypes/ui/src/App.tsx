@@ -34,6 +34,7 @@ export default function App() {
         onTrackApplication={lifecycle.track}
         onShortlistApplication={lifecycle.shortlist}
         onTransitionApplication={lifecycle.transition}
+        onStageApplicationCv={lifecycle.stageCv}
       />
     );
   }

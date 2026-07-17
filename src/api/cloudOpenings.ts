@@ -22,6 +22,15 @@ const CloudOpeningSchema = z.object({
   last_seen_run_id: z.string(),
 });
 
+const CloudOpeningRawSchema = z.object({
+  org: z.string(),
+  ats: z.enum(["ashby", "greenhouse", "lever"]),
+  external_id: z.string(),
+  title: z.string().nullable(),
+  company: z.string(),
+  raw: z.unknown(),
+});
+
 const CloudRunSchema = z.object({
   run_id: z.string(),
   run_date: z.iso.date(),
@@ -32,6 +41,7 @@ const CloudRunSchema = z.object({
 });
 
 export type CloudOpening = z.infer<typeof CloudOpeningSchema>;
+export type CloudOpeningRaw = z.infer<typeof CloudOpeningRawSchema>;
 export type CloudRun = z.infer<typeof CloudRunSchema>;
 export type CloudUnavailableCode =
   | "cloud_not_configured"
@@ -184,6 +194,27 @@ export function listCloudOpenings(
       filters: options.since ? { first_seen_at: `gte.${options.since}` } : undefined,
     },
     z.array(CloudOpeningSchema),
+  );
+}
+
+export function getCloudOpeningRaw(
+  context: ApiContext,
+  provenance: { org: string; ats: string; externalId: string },
+): Promise<CloudRowsResult<CloudOpeningRaw>> {
+  return fetchCloudRows(
+    context,
+    {
+      table: "openings",
+      select: "org,ats,external_id,title,company,raw",
+      limit: 1,
+      order: "last_seen_at.desc",
+      filters: {
+        org: `eq.${provenance.org}`,
+        ats: `eq.${provenance.ats}`,
+        external_id: `eq.${provenance.externalId}`,
+      },
+    },
+    z.array(CloudOpeningRawSchema),
   );
 }
 

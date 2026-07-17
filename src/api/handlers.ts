@@ -345,6 +345,20 @@ export async function handleApiRequest(
     route.path,
     "/api/applications/:applicationId/transition",
   );
+
+  const applicationStageCvMatch = matchPath(
+    route.path,
+    "/api/applications/:applicationId/stage-cv",
+  );
+  if (route.method === "POST" && applicationStageCvMatch) {
+    if (!context.stageCv) {
+      throw new ApiError(500, "cv_stage_unavailable", "CV staging is not configured.");
+    }
+    const applicationId = pathParam(applicationStageCvMatch, "applicationId");
+    const data = await context.stageCv(context, applicationId);
+    return jsonResponse({ ok: true, data });
+  }
+
   if (route.method === "POST" && applicationTransitionMatch) {
     const body = await readJsonObject(request);
     const data = await transitionCloudApplication(

@@ -24,6 +24,7 @@ interface Props {
     by: ApplicationActor,
     note?: string,
   ) => Promise<{ ok: boolean; error?: string }>;
+  onStageCv: (id: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 function label(status: string): string {
@@ -50,6 +51,7 @@ export default function ApplicationPipelineBoard({
   updatedAt,
   now,
   onTransition,
+  onStageCv,
 }: Props) {
   const grouped = useMemo(() => groupApplications(applications), [applications]);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -78,6 +80,14 @@ export default function ApplicationPipelineBoard({
     const result = await onTransition(application.id, "closed", "owner", reason.trim());
     setBusyId(null);
     if (!result.ok) setActionError(result.error ?? "Unable to close application");
+  };
+
+  const stageCv = async (application: ApplicationRow) => {
+    setBusyId(application.id);
+    setActionError(null);
+    const result = await onStageCv(application.id);
+    setBusyId(null);
+    if (!result.ok) setActionError(result.error ?? "Unable to stage CV");
   };
 
   return (
@@ -113,6 +123,7 @@ export default function ApplicationPipelineBoard({
                 {grouped[status].map((application) => {
                   const next = nextApplicationStatus(application.status);
                   const sentAction = next === "sent";
+                  const stageAction = application.status === "shortlisted";
                   const busy = busyId === application.id;
                   return (
                     <article
@@ -133,8 +144,27 @@ export default function ApplicationPipelineBoard({
                       <p className="mt-2 text-[9px] text-[var(--rq-faint)]">
                         tracked {applicationAge(application.created_at, now)} ago
                       </p>
+                      {application.status === "cv_staged" && application.cv_ref && (
+                        <div className="mt-2 rounded-md bg-[var(--rq-hover)] px-2 py-1.5">
+                          <p className="break-all font-mono text-[8px] text-[var(--rq-text-soft)]">
+                            {application.cv_ref}
+                          </p>
+                          <p className="mt-1 text-[8px] font-semibold text-violet-500">
+                            dummy rendered
+                          </p>
+                        </div>
+                      )}
                       <div className="mt-3 flex flex-col gap-1.5">
-                        {next && (
+                        {stageAction ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void stageCv(application)}
+                            className="rounded-md border border-violet-500/45 px-2.5 py-2 text-[9px] font-bold text-violet-500 transition hover:bg-violet-500/10 disabled:opacity-50"
+                          >
+                            {busy ? "Staging CV…" : "Stage CV"}
+                          </button>
+                        ) : next ? (
                           <button
                             type="button"
                             disabled={busy}
@@ -147,7 +177,7 @@ export default function ApplicationPipelineBoard({
                           >
                             {sentAction ? "Mark sent — I sent this" : `Move to ${label(next)}`}
                           </button>
-                        )}
+                        ) : null}
                         <button
                           type="button"
                           disabled={busy}

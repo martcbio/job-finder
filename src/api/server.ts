@@ -1,7 +1,8 @@
 import { config } from "../config";
 import { runPsqlJson } from "../db/psql";
 import { runQueueRefresh } from "../pipeline/queueRefresh";
-import type { JobFinderApiOptions } from "./context";
+import { stageApplicationCvWithContext } from "./applicationCvStage";
+import type { ApiContext, JobFinderApiOptions } from "./context";
 import { errorResponse } from "./errors";
 import { handleApiRequest } from "./handlers";
 import { buildCorsHeaders, parsePort, trimTrailingSlash } from "./http";
@@ -9,16 +10,15 @@ import { buildCorsHeaders, parsePort, trimTrailingSlash } from "./http";
 export type {
   ApiFetch,
   ApiQuery,
+  ApplicationCvStageRunner,
   CloudConfig,
   FastRefreshRunner,
   JobFinderApiOptions,
 } from "./context";
 export { ApiError } from "./errors";
 
-export function createJobFinderApiHandler(
-  options: JobFinderApiOptions = {},
-): (request: Request) => Promise<Response> {
-  const context = {
+export function createJobFinderApiContext(options: JobFinderApiOptions = {}): ApiContext {
+  return {
     query: options.query ?? ((sql) => runPsqlJson(sql)),
     fastRefresh: options.fastRefresh ?? ((fastOptions) => runQueueRefresh(fastOptions)),
     env: options.env ?? process.env,
@@ -29,7 +29,14 @@ export function createJobFinderApiHandler(
       supabaseServiceKey: config.supabaseServiceKey,
     },
     fetch: options.fetch ?? globalThis.fetch,
+    stageCv: options.stageCv ?? stageApplicationCvWithContext,
   };
+}
+
+export function createJobFinderApiHandler(
+  options: JobFinderApiOptions = {},
+): (request: Request) => Promise<Response> {
+  const context = createJobFinderApiContext(options);
 
   return async (request) => {
     const origin = request.headers.get("origin");
@@ -69,6 +76,7 @@ export function serveJobFinderApi(
   return Bun.serve({
     hostname,
     port,
+    idleTimeout: 255,
     fetch: createJobFinderApiHandler(options),
   });
 }

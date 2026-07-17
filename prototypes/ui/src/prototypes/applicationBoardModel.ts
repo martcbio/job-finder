@@ -52,13 +52,26 @@ function atsIdentity(urlValue: string): AtsIdentity | null {
 }
 
 function slug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "") || "unknown";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "unknown"
+  );
 }
 
 export function applicationInputFromQueueRow(job: ReviewQueueRow): CreateApplicationInput {
+  if (job.application_provenance) {
+    return {
+      org: job.application_provenance.org,
+      ats: job.application_provenance.ats,
+      external_id: job.application_provenance.external_id,
+      source: "lab-openings",
+      title: job.title,
+      company: job.company_hint ?? job.application_provenance.org,
+      url: job.canonical_url,
+    };
+  }
   const identity = atsIdentity(job.canonical_url);
   const fromJobserve = job.source_labels.some((label) => label.toLowerCase().includes("jobserve"));
   if (identity) {

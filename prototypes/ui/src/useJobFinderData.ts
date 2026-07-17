@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { mergeCloudOpeningsIntoQueue } from "./cloudQueue";
 import { MOCK_PIPELINE_RUNS, MOCK_QUEUE, MOCK_SOURCE_HEALTH } from "./mockData";
 import { mergeQueueRows, sortByLastSeen } from "./queueViews";
 import { postJobReview } from "./reviewApi";
@@ -16,6 +17,9 @@ import {
 import type {
   ApiEnvelope,
   ApiMeta,
+  CloudOpeningRow,
+  CloudRowsResult,
+  CloudRunRow,
   FastRefreshSourceInfo,
   PipelineRunRow,
   RefreshRunRow,
@@ -188,6 +192,8 @@ export function useJobFinderData(): JobFinderData {
       runsData: FetchResult<PipelineRunRow[]>,
       metaData: FetchResult<ApiMeta>,
       latestRun: FetchResult<RefreshRunRow>,
+      cloudOpenings: FetchResult<CloudRowsResult<CloudOpeningRow>>,
+      cloudRuns: FetchResult<CloudRowsResult<CloudRunRow>>,
     ) => {
       const isLive = health.data?.status === "ok";
       setLive(isLive);
@@ -196,6 +202,14 @@ export function useJobFinderData(): JobFinderData {
       if (health.error) errors.push(`Health: ${health.error}`);
       if (queueData.error) errors.push(`Queue: ${queueData.error}`);
       if (shortlistedData.error) errors.push(`Shortlist: ${shortlistedData.error}`);
+      if (cloudOpenings.error) errors.push(`Labs: ${cloudOpenings.error}`);
+      if (cloudOpenings.data?.status === "cloud_unavailable") {
+        errors.push(`Labs: ${cloudOpenings.data.reason.message}`);
+      }
+      if (cloudRuns.error) errors.push(`Lab runs: ${cloudRuns.error}`);
+      if (cloudRuns.data?.status === "cloud_unavailable") {
+        errors.push(`Lab runs: ${cloudRuns.data.reason.message}`);
+      }
       const queueLoaded = isLive && queueData.data !== null && shortlistedData.data !== null;
 
       if (isLive && (queueData.data || shortlistedData.data)) {
@@ -203,7 +217,11 @@ export function useJobFinderData(): JobFinderData {
         const shortlisted = asArray<ReviewQueueRow>(shortlistedData.data ?? []).map(
           normalizeQueueRow,
         );
-        setQueue(mergeQueueRows(triage, shortlisted));
+        const localRows = mergeQueueRows(triage, shortlisted);
+        const openings = cloudOpenings.data?.status === "available" ? cloudOpenings.data.rows : [];
+        const latestCloudRunId =
+          cloudRuns.data?.status === "available" ? cloudRuns.data.rows[0]?.run_id : undefined;
+        setQueue(mergeCloudOpeningsIntoQueue(localRows, openings, latestCloudRunId));
       } else if (!isLive) {
         setQueue(MOCK_QUEUE);
       }
@@ -251,12 +269,16 @@ export function useJobFinderData(): JobFinderData {
       ...evergreenFetches,
     ]);
 
-    const [healthData, runsData, metaData, latestRun] = await Promise.all([
-      fetchApi<SourceHealthRow[]>("/source-health"),
-      fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
-      fetchApi<ApiMeta>("/meta"),
-      fetchApi<RefreshRunRow>("/runs/latest"),
-    ]);
+    const [healthData, runsData, metaData, latestRun, cloudOpenings, cloudRuns] = await Promise.all(
+      [
+        fetchApi<SourceHealthRow[]>("/source-health"),
+        fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
+        fetchApi<ApiMeta>("/meta"),
+        fetchApi<RefreshRunRow>("/runs/latest"),
+        fetchApi<CloudRowsResult<CloudOpeningRow>>("/cloud/openings?limit=500"),
+        fetchApi<CloudRowsResult<CloudRunRow>>("/cloud/runs?limit=1"),
+      ],
+    );
 
     let mergedTriage = queueData;
     for (const row of evergreenResults) {
@@ -280,6 +302,8 @@ export function useJobFinderData(): JobFinderData {
       runsData,
       metaData,
       latestRun,
+      cloudOpenings,
+      cloudRuns,
     );
 
     setLoading(false);

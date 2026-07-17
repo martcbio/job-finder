@@ -118,7 +118,9 @@ export function filterQueueBySources(
   queue: ReviewQueueRow[],
   enabledIds: Set<string>,
 ): ReviewQueueRow[] {
-  return queue.filter((job) => jobMatchesAnyEnabledSource(job, enabledIds));
+  return queue.filter(
+    (job) => job.queue_source === "lab" || jobMatchesAnyEnabledSource(job, enabledIds),
+  );
 }
 
 export function toggleSourceId(

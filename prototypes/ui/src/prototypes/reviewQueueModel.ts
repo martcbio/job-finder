@@ -17,6 +17,8 @@ export type FacetId =
   | "ir35";
 
 export type QuickFilterId =
+  | "lab"
+  | "junk"
   | "non_it"
   | "contract"
   | "permanent"
@@ -58,6 +60,8 @@ export interface QueueJobView {
   signalConflict: "ir35_on_permanent" | null;
   itRelevance: ItRelevance;
   employmentType: EmploymentType;
+  queueSource: "local" | "lab";
+  junk: boolean;
   searchText: string;
 }
 
@@ -201,6 +205,59 @@ function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+const ROLE_SHAPED_TITLE =
+  /\b(?:engineer|developer|architect|analyst|scientist|researcher|designer|manager|director|consultant|specialist|administrator|coordinator|recruiter|technician|lead|head|officer|product|sales|marketing|support|operations|intern|assistant)\b/i;
+
+function normalizedEntityName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function withoutGenericEntityWords(value: string): string {
+  return normalizedEntityName(value)
+    .split(" ")
+    .filter(
+      (token) =>
+        ![
+          "job",
+          "jobs",
+          "career",
+          "careers",
+          "hiring",
+          "recruitment",
+          "board",
+          "company",
+          "limited",
+          "ltd",
+          "inc",
+          "llc",
+          "plc",
+        ].includes(token),
+    )
+    .join(" ");
+}
+
+function entityNamesNearlyEqual(left: string, right: string): boolean {
+  const normalizedLeft = normalizedEntityName(left);
+  const normalizedRight = normalizedEntityName(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+  const compactLeft = withoutGenericEntityWords(left);
+  const compactRight = withoutGenericEntityWords(right);
+  return compactLeft.length >= 3 && compactLeft === compactRight;
+}
+
+export function isJunkQueueRow(job: ReviewQueueRow): boolean {
+  if (job.queue_source === "lab" || ROLE_SHAPED_TITLE.test(job.title)) return false;
+  const identities = [job.company_hint, ...job.source_labels].filter((value): value is string =>
+    Boolean(value?.trim()),
+  );
+  return identities.some((identity) => entityNamesNearlyEqual(job.title, identity));
+}
+
 export function deriveItRelevance(job: ReviewQueueRow): ItRelevance {
   const text = queueJobText(job);
   if (matchesAny(text.title, IT_TITLE_PATTERNS) || matchesAny(text.title, IT_TITLE_ONLY_PATTERNS)) {
@@ -316,6 +373,8 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
   const confidence = deriveConfidence(job.classification_confidence);
   const ir35 = employmentType === "contract" ? detectedIr35 : "unknown";
   const itRelevance = deriveItRelevance(job);
+  const queueSource = job.queue_source === "lab" ? "lab" : "local";
+  const junk = isJunkQueueRow(job);
   const postedAgeDays = Math.max(0, (now - postedAt.getTime()) / 86_400_000);
   const searchText = [
     job.title,
@@ -347,6 +406,8 @@ export function toQueueJobView(job: ReviewQueueRow, now = Date.now()): QueueJobV
     signalConflict,
     itRelevance,
     employmentType,
+    queueSource,
+    junk,
     searchText,
   };
 }
@@ -385,6 +446,8 @@ function matchesFilter(job: QueueJobView, filter: QueueFilter): boolean {
 }
 
 function matchesQuick(job: QueueJobView, quick: QuickFilterId): boolean {
+  if (quick === "lab") return job.queueSource === "lab";
+  if (quick === "junk") return job.junk;
   if (quick === "non_it") return job.itRelevance === "non_it";
   if (quick === "contract") return job.employmentType === "contract";
   if (quick === "permanent") return job.employmentType === "permanent";
@@ -409,9 +472,12 @@ export function filterQueueJobs(
     filters.some(
       (filter) => filter.facet === "it_relevance" && filter.value.toLowerCase() === "non-it",
     );
+  const labRequested = quick.includes("lab");
+  const junkRequested = quick.includes("junk");
   return jobs.filter(
     (job) =>
-      (job.itRelevance !== "non_it" || nonItRequested) &&
+      (!job.junk || junkRequested) &&
+      (job.itRelevance !== "non_it" || nonItRequested || labRequested || junkRequested) &&
       terms.every((term) => job.searchText.includes(term)) &&
       filters.every((filter) => matchesFilter(job, filter)) &&
       quick.every((filter) => matchesQuick(job, filter)),
@@ -420,7 +486,8 @@ export function filterQueueJobs(
 
 export function facetCounts(jobs: QueueJobView[], facet: FacetId): Array<[string, number]> {
   const counts = new Map<string, number>();
-  const countedJobs = facet === "it_relevance" ? jobs : filterQueueJobs(jobs, "", [], []);
+  const countedJobs =
+    facet === "it_relevance" ? jobs.filter((job) => !job.junk) : filterQueueJobs(jobs, "", [], []);
   for (const job of countedJobs) {
     for (const value of new Set(facetValues(job, facet))) {
       if (value === "—") continue;

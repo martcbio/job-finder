@@ -24,6 +24,12 @@ export interface ReviewQueueEvent {
   created_at: string;
 }
 
+export interface LabApplicationProvenance {
+  org: string;
+  ats: "ashby" | "greenhouse" | "lever";
+  external_id: string;
+}
+
 export interface ReviewQueueRow {
   id: string;
   title: string;
@@ -38,6 +44,10 @@ export interface ReviewQueueRow {
   duplicate_candidates: ReviewQueueDuplicate[];
   latest_review_event: ReviewQueueEvent | null;
   source_labels: string[];
+  queue_source?: "local" | "lab";
+  first_seen_at?: string;
+  is_latest_run?: boolean;
+  application_provenance?: LabApplicationProvenance;
   last_seen_at: string;
   description_sample: string | null;
 }

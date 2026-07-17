@@ -62,9 +62,7 @@ describe("application board model", () => {
         application("interview", [
           { status: "interview", at: "2026-07-10T00:00:00Z", by: "owner" },
         ]),
-        application("offer", [
-          { status: "interview", at: "2026-05-01T00:00:00Z", by: "owner" },
-        ]),
+        application("offer", [{ status: "interview", at: "2026-05-01T00:00:00Z", by: "owner" }]),
         application("sent"),
       ],
       new Date("2026-07-16T00:00:00Z"),
@@ -87,6 +85,29 @@ describe("application board model", () => {
       org: "acme",
       ats: "greenhouse",
       external_id: "9988",
+      source: "lab-openings",
+    });
+  });
+
+  test("uses exact cloud-opening provenance when the queue row supplies it", () => {
+    const job = {
+      id: "lab:weights-biases:greenhouse:123",
+      title: "Research Engineer",
+      company_hint: "Weights & Biases",
+      canonical_url: "https://careers.example.com/research-engineer",
+      source_labels: ["weights-biases", "lab"],
+      queue_source: "lab",
+      application_provenance: {
+        org: "weights-biases",
+        ats: "greenhouse",
+        external_id: "123",
+      },
+    } as ReviewQueueRow;
+
+    expect(applicationInputFromQueueRow(job)).toMatchObject({
+      org: "weights-biases",
+      ats: "greenhouse",
+      external_id: "123",
       source: "lab-openings",
     });
   });

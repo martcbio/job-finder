@@ -157,6 +157,8 @@ function FacetMenu({
 }
 
 const QUICK_FILTERS: Array<{ id: QuickFilterId; label: string }> = [
+  { id: "lab", label: "Labs" },
+  { id: "junk", label: "Junk" },
   { id: "non_it", label: "Non-IT" },
   { id: "contract", label: "Contract" },
   { id: "permanent", label: "Permanent" },
@@ -381,7 +383,13 @@ export default function ReviewQueueFilters({
               key={item.id}
               type="button"
               onClick={() => toggleQuick(item.id)}
-              title={item.id === "non_it" ? "Non-IT jobs are hidden by default" : undefined}
+              title={
+                item.id === "non_it"
+                  ? "Non-IT jobs are hidden by default"
+                  : item.id === "junk"
+                    ? "Junk ingestion artifacts are hidden by default"
+                    : undefined
+              }
               className={`rq-quick ${quick.includes(item.id) ? "rq-quick-active" : ""}`}
             >
               {item.label} <span>({quickCounts.get(item.id) ?? 0})</span>

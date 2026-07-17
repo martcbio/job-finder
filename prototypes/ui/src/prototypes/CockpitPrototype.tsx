@@ -171,7 +171,14 @@ function statusLabel(job: QueueJobView): string {
   return "Ready for review";
 }
 
-function Ir35Badge({ value }: { value: QueueJobView["ir35"] }) {
+function Ir35Badge({
+  value,
+  notApplicable = false,
+}: {
+  value: QueueJobView["ir35"];
+  notApplicable?: boolean;
+}) {
+  if (notApplicable) return <span className="text-[var(--rq-muted)]">N/A</span>;
   if (value === "unknown") return <span className="text-[var(--rq-muted)]">—</span>;
   const outside = value === "outside";
   return (
@@ -238,7 +245,10 @@ function JobTable({
   return (
     <div className="overflow-x-auto">
       {actionError && (
-        <p className="border-b border-rose-500/20 bg-rose-500/8 px-4 py-2 text-[10px] text-rose-500" aria-live="polite">
+        <p
+          className="border-b border-rose-500/20 bg-rose-500/8 px-4 py-2 text-[10px] text-rose-500"
+          aria-live="polite"
+        >
           {actionError}
         </p>
       )}
@@ -313,6 +323,11 @@ function JobTable({
                             Contract
                           </span>
                         )}
+                        {job.is_latest_run && (
+                          <span className="shrink-0 rounded border border-violet-400/25 bg-violet-400/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-500">
+                            New latest run
+                          </span>
+                        )}
                         {isCrossSourceDuplicate(job) && (
                           <span className="shrink-0 rounded bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-medium text-rose-500">
                             Cross-dup
@@ -326,7 +341,7 @@ function JobTable({
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-3.5">
-                  <Ir35Badge value={view.ir35} />
+                  <Ir35Badge value={view.ir35} notApplicable={view.queueSource === "lab"} />
                 </td>
                 <td className="max-w-[145px] truncate px-3 py-3.5" title={view.location}>
                   {view.location}
@@ -336,8 +351,21 @@ function JobTable({
                 <td className="max-w-[130px] truncate px-3 py-3.5" title={view.role}>
                   {view.role}
                 </td>
-                <td className="max-w-[120px] truncate px-3 py-3.5" title={view.source}>
-                  {view.source}
+                <td
+                  className="max-w-[150px] truncate px-3 py-3.5"
+                  title={
+                    view.queueSource === "lab"
+                      ? `Lab opening · first seen ${job.first_seen_at ?? "unknown"} · last seen ${job.last_seen_at}`
+                      : view.source
+                  }
+                >
+                  {view.queueSource === "lab" ? (
+                    <span className="inline-flex max-w-full truncate rounded border border-violet-400/25 bg-violet-400/10 px-2 py-1 text-[9px] font-medium text-violet-500">
+                      Lab · {view.source}
+                    </span>
+                  ) : (
+                    view.source
+                  )}
                 </td>
                 <td className="px-3 py-3.5">
                   <Confidence value={view.confidence} />
@@ -356,7 +384,9 @@ function JobTable({
                           ? "border-amber-500/55 text-amber-500"
                           : "border-emerald-500/45 text-emerald-600"
                       }`}
-                      title={applicationUnavailable ? "Application cloud is unavailable" : undefined}
+                      title={
+                        applicationUnavailable ? "Application cloud is unavailable" : undefined
+                      }
                     >
                       {application ? `Tracked · ${application.status.replace(/_/g, " ")}` : "Track"}
                     </button>
@@ -370,7 +400,9 @@ function JobTable({
                       onClick={() => void run(job, onShortlist)}
                       className="rounded-md border border-blue-500/45 px-2.5 py-2 text-[9px] font-semibold text-blue-500 disabled:opacity-55"
                     >
-                      {application && application.status !== "interested" ? "Shortlisted" : "Shortlist"}
+                      {application && application.status !== "interested"
+                        ? "Shortlisted"
+                        : "Shortlist"}
                     </button>
                   </div>
                 </td>
@@ -604,7 +636,12 @@ export default function CockpitPrototype({
           <header className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="mb-2 text-[10px] text-[var(--rq-muted)] lg:hidden">
-                Signal Cockpit · {activePage === "overview" ? "Overview" : activePage === "queue" ? "Review Queue" : "Shortlist"}
+                Signal Cockpit ·{" "}
+                {activePage === "overview"
+                  ? "Overview"
+                  : activePage === "queue"
+                    ? "Review Queue"
+                    : "Shortlist"}
               </p>
               <h1 className="text-[27px] font-bold tracking-[-0.035em] text-[var(--rq-text)]">
                 {activePage === "overview"
@@ -617,7 +654,7 @@ export default function CockpitPrototype({
                 {activePage === "overview"
                   ? "Pipeline health, operational alerts, parity, and application outcomes."
                   : activePage === "queue"
-                    ? "Review and track jobs from your local job database."
+                    ? "Review and track local jobs and high-value lab openings."
                     : "Move tracked applications forward while keeping send authority with the owner."}
               </p>
               {activePage === "queue" && (

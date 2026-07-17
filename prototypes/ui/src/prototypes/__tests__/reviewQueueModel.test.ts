@@ -6,6 +6,7 @@ import {
   facetCounts,
   filterQueueJobs,
   isCrossSourceDuplicate,
+  isJunkQueueRow,
   toQueueJobView,
 } from "../reviewQueueModel";
 
@@ -160,5 +161,35 @@ describe("filterQueueJobs relevance defaults", () => {
     expect(
       filterQueueJobs(views, "", [{ facet: "it_relevance", value: "Non-IT" }], []),
     ).toHaveLength(1);
+  });
+});
+
+describe("junk queue rows", () => {
+  const linkedInArtifact = job("LinkedIn");
+  linkedInArtifact.company_hint = "LinkedIn";
+  linkedInArtifact.source_labels = ["LinkedIn"];
+
+  const rocketshipArtifact = job("Remote Rocketship");
+  rocketshipArtifact.company_hint = "Remote Rocketship";
+  rocketshipArtifact.source_labels = ["Remote Rocketship"];
+
+  const realLinkedInRole = job("Software Engineer");
+  realLinkedInRole.company_hint = "LinkedIn";
+  realLinkedInRole.source_labels = ["LinkedIn"];
+
+  test("marks source-name artifacts but preserves a real role at LinkedIn", () => {
+    expect(isJunkQueueRow(linkedInArtifact)).toBe(true);
+    expect(isJunkQueueRow(rocketshipArtifact)).toBe(true);
+    expect(isJunkQueueRow(realLinkedInRole)).toBe(false);
+  });
+
+  test("hides junk by default and reveals it through the counted quick filter", () => {
+    const views = [linkedInArtifact, rocketshipArtifact, realLinkedInRole].map((row) =>
+      toQueueJobView(row),
+    );
+    expect(filterQueueJobs(views, "", [], []).map((view) => view.job.title)).toEqual([
+      "Software Engineer",
+    ]);
+    expect(filterQueueJobs(views, "", [], ["junk"])).toHaveLength(2);
   });
 });

@@ -1,6 +1,6 @@
-# Lab-openings cloud shadow
+# Lab-openings Modal arm
 
-This Modal arm runs the existing scanner every three hours in UTC and writes only to a container scratch directory plus the estate Supabase project. It never mounts or writes `/Users/mcb/Claudelocal/careers/market`; local launchd remains the production arm. Active targets come from `careers.targets`; `cloud/targets.json` is the fallback used when that read is empty or fails.
+This is the cloud half of the dual-arm lab-openings scanner. Modal runs every three hours in UTC and writes only to a container scratch directory plus the estate Supabase `careers` schema; the macOS launchd arm writes the local market artifacts. Both are operational arms and publish comparable parity rows. Modal never mounts or writes `/Users/mcb/Claudelocal/careers/market`. Active targets come from `careers.targets`; `cloud/targets.json` is the fallback used when that read is empty or fails.
 
 ## Parity digest contract
 
@@ -55,7 +55,7 @@ select * from heartbeats where task = 'careers-lab-openings' order by beat_at de
 select * from doctor where task = 'careers-lab-openings';
 ```
 
-The doctor becomes stale when the last successful control-plane run is older than twice the registered 10,800-second cadence. Bakeoff cutover is a later decision: keep launchd untouched until cloud/local output parity is established.
+The doctor becomes stale when the last successful control-plane run is older than twice the registered 10,800-second cadence. Keep both arms running and use `careers.parity_runs` plus the operations UI to investigate count or digest divergence.
 
 ## Kill switch
 

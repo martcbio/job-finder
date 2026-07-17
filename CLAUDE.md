@@ -2,10 +2,18 @@
 
 Guidance for Claude Code (and any other agent) working in this repository.
 
-This is a single-app Bun project. There is no monorepo, no database, no
-frontend. The thing this repo does is scrape job boards, run them through an
-LLM evaluation pipeline, and write qualified jobs to Notion. Everything else
-exists to make that loop reliable, observable, and cheap.
+This is a Bun job-search system with local and cloud operating lanes. Its primary
+scanner is `lab-openings`: a launchd-scheduled macOS arm writes local market
+artifacts, while a three-hourly Modal arm writes to the `careers` schema in the
+estate Supabase project. Both arms publish parity digests from the same
+`org:ats:id` identity set. Notion code remains legacy/optional; it is not the
+source of truth for current API, UI, scanner, or application work.
+
+The local JSON API is normally kept alive by launchd on `127.0.0.1:3737`. The
+launchd-managed Vite review UI listens on `127.0.0.1:32002` and exposes Overview,
+Review Queue, Cloud Lane, and the application pipeline board. The API fronts
+local Postgres job-search data plus cloud-durable openings, operations, parity,
+and `careers.applications` lifecycle data.
 
 The bar for changes is: the next run is at least as trustworthy as the last
 one. False positives in evaluation cost more than false negatives, so we err
@@ -14,8 +22,9 @@ toward strictness; flaky LLM behaviour gets contained, not papered over.
 ## Tasks
 
 ```sh
-bun run scrape             # full pipeline: search → process → reconcile
-bun run reconcile          # reconcile-only (no scrape)
+bun run labs:openings      # inspect/record the lab-openings scanner
+bun run api                # local API on 127.0.0.1:3737
+bun run jobs:fast-refresh  # cheap local Postgres refresh path
 bun run test               # unit tests (src/**/__tests__/)
 bun run test:integration   # full eval-pipeline tests, hits real LLM
 bun run lint               # biome check
@@ -36,29 +45,54 @@ hook fails, fix the cause — do not bypass with `--no-verify`.
 
 ## Architecture
 
-A linear pipeline. Each stage is a module under `src/pipeline/`; cross-cutting
-concerns live alongside.
+The current system has four connected lanes:
 
 ```
-search → scrape → structuralFilter → dedup → enrich → evaluate → reconcile → Notion
+lab-openings (mac launchd + Modal) → Supabase careers.openings + parity
+local source fanout → Postgres ingest/classify/duplicates → human review queue
+review decision → careers.applications lifecycle → owner-performed send
+shortlisted application → resume3 CV bridge → dummy-rendered cv_staged artifact
 ```
 
 ```
 src/
-  pipeline/        the stages above, plus processUrl.ts that composes them
+  api/             local JSON API, including cloud openings/applications/ops
+  pipeline/        scanners, refresh, ingest, classify, review, and legacy stages
     __tests__/     unit tests
     __integration__/  full-pipeline tests + .md fixtures
-  services/        external integrations (LLM, Notion, ATS, Slack, exchangeRates, http)
+  cv/              deterministic resume3 application staging bridge
+  services/        external integrations (ATS, HTTP, LLM, legacy Notion)
     llm.ts         the only place that talks to OpenAI/OpenRouter
-    notion/        client + queries + mutations + builders + helpers
     ats/           dispatcher for greenhouse/lever/ashby
   concurrency/     reusable primitives — Semaphore, RateLimiter, CircuitBreaker, retry
-  config/          env loaded + Zod-validated + frozen at startup
-  scripts/ (top-level) one-off operational scripts (reevaluate, migrate, etc.)
+  config/          validated configuration for the legacy Notion-first entrypoint
+scripts/           API/scanner/backup wrappers and one-off operational tools
+cloud/             Modal scanner arm and Supabase careers schema
+prototypes/ui/     Vite review cockpit
 ```
 
-`src/index.ts` is the entrypoint that wires the stages together for the
-`scrape` and `reconcile` commands.
+`src/index.ts` still wires the retired Notion-first `scrape`/`reconcile` path.
+Do not use it as the architecture template for new API, UI, or scanner work.
+
+### Application and CV safety
+
+`careers.applications` advances through
+`interested → shortlisted → cv_staged → sent → response → interview → offer`;
+`closed` is reachable from any active state. Agents may stage and record, but
+only the owner sends: the API rejects `sent` unless `by` is `owner`, and no route
+submits an external application.
+
+The CV bridge runs resume3 subprocesses with `AGENT_MODE=1` and
+`--identity=dummy`. It stores only dummy HTML/PDF renders and the case reference;
+failure aborts the lifecycle transition.
+
+### Operations and backup
+
+Scheduled macOS and Modal work records control-plane runs/heartbeats. Operations
+surfaces use `doctor_v2` (with explicit legacy-doctor detection), alerts, and
+parity rows; a zero process exit is not a substitute for those beacons. The
+nightly local Postgres backup lane writes custom-format dumps under
+`market/backups`, retains 14, and emits a `jobs-db-backup` run beacon.
 
 ## Hard rules
 
@@ -70,9 +104,10 @@ src/
   cleanup into a feature commit.
 - **Never bypass hooks.** No `--no-verify`. If lefthook fails, the underlying
   problem is the bug, not the hook.
-- **Env vars only via `src/config`.** All `process.env` access lives in
-  `config/schema.ts`, validated by Zod, frozen at startup. The app refuses to
-  start with bad config — that is the point.
+- **Validate env at each runtime boundary.** The legacy Notion-first app owns its
+  environment through `src/config`; the API, cloud arm, and scheduled wrappers
+  have separate explicit configuration boundaries. Do not import `src/config`
+  into new API/frontend code because it intentionally requires legacy secrets.
 - **Structured logging via Pino child loggers.** Pass structured fields
   (`log.info({ url, attempt }, "search retry")`), not interpolated strings.
   Never log secrets.
@@ -181,21 +216,17 @@ thresholds — enforces decisions; the LLM only informs them.
   criterion, changed N-shot example) gets a fixture that exercises it — both a
   passing case and a rejecting case.
 
-## Notion as database
+## Persistence boundaries
 
-Notion is the system of record. Treat it accordingly.
-
-- **All Notion access goes through `services/notion`.** Builders compose
-  page properties, mutations write, queries read, helpers normalise. No raw
-  `@notionhq/client` calls outside this directory.
-- **One cache per run.** `notionCache.ts` pre-loads what we need; mutations
-  flow through `NotionCacheUpdater` so the in-memory view stays consistent.
-- **Reconcile is idempotent.** A second `reconcile()` call must not change
-  steady state. Both pre-scrape and post-scrape passes run every full run.
-- **Notion is rate-limited and eventually consistent.** Expect 429s. Retries
-  go through `withRetry`. Don't assume read-after-write within a run.
-- **Dedup canonicalises URLs.** See `pipeline/dedup.ts`. New job sources need
-  their URL shape considered there before they're trusted as unique.
+- Local Postgres is the source of truth for search runs, jobs, observations,
+  classifications, duplicate candidates, review events, and local pipeline runs.
+- The Supabase `careers` schema is the durable source for lab openings, scanner
+  runs/parity/ops state, targets, and the application lifecycle.
+- Notion integrations are legacy/optional. If deliberately maintaining them,
+  keep all access through `services/notion`, preserve one-cache-per-run and
+  idempotent reconcile behaviour, and handle rate limits with `withRetry`.
+- Dedup canonicalises URLs. See `pipeline/dedup.ts`; new job sources need their
+  URL shape considered before they are trusted as unique.
 
 ## Concurrency primitives
 

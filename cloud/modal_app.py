@@ -242,9 +242,17 @@ def _expect_one(response: httpx.Response, operation: str) -> dict[str, Any]:
 
 
 def _register_task(client: httpx.Client, base_url: str) -> None:
+    """Idempotent nicety; shared-table schema drift must never kill the scan."""
+    try:
+        _register_task_strict(client, base_url)
+    except httpx.HTTPStatusError as error:
+        print(f"task registration skipped: HTTP {error.response.status_code}")
+
+
+def _register_task_strict(client: httpx.Client, base_url: str) -> None:
     response = client.post(
         f"{base_url}/rest/v1/tasks",
-        params={"on_conflict": "task"},
+        params={"on_conflict": "task,substrate"},
         headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         json={
             "task": TASK_NAME,

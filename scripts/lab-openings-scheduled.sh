@@ -25,6 +25,7 @@ readonly AUTHORIZATION="Authorization: Bearer ${SUPABASE_SERVICE_KEY}"
 scanner_status=1
 signals_status=-1
 parity_status=-1
+report_status=-1
 publication_status="unknown"
 
 # shellcheck source=lib/resolve-openings-artifacts.sh
@@ -54,7 +55,7 @@ finish_beacon() {
   local notes
   trap - EXIT
   notes="$(scheduled_run_notes \
-    "${scanner_status}" "${signals_status}" "${parity_status}" "${publication_status}")"
+    "${scanner_status}" "${signals_status}" "${parity_status}" "${publication_status}" "${report_status}")"
   finish_payload="$(jq -cn \
     --arg finished_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson exit_status "${exit_status}" \
@@ -126,4 +127,17 @@ fi
 signals_status=0
 (cd "${REPO_ROOT}" && PATH="/opt/homebrew/bin:${HOME}/.local/bin:${PATH}" /opt/homebrew/bin/bun run company:signals) || signals_status=$?
 
-exit "$(scheduled_effective_exit_status "${scanner_status}" "${parity_status}")"
+if ((scanner_status == 0 && signals_status == 0 && parity_status == 0)); then
+  report_status=0
+  (
+    cd "${REPO_ROOT}" &&
+      PATH="/opt/homebrew/bin:${HOME}/.local/bin:${PATH}" \
+        "${REPO_ROOT}/scripts/opps" list --refresh-direct --strict-source-health --quiet
+  ) || report_status=$?
+else
+  printf 'lab-openings-scheduled: daily report skipped for scanner=%d signals=%d parity=%d\n' \
+    "${scanner_status}" "${signals_status}" "${parity_status}" >&2
+fi
+
+exit "$(scheduled_effective_exit_status \
+  "${scanner_status}" "${signals_status}" "${parity_status}" "${report_status}")"

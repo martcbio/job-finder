@@ -1,5 +1,6 @@
 import type { CvStageResult } from "../cv/stageApplicationCv";
 import type { FastRefreshOptions, FastRefreshResult } from "../pipeline/fastRefresh";
+import type { OpportunityReport } from "../pipeline/opportunityReport";
 
 export type ApiQuery = <T>(sql: string) => Promise<T>;
 
@@ -19,6 +20,11 @@ export type ApplicationCvStageRunner = (
   applicationId: string,
 ) => Promise<CvStageResult>;
 
+export type OpportunityReportLoader = (options: {
+  limit: number;
+  now: Date;
+}) => Promise<OpportunityReport>;
+
 export interface ApiContext {
   query: ApiQuery;
   fastRefresh: FastRefreshRunner;
@@ -28,6 +34,7 @@ export interface ApiContext {
   cloudConfig: CloudConfig;
   fetch: ApiFetch;
   stageCv?: ApplicationCvStageRunner;
+  opportunityReport?: OpportunityReportLoader;
 }
 
 export interface ApiRoute {
@@ -46,4 +53,5 @@ export interface JobFinderApiOptions {
   cloudConfig?: CloudConfig;
   fetch?: ApiFetch;
   stageCv?: ApplicationCvStageRunner;
+  opportunityReport?: OpportunityReportLoader;
 }

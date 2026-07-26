@@ -48,7 +48,7 @@ function parseArgs(argv: string[]): CliOptions {
   if (command === "inspect" && scheduledAt) {
     throw new Error("--scheduled-at is only valid with record");
   }
-  return { command, json, help, scheduledAt };
+  return { command, json, help, ...(scheduledAt ? { scheduledAt } : {}) };
 }
 
 export function exitCodeForRecordStatus(
@@ -97,7 +97,7 @@ async function main(): Promise<void> {
 
   const result = await labOpenings.record({
     trigger: options.scheduledAt ? "scheduled" : "manual",
-    scheduledAt: options.scheduledAt,
+    ...(options.scheduledAt ? { scheduledAt: options.scheduledAt } : {}),
   });
   if (result.status === "locked") {
     console.error(

@@ -169,7 +169,7 @@ describe("fetchWorkableJob", () => {
   test("POSTs the title as the query body", async () => {
     let captured: { url?: string; init?: RequestInit } = {};
     const capturing: Fetcher = async (url, init) => {
-      captured = { url, init };
+      captured = { url, ...(init ? { init } : {}) };
       return new Response(JSON.stringify({ results: [] }), { status: 200 });
     };
     await fetchWorkableJob(

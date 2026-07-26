@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { z } from "zod";
 import { logger } from "../logger";
 import { getClient } from "../services/llm";
 import type { TokenTracker } from "../services/tokenTracker";
@@ -10,6 +11,15 @@ export interface JobEnrichment {
   description: string;
   location: string;
 }
+
+const jobEnrichmentSchema = z
+  .object({
+    title: z.string().min(1),
+    company: z.string().min(1),
+    description: z.string().min(1),
+    location: z.string().min(1),
+  })
+  .strict();
 
 const log = logger.child({ component: "enrich" });
 
@@ -100,11 +110,16 @@ ${job.description}`;
     throw new Error("Enrichment failed: no function tool_call in response");
   }
 
+  return parseJobEnrichment(toolCall.function.arguments);
+}
+
+/** Parses and validates the model tool payload at the untrusted LLM boundary. */
+export function parseJobEnrichment(argumentsJson: string): JobEnrichment {
   try {
-    return JSON.parse(toolCall.function.arguments) as JobEnrichment;
-  } catch {
-    throw new Error(
-      `Enrichment failed: could not parse tool arguments: ${toolCall.function.arguments}`,
-    );
+    return jobEnrichmentSchema.parse(JSON.parse(argumentsJson));
+  } catch (error) {
+    throw new Error(`Enrichment failed: invalid tool arguments: ${argumentsJson}`, {
+      cause: error,
+    });
   }
 }

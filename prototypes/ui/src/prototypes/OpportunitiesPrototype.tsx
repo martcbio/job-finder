@@ -1,0 +1,228 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ApiEnvelope, OpportunityReport, OpportunityRow } from "../types";
+
+type Filter = "all" | "picks" | "qualified" | "caveat" | "disqualified";
+
+function verdict(row: OpportunityRow): Exclude<Filter, "all" | "picks"> {
+  if (row.screening.status === "rejected") return "disqualified";
+  if (row.screening.status === "needs_human_review") return "caveat";
+  return "qualified";
+}
+
+const verdictStyle = {
+  qualified: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
+  caveat: "border-amber-400/25 bg-amber-400/10 text-amber-300",
+  disqualified: "border-rose-400/25 bg-rose-400/10 text-rose-300",
+} as const;
+
+function date(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(value));
+}
+
+export default function OpportunitiesPrototype() {
+  const [report, setReport] = useState<OpportunityReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/opportunities?limit=50", { cache: "no-store" });
+      const envelope = (await response.json()) as ApiEnvelope<OpportunityReport>;
+      if (!response.ok || !envelope.ok || !envelope.data) {
+        throw new Error(envelope.error?.message ?? `HTTP ${response.status}`);
+      }
+      setReport(envelope.data);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load opportunities");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const pickUrls = useMemo(() => new Set(report?.pickUrls ?? []), [report]);
+  const rows = useMemo(() => {
+    if (!report) return [];
+    if (filter === "all") return report.rows;
+    if (filter === "picks") return report.rows.filter((row) => pickUrls.has(row.url));
+    return report.rows.filter((row) => verdict(row) === filter);
+  }, [filter, pickUrls, report]);
+
+  if (loading && !report) {
+    return (
+      <main className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
+        <div className="shimmer h-52 rounded-2xl border border-white/5" />
+      </main>
+    );
+  }
+
+  if (!report) {
+    return (
+      <main className="mx-auto max-w-[1400px] px-4 py-8 md:px-6">
+        <section className="rounded-2xl border border-rose-400/25 bg-rose-400/8 p-8 text-rose-200">
+          <h1 className="text-2xl font-bold">Opportunity list unavailable</h1>
+          <p className="mt-2 text-sm opacity-80">{error}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-5 rounded-full border border-rose-300/30 px-4 py-2 text-xs"
+          >
+            Retry local data
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-[1400px] space-y-5 px-4 py-8 md:px-6">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-amber-300">
+            Local data · no source refresh
+          </p>
+          <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-bold text-white">
+            Latest engineering opportunities
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            JobServe and company ATS roles, selected across {report.maxAgeDays} days and displayed
+            newest first.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="self-start rounded-full border border-white/10 px-4 py-2 text-xs text-zinc-300 hover:border-amber-300/40 hover:text-amber-200"
+        >
+          Reload local data
+        </button>
+      </header>
+
+      <section className="grid gap-3 md:grid-cols-3">
+        {report.sourceHealth.map((source) => (
+          <article key={source.source} className="rounded-xl border border-white/8 bg-white/[0.025] p-4">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-white">{source.source}</span>
+              <span
+                className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase ${
+                  source.status === "current"
+                    ? verdictStyle.qualified
+                    : source.status === "stale"
+                      ? verdictStyle.caveat
+                      : verdictStyle.disqualified
+                }`}
+              >
+                {source.status}
+              </span>
+            </div>
+            <p className="mt-3 text-2xl font-semibold text-white">{source.rowCount}</p>
+            <p className="text-xs text-zinc-500">
+              {source.ageHours === null ? "No capture" : `captured ${source.ageHours.toFixed(1)}h ago`}
+            </p>
+          </article>
+        ))}
+        <article className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
+          <span className="font-semibold text-amber-200">ChatGPT Picks</span>
+          <p className="mt-3 text-2xl font-semibold text-white">{report.pickUrls.length}</p>
+          <p className="text-xs text-zinc-500">
+            {report.pickDistribution.map((item) => `${item.source} ${item.count}`).join(" · ")}
+          </p>
+        </article>
+      </section>
+
+      <section className="flex flex-wrap gap-2">
+        {(["all", "picks", "qualified", "caveat", "disqualified"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setFilter(value)}
+            className={`rounded-full border px-3 py-1.5 text-xs capitalize ${
+              filter === value
+                ? "border-amber-300/40 bg-amber-300/10 text-amber-200"
+                : "border-white/8 text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {value}
+          </button>
+        ))}
+        <span className="ml-auto self-center font-mono text-[10px] text-zinc-600">
+          {rows.length} of {report.rows.length}
+        </span>
+      </section>
+
+      {error && (
+        <p className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-xs text-amber-200">
+          Reload failed; showing previous local data: {error}
+        </p>
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-white/8 bg-white/[0.02]">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1050px] border-collapse text-left">
+            <thead className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">
+              <tr className="border-b border-white/5">
+                <th className="px-5 py-3 font-medium">Role</th>
+                <th className="px-4 py-3 font-medium">Date / source</th>
+                <th className="px-4 py-3 font-medium">Location</th>
+                <th className="px-4 py-3 font-medium">Verdict</th>
+                <th className="px-5 py-3 font-medium">Why / terms</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const decision = verdict(row);
+                const why =
+                  row.screening.reasons.map((reason) => reason.detail).join("; ") ||
+                  row.screening.summary;
+                return (
+                  <tr key={row.url} className="border-b border-white/5 align-top last:border-0">
+                    <td className="px-5 py-4">
+                      <a
+                        href={row.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-zinc-100 underline-offset-4 hover:text-amber-200 hover:underline"
+                      >
+                        {row.title}
+                      </a>
+                      {pickUrls.has(row.url) && (
+                        <p className="mt-1 text-[10px] font-semibold text-amber-300">
+                          ★ ChatGPT Pick
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-zinc-500">{row.company}</p>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-zinc-400">
+                      {date(row.postedAt)}
+                      <p className="mt-1 font-mono text-[9px] uppercase text-zinc-600">
+                        {row.source}
+                      </p>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-zinc-400">{row.location || "Unstated"}</td>
+                    <td className="px-4 py-4">
+                      <span
+                        className={`rounded-full border px-2 py-1 font-mono text-[9px] uppercase ${verdictStyle[decision]}`}
+                      >
+                        {decision}
+                      </span>
+                    </td>
+                    <td className="max-w-xl px-5 py-4 text-xs leading-5 text-zinc-400">
+                      <p>{why}</p>
+                      <p className="mt-1 text-zinc-600">{row.terms}</p>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  );
+}

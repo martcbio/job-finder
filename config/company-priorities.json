@@ -1,0 +1,56 @@
+{
+  "OpenAI": {
+    "aiNative": 2,
+    "workingStyle": 1,
+    "prestige": 2,
+    "note": "frontier AI lab; strong engineering prestige"
+  },
+  "Anthropic": {
+    "aiNative": 2,
+    "workingStyle": 1,
+    "prestige": 2,
+    "note": "frontier AI lab; strong engineering prestige"
+  },
+  "Cognition": {
+    "aiNative": 2,
+    "workingStyle": 2,
+    "prestige": 1,
+    "note": "AI-native product company with deployed-engineering work"
+  },
+  "Cohere": {
+    "aiNative": 2,
+    "workingStyle": 1,
+    "prestige": 1,
+    "note": "AI-native model and enterprise product company"
+  },
+  "Mistral AI": {
+    "aiNative": 2,
+    "workingStyle": 1,
+    "prestige": 1,
+    "note": "AI-native model company"
+  },
+  "Databricks": {
+    "aiNative": 2,
+    "workingStyle": 1,
+    "prestige": 1,
+    "note": "AI-heavy product company with strong engineering roles"
+  },
+  "Cursor / Anysphere": {
+    "aiNative": 2,
+    "workingStyle": 2,
+    "prestige": 1,
+    "note": "AI-native developer-tools company"
+  },
+  "Ramp": {
+    "aiNative": 2,
+    "workingStyle": 2,
+    "prestige": 1,
+    "note": "AI-native transition with strong product-engineering operating model"
+  },
+  "Linear": {
+    "aiNative": 2,
+    "workingStyle": 2,
+    "prestige": 1,
+    "note": "AI-native transition with a strong product-engineering operating model"
+  }
+}

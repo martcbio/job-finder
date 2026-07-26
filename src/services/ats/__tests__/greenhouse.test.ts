@@ -143,6 +143,9 @@ describe("listOrgJobs", () => {
 
     expect(result.status).toBe("success");
     if (result.status === "failure") throw new Error("expected Greenhouse acquisition to succeed");
+    expect(result.endpoint).toBe(
+      "https://boards-api.greenhouse.io/v1/boards/openup/jobs?content=true",
+    );
     expect(result.jobs).toEqual([
       expect.objectContaining({
         source: "greenhouse",
@@ -154,6 +157,9 @@ describe("listOrgJobs", () => {
         locations: ["Amsterdam", "Amsterdam, North Holland, Netherlands"],
         url: "https://boards.eu.greenhouse.io/openup/jobs/4847917101?gh_jid=4847917101",
         postedAt: "2026-04-22T11:16:54-04:00",
+        raw: expect.objectContaining({
+          content: expect.stringContaining("multi-agent architectures"),
+        }),
       }),
     ]);
   });

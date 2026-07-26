@@ -49,22 +49,38 @@ reference/integration code, but new UI work should not depend on them.
 
 ## Refresh jobs (day-to-day)
 
-Re-fetch from configured native sources (JobServe, linear-careers), ingest pages, and classify — no saved sweep required:
+Generate the current mixed-source shortlist from the latest native lab snapshot
+and stored JobServe rows:
 
 ```bash
 export DATABASE_URL=postgres://mcb@localhost:5432/jobs
-bun run jobs:fast-refresh
+bun run jobs:opportunities
 ```
 
-Same path via API:
+Prefer the fresh complete Modal ATS snapshot, with a loud native-Mac fallback:
 
 ```bash
-curl -X POST http://127.0.0.1:3737/api/refresh/fast \
-  -H 'content-type: application/json' \
-  -d '{}'
+bun run jobs:opportunities -- --refresh-cloud-labs
 ```
 
-**Fast refresh** = cheap native sources, bounded limits. **Pipeline run** (below) = full saved-sweep fanout with explicit confirm.
+Use `--refresh-labs` to force a native Mac ATS scan.
+
+JobServe refresh is deliberately opt-in because it enforces bounded queries,
+pacing, and immediate abort on a usage-restriction page:
+
+```bash
+bun run jobs:opportunities -- --refresh-jobserve
+```
+
+Use `--refresh` to run both refreshes, or omit all refresh flags to make no
+network requests. `--format json`, `--output artifacts/opportunities/latest.md`,
+and `--strict-source-health` support scripts and automation. Defaults live in
+[`config/opportunity-report.json`](config/opportunity-report.json); the full
+operating contract is in
+[`docs/opportunity-report.md`](docs/opportunity-report.md).
+
+**Fast refresh** = cheap native sources, bounded limits. **Pipeline run**
+(below) = full saved-sweep fanout with explicit confirm.
 
 ## Common Commands
 

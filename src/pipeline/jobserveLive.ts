@@ -8,6 +8,8 @@ export interface LiveJobServeOptions {
   maxPages: number;
   timeoutMs: number;
   ageDays?: number;
+  detailLimit?: number;
+  requestDelayMs?: number;
   fetcher?: typeof fetch;
 }
 
@@ -47,6 +49,8 @@ export interface LiveJobServeResult {
   pagesFetched: number;
   roles: LiveJobServeRole[];
   excludedRoles: LiveJobServeRole[];
+  errors: string[];
+  blockedReason: string | null;
 }
 
 const BASE_URL = "https://www.jobserve.com";
@@ -63,8 +67,24 @@ const DETAIL_LABEL_RE =
 const NEXT_LINK_RE = /<span class="nav_Next">\s*(?:<a href="([^"]+)".*?)?<\/span>/is;
 const PAGE_RE = /[?&]page=(\d+)/i;
 
+class JobServeUsageRestrictionError extends Error {
+  constructor() {
+    super("JobServe usage restricted; aborting all further requests");
+    this.name = "JobServeUsageRestrictionError";
+  }
+}
+
 class CookieJar {
   readonly cookies = new Map<string, string>();
+  private lastRequestAt = 0;
+
+  constructor(private readonly requestDelayMs: number) {}
+
+  async waitForRequestSlot(): Promise<void> {
+    const remaining = this.requestDelayMs - (Date.now() - this.lastRequestAt);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    this.lastRequestAt = Date.now();
+  }
 
   add(headers: Headers): void {
     const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
@@ -88,11 +108,12 @@ class CookieJar {
   }
 }
 
+/** Fetches a bounded JobServe search and preserves site-wide blocks as source diagnostics. */
 export async function fetchLiveJobServeRoles(
   options: LiveJobServeOptions,
 ): Promise<LiveJobServeResult> {
   const fetcher = options.fetcher ?? fetch;
-  const jar = new CookieJar();
+  const jar = new CookieJar(options.requestDelayMs ?? 1500);
   const timeoutMs = options.timeoutMs;
   const seedUrl = options.searchUrl ?? DEFAULT_SEARCH_URL;
   const ageDays = options.ageDays ?? 3;
@@ -118,8 +139,9 @@ export async function fetchLiveJobServeRoles(
   const roles: LiveJobServeRole[] = [];
   const excludedRoles: LiveJobServeRole[] = [];
   const seen = new Set<string>();
+  let blockedReason: string | null = null;
 
-  for (const page of pages) {
+  pageLoop: for (const page of pages) {
     for (const block of extractRoleBlocks(page.html)) {
       const role = parseJobServeRoleBlock(block, {
         pageNumber: page.pageNumber,
@@ -131,11 +153,32 @@ export async function fetchLiveJobServeRoles(
       if (role.security_clearance_required) {
         excludedRoles.push(role);
       } else {
-        roles.push(await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs));
+        if (roles.length >= (options.detailLimit ?? 5)) {
+          roles.push(role);
+          continue;
+        }
+        try {
+          roles.push(await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs));
+        } catch (error) {
+          if (!(error instanceof JobServeUsageRestrictionError)) throw error;
+          blockedReason = error.message;
+          roles.push({
+            ...role,
+            detail_status: "error",
+            detail_error: error.message,
+          });
+          break pageLoop;
+        }
       }
     }
   }
 
+  const errors = [
+    ...(blockedReason ? [blockedReason] : []),
+    ...(excludedRoles.length > 0
+      ? [`${excludedRoles.length} security-clearance role(s) excluded`]
+      : []),
+  ];
   return {
     query: options.query,
     searchUrl: submitted.url,
@@ -143,6 +186,8 @@ export async function fetchLiveJobServeRoles(
     pagesFetched: pages.length,
     roles,
     excludedRoles,
+    errors,
+    blockedReason,
   };
 }
 
@@ -298,6 +343,7 @@ async function requestText(
     timeoutMs: number;
   },
 ): Promise<{ text: string; url: string }> {
+  await jar.waitForRequestSlot();
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(`JobServe request timed out after ${options.timeoutMs}ms`),
@@ -321,7 +367,15 @@ async function requestText(
     });
     jar.add(response.headers);
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
-    return { text: await response.text(), url: response.url };
+    const text = await response.text();
+    if (
+      /<h1[^>]*>\s*Usage Restricted\s*<\/h1>/i.test(text) ||
+      /\bdeemed to exceed our fair usage levels\b/i.test(text) ||
+      /\/UsageRestriction\.aspx\b/i.test(response.url)
+    ) {
+      throw new JobServeUsageRestrictionError();
+    }
+    return { text, url: response.url || url };
   } finally {
     clearTimeout(timeout);
   }
@@ -445,6 +499,7 @@ async function fetchJobServeRoleDetail(
       detail_error: "",
     };
   } catch (err) {
+    if (err instanceof JobServeUsageRestrictionError) throw err;
     return {
       ...role,
       detail_status: "error",

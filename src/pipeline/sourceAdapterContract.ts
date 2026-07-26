@@ -91,6 +91,7 @@ export interface SourceDiscoveryResult {
   keyword: string;
   outcome: SourceOutcome;
   discovered: number;
+  excluded: number;
   jobs: NormalizedJobInput[];
   pagesFetched: number | null;
   costs: SourceCostUsage;
@@ -125,6 +126,7 @@ export interface SourceDiscoveryContractSnapshot {
   status: SourceAttemptStatus;
   outcome: SourceOutcome;
   discovered: number;
+  excluded: number;
   candidateCount: number;
   pagesFetched: number | null;
   costs: SourceCostUsage;
@@ -187,6 +189,12 @@ export function assertSourceDiscoveryResultContract(
   if (result.discovered < result.jobs.length) {
     throw new Error("result.discovered must be greater than or equal to jobs.length");
   }
+  if (!Number.isInteger(result.excluded) || result.excluded < 0) {
+    throw new Error("result.excluded must be a non-negative integer");
+  }
+  if (result.excluded > result.discovered) {
+    throw new Error("result.excluded must be less than or equal to result.discovered");
+  }
   if (result.outcome === "success" && result.jobs.length === 0) {
     throw new Error(
       "result.outcome success requires at least one normalized job; use zero_results",
@@ -215,6 +223,7 @@ export function assertSourceDiscoveryResultContract(
     status: sourceAttemptStatus(result.outcome, result.jobs.length, result.errors),
     outcome: result.outcome,
     discovered: result.discovered,
+    excluded: result.excluded,
     candidateCount: result.jobs.length,
     pagesFetched: result.pagesFetched,
     costs: result.costs,

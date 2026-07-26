@@ -270,24 +270,28 @@ The API should expose reviewable eligibility flags instead of hard-coded pass/fa
 
 Current user constraints:
 
-- US remote is generally bad because of passport/work authorization constraints.
-- EU-based jobs are generally bad if they require in-situ EU presence.
-- EU remote may be fine, especially if only occasional business meetings are required.
+- US-only jobs and explicit US passport/citizenship/work-authorization requirements are hard blockers.
+- Explicit EU passport/citizenship/work-authorization requirements are currently hard blockers; an EU location alone is not.
+- EU remote, hybrid, and in-person jobs may be viable. Hybrid/on-site attendance is a caveat to expose, not a rejection by itself.
 - Switzerland remote likely needs special review because in-situ requirements may apply.
 - London, Singapore, UAE, and interesting AI-lab in-person roles are worth review.
-- Inside IR35 is a strong negative unless the company or role is exceptional.
-- UK security clearance requirements are likely reject.
+- Inside IR35 is a major caveat, not a rejection.
+- UK security-clearance requirements are hard blockers.
+- Explicit candidate-identity eligibility requirements the candidate cannot satisfy are hard blockers; inclusive outreach language is not.
 - Generic `remote` or `distributed` alone is not enough to mark high signal.
 
 Possible API flags:
 
 - `us_remote_problem`
+- `us_or_eu_authorization_required`
 - `eu_in_situ_problem`
 - `eu_remote_possible`
+- `hybrid_or_onsite`
 - `switzerland_review`
 - `inside_ir35`
 - `outside_ir35`
 - `security_clearance_required`
+- `candidate_identity_requirement`
 - `interesting_location`
 - `ai_lab_exception_possible`
 - `generic_remote_needs_review`

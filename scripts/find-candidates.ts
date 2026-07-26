@@ -47,7 +47,7 @@ async function fetchByStatus(status: string, limit = 60) {
       database_id: databaseId!,
       filter: { property: "Status", select: { equals: status } },
       sorts: [{ property: "Date Scraped", direction: "descending" }],
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
       page_size: 50,
     });
     for (const page of resp.results) {

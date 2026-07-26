@@ -72,24 +72,31 @@ describe("fast refresh contract helpers", () => {
       jobserveQueries: ["agentic", "rag"],
     });
 
-    expect(defaults.jobserveQueries).toEqual([
-      "agentic",
-      "langchain",
-      "forward deployed engineer",
-      "inference engineer",
-      "ai enablement",
-      "ai automation",
-      "internal ai",
-    ]);
+    expect(defaults.jobserveQueries).toEqual(["AI engineer", "agentic AI", "LLM engineer"]);
     expect(options.limit).toBe(5);
-    expect(options.sourceIds).toEqual(["jobserve", "linear-careers"]);
+    expect(options.sourceIds).toEqual(["jobserve", "linear-careers", "google-careers"]);
     expect(options.jobserveQueries).toEqual(["agentic", "rag"]);
-    expect(options.jobserveMaxPages).toBe(3);
+    expect(options.jobserveMaxPages).toBe(2);
+    expect(options.jobserveImportLimitPerQuery).toBe(5);
   });
 
-  test("builds concrete source adapters for JobServe queries and Linear Careers", () => {
+  test("refuses JobServe refresh settings that exceed the fair-use safety envelope", () => {
+    expect(() =>
+      normalizeFastRefreshOptions({
+        jobserveQueries: ["one", "two", "three", "four"],
+      }),
+    ).toThrow("JobServe refresh is limited to 3 queries");
+    expect(() => normalizeFastRefreshOptions({ jobserveMaxPages: 3 })).toThrow(
+      "JobServe refresh is limited to 2 pages per query",
+    );
+    expect(() => normalizeFastRefreshOptions({ jobserveImportLimitPerQuery: 6 })).toThrow(
+      "JobServe refresh is limited to 5 detail pages per query",
+    );
+  });
+
+  test("builds concrete source adapters for JobServe and direct careers sources", () => {
     const adapters = buildFastRefreshSourceAdapters({
-      sourceIds: ["jobserve", "linear-careers"],
+      sourceIds: ["jobserve", "linear-careers", "google-careers"],
       jobserveQueries: ["agentic", "rag"],
       jobserveMaxPages: 2,
     });
@@ -98,18 +105,20 @@ describe("fast refresh contract helpers", () => {
       "jobserve",
       "jobserve",
       "linear-careers",
+      "google-careers",
     ]);
     expect(adapters.map((adapter) => adapter.defaultKeyword)).toEqual([
       "agentic",
       "rag",
       "linear-careers",
+      "google-careers",
     ]);
     expect(adapters[0]?.discover).toBeFunction();
   });
 
   test("source adapter descriptors are stable enough for UI and source-scoped refresh", () => {
     const sources = listFastRefreshSources({
-      sourceIds: ["jobserve", "linear-careers"],
+      sourceIds: ["jobserve", "linear-careers", "google-careers"],
       jobserveQueries: ["agentic"],
       jobserveMaxPages: 1,
     });
@@ -130,6 +139,15 @@ describe("fast refresh contract helpers", () => {
         kind: "direct_employer",
         quality: "high",
         defaultKeyword: "linear-careers",
+        defaultIncluded: true,
+        supportsSourceScopedRefresh: true,
+      },
+      {
+        id: "google-careers",
+        label: "Google Careers",
+        kind: "direct_employer",
+        quality: "high",
+        defaultKeyword: "google-careers",
         defaultIncluded: true,
         supportsSourceScopedRefresh: true,
       },

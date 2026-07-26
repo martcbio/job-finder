@@ -71,6 +71,18 @@ export function rankJobServeContracts(
     .slice(0, options.limit);
 }
 
+export function filterRecentJobServeContracts(
+  rows: readonly RankedJobServeContract[],
+  options: { maxAgeDays: number; now?: Date },
+): RankedJobServeContract[] {
+  const now = options.now ?? new Date();
+  const cutoff = now.getTime() - options.maxAgeDays * 24 * 60 * 60 * 1000;
+  return rows.filter((row) => {
+    const timestamp = row.postedAt?.getTime() ?? Date.parse(row.lastSeenAt);
+    return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= now.getTime();
+  });
+}
+
 export function rankJobServeContract(row: JobServeContractRow): RankedJobServeContract | null {
   const haystack = jobServeHaystack(row);
   const strictMatches = matchingLabels(haystack, STRICT_TERM_PATTERNS);

@@ -38,5 +38,9 @@
   "perplexity": {
     "ats": "ashby",
     "company": "Perplexity"
+  },
+  "ramp": {
+    "ats": "ashby",
+    "company": "Ramp"
   }
 }

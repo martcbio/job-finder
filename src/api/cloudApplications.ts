@@ -263,7 +263,7 @@ export async function listCloudApplications(
     }
     parsedStatus = parsed.data;
   }
-  return fetchRows(context, { status: parsedStatus });
+  return fetchRows(context, parsedStatus ? { status: parsedStatus } : {});
 }
 
 export async function getCloudApplication(

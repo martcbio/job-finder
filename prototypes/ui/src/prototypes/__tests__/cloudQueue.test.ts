@@ -14,6 +14,11 @@ function opening(overrides: Partial<CloudOpeningRow> = {}): CloudOpeningRow {
     locations: ["London", "Remote UK"],
     url: "https://job-boards.greenhouse.io/acme-lab/jobs/42",
     posted_at: "2026-07-15T08:00:00.000Z",
+    location_eligibility: "eligible",
+    location_reason_codes: ["location.europe_or_uk"],
+    role_relevance: "relevant",
+    role_reason_codes: ["role.technical"],
+    disposition: "suitable",
     first_seen_at: "2026-07-16T08:00:00.000Z",
     last_seen_at: "2026-07-17T08:00:00.000Z",
     first_seen_run_id: "run-latest",
@@ -71,6 +76,22 @@ describe("cloud openings in the review queue", () => {
   test("deduplicates cloud openings against normalized local URLs", () => {
     const local = localRow("http://www.job-boards.greenhouse.io/acme-lab/jobs/42/?gh_src=feed");
     expect(mergeCloudOpeningsIntoQueue([local], [opening()], "run-latest")).toEqual([local]);
+  });
+
+  test("adds only suitable openings to the default review queue", () => {
+    const unsuitable = opening({
+      external_id: "us-1",
+      url: "https://job-boards.greenhouse.io/acme-lab/jobs/us-1",
+      location: "San Francisco, CA",
+      locations: ["San Francisco, CA"],
+      location_eligibility: "ineligible",
+      location_reason_codes: ["location.us_only"],
+      disposition: "unsuitable_location",
+    });
+
+    const merged = mergeCloudOpeningsIntoQueue([], [opening(), unsuitable], "run-latest");
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.application_provenance?.external_id).toBe("42");
   });
 
   test("filters every mapped lab row through the Labs quick chip", () => {

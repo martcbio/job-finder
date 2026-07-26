@@ -30,7 +30,7 @@ export async function insertJob(
   const response = await client.pages.create({
     parent: { database_id: databaseId },
     properties: properties as CreatePageParameters["properties"],
-    children: children as CreatePageParameters["children"],
+    children: children as NonNullable<CreatePageParameters["children"]>,
   });
 
   return response.id;

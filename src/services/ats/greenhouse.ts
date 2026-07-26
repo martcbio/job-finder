@@ -133,7 +133,7 @@ export async function listOrgJobs(
   org: string,
   fetcher: Fetcher = fetch,
 ): Promise<AtsOrgAcquisition> {
-  const endpoint = `https://boards-api.greenhouse.io/v1/boards/${org}/jobs`;
+  const endpoint = `https://boards-api.greenhouse.io/v1/boards/${org}/jobs?content=true`;
   const acquisition = await fetchAtsJson(
     endpoint,
     greenhouseListResponseSchema,

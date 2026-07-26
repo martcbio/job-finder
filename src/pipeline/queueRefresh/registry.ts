@@ -1,6 +1,6 @@
 import { JOB_SOURCE_SITES, resolveJobSourceSites } from "../sourceSites";
 
-export const FAST_REFRESH_SOURCE_IDS = new Set(["jobserve", "linear-careers"]);
+export const FAST_REFRESH_SOURCE_IDS = new Set(["jobserve", "linear-careers", "google-careers"]);
 
 /** Normalized imports (snapshot file) rather than live search. */
 export const LANE_IMPORT_SOURCE_IDS = new Set(["jobspy"]);

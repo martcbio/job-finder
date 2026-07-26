@@ -64,7 +64,7 @@ while (collected.length < LIMIT) {
     database_id: databaseId,
     filter: { property: "Status", select: { equals: "Rejected" } },
     sorts: [{ property: "Date Scraped", direction: "descending" }],
-    start_cursor: cursor,
+    ...(cursor ? { start_cursor: cursor } : {}),
     page_size: 100,
   });
   for (const page of resp.results) {

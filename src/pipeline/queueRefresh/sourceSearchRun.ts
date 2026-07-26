@@ -26,6 +26,10 @@ export interface SourceSearchRunOptions {
   maxQueries?: number;
   limitPerQuery?: number;
   timeoutMs?: number;
+  credentials: {
+    braveApiKey: string;
+    jinaApiKey: string;
+  };
 }
 
 export interface SourceSearchRunResult {
@@ -52,6 +56,7 @@ async function assertMigrationsReady(): Promise<void> {
   }
 }
 
+/** Runs a persisted source search using credentials supplied by the composition root. */
 export async function runSourceSearchForSites(
   input: SourceSearchRunOptions,
 ): Promise<SourceSearchRunResult | null> {
@@ -115,14 +120,11 @@ export async function runSourceSearchForSites(
     }
 
     try {
-      const call = await fetchDiscoveryWithUsage(
-        target.query,
-        {
-          braveApiKey: process.env.BRAVE_API_KEY ?? "",
-          jinaApiKey: process.env.JINA_API_KEY ?? "",
-        },
-        { timeoutMs, provider: "auto", count: limitPerQuery },
-      );
+      const call = await fetchDiscoveryWithUsage(target.query, input.credentials, {
+        timeoutMs,
+        provider: "auto",
+        count: limitPerQuery,
+      });
       const items = target.filter(call.results).slice(0, limitPerQuery);
 
       for (const [itemIndex, item] of items.entries()) {
@@ -211,6 +213,7 @@ export function searchRunToSourceSummaries(run: SourceSearchRunResult): FastRefr
       outcome: site.status,
       status: sourceAttemptStatus(site.status, site.results, errors),
       discovered: site.results,
+      excluded: 0,
       imported: 0,
       fullText: { persisted: 0, fetchedPages: null, status: "pending" as const },
       classification: { classified: 0 },

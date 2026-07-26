@@ -195,6 +195,45 @@ export interface ApiEnvelope<T> {
   error?: { code: string; message: string };
 }
 
+export interface OpportunityReason {
+  code: string;
+  detail: string;
+}
+
+export interface OpportunityRow {
+  source: string;
+  company: string;
+  title: string;
+  location: string;
+  url: string;
+  postedAt: string;
+  observedAt: string;
+  terms: string;
+  screening: {
+    status: "high_signal" | "needs_human_review" | "rejected";
+    reasons: OpportunityReason[];
+    summary: string;
+  };
+  bodyAvailable: boolean;
+}
+
+export interface OpportunityReport {
+  generatedAt: string;
+  maxAgeDays: number;
+  rows: OpportunityRow[];
+  pickUrls: string[];
+  pickDistribution: Array<{ source: string; count: number }>;
+  sourceHealth: Array<{
+    source: string;
+    rowCount: number;
+    newestPostedAt: string | null;
+    newestObservedAt: string | null;
+    ageHours: number | null;
+    status: "current" | "stale" | "missing";
+    message: string;
+  }>;
+}
+
 export interface CloudOpeningRow {
   org: string;
   ats: "ashby" | "greenhouse" | "lever";
@@ -205,6 +244,11 @@ export interface CloudOpeningRow {
   locations: string[];
   url: string;
   posted_at: string | null;
+  location_eligibility: "eligible" | "ineligible" | "undecided";
+  location_reason_codes: string[];
+  role_relevance: "relevant" | "irrelevant" | "undecided";
+  role_reason_codes: string[];
+  disposition: "suitable" | "unsuitable_location" | "unsuitable_role" | "undecided";
   first_seen_at: string;
   last_seen_at: string;
   first_seen_run_id: string;
@@ -217,7 +261,23 @@ export interface CloudRunRow {
   completed_at: string;
   health: "complete" | "degraded" | "failed";
   matched_openings_count: number;
+  raw_openings_count: number;
+  eligible_openings_count: number;
+  suitable_openings_count: number;
+  unsuitable_location_openings_count: number;
+  unsuitable_role_openings_count: number;
+  undecided_openings_count: number;
   substrate: "modal" | "mac";
+}
+
+export interface CloudOpeningCounts {
+  scope: "returned_rows";
+  raw: number;
+  eligible: number;
+  suitable: number;
+  unsuitableLocation: number;
+  unsuitableRole: number;
+  undecided: number;
 }
 
 export type CloudUnavailableCode =
@@ -231,6 +291,10 @@ export type CloudRowsResult<T> =
       status: "cloud_unavailable";
       reason: { code: CloudUnavailableCode; message: string; upstreamStatus?: number };
     };
+
+export type CloudOpeningsResult =
+  | { status: "available"; rows: CloudOpeningRow[]; counts: CloudOpeningCounts }
+  | Extract<CloudRowsResult<never>, { status: "cloud_unavailable" }>;
 
 export interface OpsDoctorRow {
   task: string;
@@ -298,7 +362,13 @@ export interface CloudOpsPayload {
   parity: { status: "available"; rows: OpsParityRow[] } | OpsUnavailable;
 }
 
-export type PrototypeId = "cockpit" | "cloud" | "swipe" | "bento" | "timeline";
+export type PrototypeId =
+  | "opportunities"
+  | "cockpit"
+  | "cloud"
+  | "swipe"
+  | "bento"
+  | "timeline";
 
 export interface PrototypeInfo {
   id: PrototypeId;

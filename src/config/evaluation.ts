@@ -127,7 +127,7 @@ const LOCATION_ELIGIBILITY_FILTER: EvaluationFilter = {
 
 A listing may begin with a "## ATS Structured Data" block. When present, it is employer-set metadata from the ATS (Ashby, Lever, Greenhouse) and is the source of truth for the fields it carries:
 
-- "Workplace type" is authoritative. Hybrid means hybrid; you may only override it if the body explicitly contradicts ("100% remote", "fully remote regardless of location", "optional office"). Body silence does NOT override Hybrid. (OnSite is filtered upstream — you should not see it; if you ever do, FAIL unless the role is an exceptional AI lab/frontier AI opportunity in a preferred city.)
+- "Workplace type" is authoritative. Hybrid means hybrid and OnSite means on-site. Neither is a rejection by itself: PASS and state the work-mode caveat in the reason.
 - "All listed locations" reflects where the employer is actively hiring. Use it to judge geographic eligibility per the rules below.
 - "Primary location" is often the HQ city — do not over-index on it as a hiring restriction.
 - "Country (HQ)" is the headquartering country. When "All listed locations" does not name any specific country (e.g., it is empty, or contains only generic tokens like "Remote"), Country (HQ) is a weak country signal, not proof of global hiring. The literal token "Remote" in a location describes work mode, not geographic scope.
@@ -138,28 +138,33 @@ When there is no ATS block (e.g., Workable listings), rely entirely on the body.
 
 # Candidate constraints
 
-- US-remote is blocked. The candidate does not have US work authorization/passport support for US-only employment.
+- US-only employment is blocked. The candidate does not have US work authorization/passport support.
+- A requirement for an EU passport, EU citizenship, or existing EU work authorization is currently also blocked. Do not infer this requirement merely because a job is located in Europe; it must be explicit.
 - True EU remote is acceptable. EU/Europe remote roles can PASS if they are genuinely remote and do not require regular local presence.
 - Occasional business meetings, annual or quarterly offsites, conferences, and short team gatherings are acceptable.
 - Switzerland is suspect: Swiss roles often require being in situ or locally employed. FAIL Swiss-only, Switzerland-based, Zurich/Geneva/Basel-local, or "work from Switzerland" roles unless the listing explicitly allows remote work from outside Switzerland or global/Europe-wide employment without Swiss residency.
 - Most other non-US remote gigs are acceptable when the geography is clear.
-- Remote is preferred. In-person or hybrid roles should generally FAIL unless they are exceptional AI lab/frontier AI/research lab opportunities, especially in Singapore, UAE, London, or another unusually interesting location.
-- Inside IR35 is a strong negative. FAIL ordinary Inside IR35 contract roles unless the company/role is clearly exceptional AI lab/frontier AI.
+- Remote is preferred. In-person and hybrid roles PASS when otherwise geographically viable, but the reason MUST flag the exact office/location requirement for human review.
+- Inside IR35 is a strong negative but not a hard blocker. PASS and explicitly flag Inside IR35 for human review.
 - The candidate does not have UK security clearance. FAIL roles requiring active/current SC, DV, NPPV, "UK security clearance", or clearance eligibility that implies UK citizenship/residency constraints.
+- FAIL explicit candidate-identity eligibility requirements the candidate cannot satisfy, such as "women only" or "applicants must be women". Inclusive equal-opportunity language or "women are encouraged to apply" is not a blocker.
 
-# STEP 1 — Is the role remote enough?
+# STEP 1 — What is the work mode?
 
 PASS the work-mode signal when:
 - The ATS block has Workplace type=Remote, or the body indicates remote ("Remote", "Work from anywhere", "Distributed team", "100% remote", "Fully remote", "Remote - Europe", etc.).
 - Hybrid is offered alongside fully-remote as parallel alternatives — e.g., "Remote / Hybrid (London)", "Remote-first with optional office for those nearby", or "work from anywhere with optional office access".
 - The role requires only occasional business travel, annual/quarterly offsites, conferences, or short team meetings.
+- The role is hybrid or on-site. PASS but state the location, frequency, and work-mode caveat in the reason.
 
-FAIL the work-mode signal when:
-- ATS Workplace type=Hybrid AND the body does not explicitly contradict it. Body silence is NOT contradiction.
-- The body describes regular in-person attendance (weekly/monthly office days, "X days/month in office", "must be able to commute", "hybrid by default").
-- "Option to work remotely" frames on-site as the default.
+Do not FAIL merely because:
+- ATS Workplace type=Hybrid or OnSite.
+- The body describes regular in-person attendance (weekly/monthly office days, "X days/month in office", "must be able to commute", "hybrid by default"). Flag it.
+- "Option to work remotely" frames on-site as the default. Treat it as an on-site/hybrid caveat.
+
+FAIL the work-mode/geography combination when:
 - "Remote" means local-remote to a blocked place (e.g., "Remote - United States", "remote within Switzerland only").
-- No remote signal anywhere, unless the role is an exceptional AI lab/frontier AI role in Singapore, UAE, London, or another highly interesting location.
+- The role is tied to a geography the candidate cannot pursue and gives no viable alternative.
 
 # STEP 2 — Is the geography/work authorization viable?
 
@@ -167,23 +172,23 @@ Apply the first rule that fits, in order:
 
 A. Global/anywhere remote: body says "worldwide", "anywhere", "globally distributed", "global team", "international team", "employees worldwide", "employees in [N]+ countries", or describes a team spanning multiple continents → PASS unless it also says US-only, Switzerland-only, clearance-required, or similar.
 
-B. US restriction: role is "Remote - United States", "US only", requires US work authorization, requires candidate to be a US person, requires US residency, or has ATS locations only in the United States with no global override → FAIL.
+B. Authorization/citizenship restriction: role is "Remote - United States", "US only", requires US work authorization, requires candidate to be a US person, requires US residency, requires an EU passport/citizenship/work authorization, or has ATS locations only in the United States with no global override → FAIL. The EU rule fires only on an explicit requirement, not merely an EU location.
 
-C. EU/Europe remote: role is Remote Europe, EU remote, EMEA remote, UK/EU remote, or remote with European timezone overlap → PASS if there is no regular office attendance requirement. Occasional business meetings are OK.
+C. EU/Europe: role is Remote Europe, EU remote, EMEA remote, UK/EU remote, or has European office attendance → PASS unless an explicit EU-passport/citizenship/work-authorization requirement appears. Flag regular office attendance; occasional business meetings are a lighter caveat.
 
 D. Switzerland: role is Switzerland-only, Swiss-based, Zurich/Geneva/Basel hybrid, or "remote within Switzerland" → FAIL unless the body explicitly allows remote work from outside Switzerland or global/Europe-wide hiring without Swiss residency. If Switzerland appears in a broad list of eligible countries alongside EU/UK/global locations, do NOT fail only because Switzerland is listed.
 
-E. UK/London: remote or London-based roles can PASS if no security-clearance requirement, no regular unwanted hybrid pattern, and no ordinary Inside IR35 constraint. London in-person/hybrid should PASS only for exceptional AI lab/frontier AI/research lab opportunities; otherwise FAIL.
+E. UK/London: remote or London-based roles PASS if no security-clearance or other hard blocker applies. Flag hybrid/on-site attendance and Inside IR35.
 
-F. Singapore/UAE/interesting in-person: in-person or hybrid roles in Singapore, UAE, London, or another unusually interesting location PASS only when the role is clearly exceptional AI lab/frontier AI/research lab or otherwise unusually compelling. Ordinary in-person/hybrid roles FAIL.
+F. Other non-US in-person: in-person or hybrid roles outside the US PASS when the candidate can plausibly pursue the location. Flag the exact attendance requirement and location.
 
-G. Other non-US remote: remote roles open to APAC, Middle East, Africa, Canada, LATAM, worldwide contractors, or country-agnostic employment PASS unless they require local work authorization/residency the candidate likely lacks. If the only signal is a single non-US, non-EU country and no remote/outside-country permission, FAIL.
+G. Other non-US remote: remote roles open to APAC, Middle East, Africa, Canada, LATAM, worldwide contractors, or country-agnostic employment PASS unless they explicitly require local work authorization/residency the candidate lacks. A single non-US, non-EU country is a location caveat, not a hard blocker without an explicit authorization requirement.
 
-H. Security clearance: active/current UK SC, DV, NPPV, national-security clearance, or clearance eligibility tied to UK citizenship/residency → FAIL.
+H. Security clearance and candidate identity: active/current UK SC, DV, NPPV, national-security clearance, clearance eligibility tied to citizenship/residency, or an explicit sex/identity eligibility requirement the candidate cannot satisfy → FAIL.
 
-I. Inside IR35: ordinary Inside IR35 contractor roles → FAIL. PASS only if the company/role is clearly exceptional AI lab/frontier AI and the reason should explicitly flag Inside IR35 for human review.
+I. Inside IR35: PASS, but the reason MUST explicitly flag Inside IR35 as a major caveat for human review.
 
-J. Ambiguous but possibly viable remote: if the listing is genuinely remote and not US-only/Swiss-only/clearance/ordinary Inside IR35, PASS for human review rather than dropping it.
+J. Ambiguous but possibly viable: if the listing has no hard blocker, PASS for human review rather than dropping it.
 
 # Examples (worked decisions across the rules above)
 
@@ -197,15 +202,15 @@ FAIL: "Remote, must be authorized to work in the United States" → US authoriza
 FAIL: "Remote within Switzerland" → Swiss in-situ/local-employment risk
 PASS: "Remote across Europe, Switzerland also listed" → broad Europe/global list; Switzerland mention alone does not block
 PASS: "A supportive remote environment. Two annual in-person team meet-ups." → remote ✓, annual offsites OK
-FAIL: "A highly flexible remote work policy, 2 days at the office per month" → regular office attendance
-FAIL: "Full-time position in Prague. Option to work remotely." → on-site default, remote optional, ordinary role
+PASS: "A highly flexible remote work policy, 2 days at the office per month" → flag regular office attendance
+PASS: "Full-time position in Prague. Option to work remotely." → flag on-site default and Prague location
 PASS: "Frontier AI lab, Research Engineer, Singapore, in office" → exceptional AI lab + preferred city, keep for human review
-FAIL: Body says "Flexible work model (hybrid and options for remote work)" — hybrid is the default framing, remote is the qualified option ("options for") → hybrid-primary
+PASS: Body says "Flexible work model (hybrid and options for remote work)" → flag hybrid-primary
 PASS: Header "Location: Remote / Hybrid (Warsaw)" with body elsewhere "Total Autonomy (Remote-First)" → remote-only path is clearly available
-FAIL: No location or remote info mentioned, non-crypto company → no remote signal
+PASS: No location or remote info mentioned → location unclear; keep for human review
 
 [ATS Workplace type interactions]
-FAIL: ATS Workplace type=Hybrid, locations="San Francisco, New York", body describes role/stack but says nothing about workplace arrangement → Hybrid + body silent → rule on Step 1 FAIL
+FAIL: ATS Workplace type=Hybrid, locations="San Francisco, New York", body describes role/stack but says nothing about workplace arrangement → US-only locations are blocked, independent of hybrid
 PASS: ATS Workplace type=Hybrid, country=Spain, body says "Work 100% remotely, with the option to use our offices in Málaga or Barcelona if you're nearby" → body explicitly contradicts Hybrid ✓
 PASS: ATS Workplace type=Remote, locations include Portugal/Spain/UK/Ireland alongside non-EU markets, body says "remote-first" → rule D, EU members in list ✓
 
@@ -219,7 +224,8 @@ PASS: ATS Workplace type=Remote, locations="Spain, Portugal, Germany" → true E
 FAIL: "Remote - US only" → explicit US restriction
 FAIL: "Remote - Switzerland, must be based in Switzerland" → Swiss in-situ requirement
 PASS: "Remote - Europe, occasional Zurich business meetings" → Europe remote + occasional travel OK
-FAIL: "Dublin, Ireland — Hybrid, 3 days/week office" → regular office requirement
+PASS: "Dublin, Ireland — Hybrid, 3 days/week office" → flag hybrid and 3-day office requirement
+FAIL: "Remote across Europe; candidates must hold an EU passport or already have EU work authorization" → explicit EU authorization blocker
 
 [Body overrides ATS metadata]
 PASS: Header says "USA and Global (Hybrid)" but body says "team members all over the world" → rule A, body says worldwide
@@ -229,8 +235,10 @@ PASS: Location metadata "Canada; Portugal; UK; USA" + body "remote-first organiz
 [Risk-specific examples]
 FAIL: "Requires active UK SC clearance" → no security clearance
 FAIL: "Must be eligible for DV clearance" → clearance eligibility blocker
-FAIL: "Inside IR35 contract, generic enterprise migration" → ordinary Inside IR35
-PASS: "Inside IR35, frontier AI research lab, London, Staff Agent Engineer" → exceptional enough for human review; flag IR35 risk
+PASS: "Inside IR35 contract, generic enterprise migration" → keep but flag major IR35 caveat
+PASS: "Inside IR35, frontier AI research lab, London, Staff Agent Engineer" → keep and flag IR35 risk
+FAIL: "This programme is open to women only" → explicit candidate-identity eligibility blocker
+PASS: "Women and under-represented candidates are encouraged to apply" → inclusive outreach, not restricted eligibility
 PASS: "Work around U.S. business hours" or "US East Coast hours" without US authorization/residency restriction → timezone overlap alone is not a US-remote blocker`,
 };
 

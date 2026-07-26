@@ -182,7 +182,7 @@ describe("hasUsableAtsBody", () => {
 });
 
 describe("atsStructuralFilter", () => {
-  test("rejects workplaceType=OnSite with location in the reason", () => {
+  test("passes workplaceType=OnSite for downstream caveat handling", () => {
     const result = atsStructuralFilter({
       source: "ashby",
       location: "New York",
@@ -190,12 +190,10 @@ describe("atsStructuralFilter", () => {
       workplaceType: "OnSite",
       country: "United States",
     });
-    expect(result.pass).toBe(false);
-    expect(result.reason).toContain("OnSite");
-    expect(result.reason).toContain("New York");
+    expect(result).toEqual({ pass: true, reason: "" });
   });
 
-  test("falls back to country when location is empty", () => {
+  test("does not reject an on-site role solely from its country metadata", () => {
     const result = atsStructuralFilter({
       source: "ashby",
       location: "",
@@ -203,8 +201,7 @@ describe("atsStructuralFilter", () => {
       workplaceType: "OnSite",
       country: "Germany",
     });
-    expect(result.pass).toBe(false);
-    expect(result.reason).toContain("Germany");
+    expect(result).toEqual({ pass: true, reason: "" });
   });
 
   test("passes Hybrid — body may override (MONEI case)", () => {

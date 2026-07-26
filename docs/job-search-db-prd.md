@@ -197,7 +197,7 @@ The system should optimize first for correctness and auditability, second for to
 
 - Human review remains mandatory until the pipeline proves itself. Agents may prepare recommendations and drafts, but application/outreach behavior stays human-gated.
 
-- Location and authorization preferences are maintained in `docs/opportunity-criteria.md` and mirrored by the first evaluation filter. Current high-level rules: reject US-only remote and US-work-authorization roles; allow genuine EU remote plus occasional business meetings; treat Switzerland-only remote as suspect unless outside-Switzerland remote is explicit; reject UK security-clearance requirements; treat Inside IR35 as a strong negative unless the role is exceptional.
+- Location and authorization preferences are maintained in `docs/opportunity-criteria.md` and mirrored by the first evaluation filter. Current high-level rules: reject US-only roles and explicit US/EU passport, citizenship, or work-authorization requirements; keep hybrid/on-site roles but flag their attendance requirements; treat Switzerland-only remote as suspect unless outside-Switzerland remote is explicit; reject security-clearance and explicit unsatisfied candidate-identity requirements; keep Inside IR35 roles but flag them as a major caveat.
 
 - Review feedback should be structured from day one. Store shortlist/reject/maybe/duplicate/stale/bad-parse/wrong-category decisions, reason codes, and freeform notes.
 

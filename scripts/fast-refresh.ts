@@ -79,12 +79,12 @@ function printUsage(): void {
   bun run jobserve:refresh-contracts -- -q agentic -q langchain --jobserve-max-pages 3
 
 Options:
-  --source                Source id to run. Repeatable. Defaults to jobserve and linear-careers.
+  --source                Source id to run. Repeatable. Defaults to JobServe, Linear, and Google.
   -q, --jobserve-query    JobServe query. Repeatable. Defaults to agentic/langchain/FDE/inference.
   --jobserve-max-pages    JobServe classic pages per query. Defaults to 3.
   --jobserve-import-limit-per-query
                            JobServe rows to persist per query after discovery. Defaults to 8.
-  --direct-limit          Direct Linear Careers roles to ingest. Defaults to 6.
+  --direct-limit          Roles to ingest per direct careers source. Defaults to 6.
   --timeout-ms            Per-request timeout. Defaults to 20000.
   --classify-limit        Max jobs to classify per run. Defaults to 250.
   --limit                 Latest ranked jobs to print. Defaults to 20.

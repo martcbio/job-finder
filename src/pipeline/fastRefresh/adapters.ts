@@ -1,4 +1,4 @@
-import { fetchLinearCareersJobs } from "../directSources";
+import { fetchGoogleCareersJobs, fetchLinearCareersJobs } from "../directSources";
 import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "../jobserveLive";
 import { ingestNormalizedJobs } from "../normalizedJobIngest";
 import {
@@ -25,6 +25,7 @@ export function buildFastRefreshSourceAdapters(
         )
       : []),
     ...(sourceIds.has("linear-careers") ? [linearCareersSourceAdapter()] : []),
+    ...(sourceIds.has("google-careers") ? [googleCareersSourceAdapter()] : []),
   ];
 }
 
@@ -47,7 +48,9 @@ export async function ingestSourceAdapter(
   const started = Date.now();
   try {
     const limit =
-      adapter.id === "linear-careers" ? options.directLimit : options.jobserveImportLimitPerQuery;
+      adapter.kind === "direct_employer"
+        ? options.directLimit
+        : options.jobserveImportLimitPerQuery;
     const discovery = await adapter.discover({
       keyword: adapter.defaultKeyword,
       limit,
@@ -60,6 +63,7 @@ export async function ingestSourceAdapter(
         runId: null,
         outcome: discovery.outcome,
         discovered: discovery.discovered,
+        excluded: discovery.excluded,
         imported: 0,
         pagesPersisted: 0,
         pagesFetched: discovery.pagesFetched,
@@ -81,8 +85,9 @@ export async function ingestSourceAdapter(
       source: discovery.source,
       keyword: discovery.keyword,
       runId: ingest.runId,
-      outcome: ingest.errors.length > 0 ? "http_error" : "success",
+      outcome: ingest.errors.length > 0 ? "http_error" : discovery.outcome,
       discovered: discovery.discovered,
+      excluded: discovery.excluded,
       imported: ingest.jobsPersisted,
       pagesPersisted: ingest.pagesPersisted,
       pagesFetched: discovery.pagesFetched,
@@ -91,6 +96,7 @@ export async function ingestSourceAdapter(
         ...discovery.errors,
         ...ingest.errors.map((error) => `${error.title}: ${error.error}`),
       ],
+      blockedReason: discovery.blockedReason,
     });
   } catch (err) {
     return sourceSummary({
@@ -99,6 +105,7 @@ export async function ingestSourceAdapter(
       runId: null,
       outcome: outcomeFromError(err),
       discovered: 0,
+      excluded: 0,
       imported: 0,
       pagesPersisted: 0,
       pagesFetched: null,
@@ -118,6 +125,7 @@ function jobServeSourceAdapter(query: string, maxPages: number): FastRefreshSour
         query,
         maxPages,
         timeoutMs: input.timeoutMs,
+        detailLimit: input.limit,
       });
       const jobs = result.roles
         .slice(0, input.limit)
@@ -125,13 +133,18 @@ function jobServeSourceAdapter(query: string, maxPages: number): FastRefreshSour
       return {
         source: sourceAdapterFor("jobserve", "JobServe", ""),
         keyword: query,
-        outcome: jobs.length > 0 ? "success" : "zero_results",
-        discovered: result.roles.length,
+        outcome: result.blockedReason
+          ? "blocked_robots_or_waf"
+          : jobs.length > 0
+            ? "success"
+            : "zero_results",
+        discovered: result.roles.length + result.excludedRoles.length,
+        excluded: result.excludedRoles.length,
         jobs,
         pagesFetched: result.pagesFetched,
         costs: ZERO,
-        errors: [],
-        blockedReason: null,
+        errors: result.errors,
+        blockedReason: result.blockedReason,
       };
     },
   };
@@ -151,8 +164,34 @@ function linearCareersSourceAdapter(): FastRefreshSourceAdapter {
         keyword: "linear-careers",
         outcome: result.jobs.length > 0 ? "success" : "zero_results",
         discovered: result.discovered,
+        excluded: 0,
         jobs: result.jobs,
         pagesFetched: null,
+        costs: ZERO,
+        errors: [],
+        blockedReason: null,
+      };
+    },
+  };
+}
+
+function googleCareersSourceAdapter(): FastRefreshSourceAdapter {
+  return {
+    ...sourceAdapterFor("google-careers", "Google Careers", ""),
+    defaultKeyword: "google-careers",
+    async discover(input) {
+      const result = await fetchGoogleCareersJobs({
+        limit: input.limit,
+        timeoutMs: input.timeoutMs,
+      });
+      return {
+        source: sourceAdapterFor(result.sourceId, result.sourceLabel, ""),
+        keyword: "google-careers",
+        outcome: result.jobs.length > 0 ? "success" : "zero_results",
+        discovered: result.discovered,
+        excluded: Math.max(0, result.discovered - result.jobs.length),
+        jobs: result.jobs,
+        pagesFetched: result.jobs.length + 1,
         costs: ZERO,
         errors: [],
         blockedReason: null,
@@ -167,6 +206,7 @@ function sourceSummary(input: {
   runId: number | null;
   outcome: SourceOutcome;
   discovered: number;
+  excluded: number;
   imported: number;
   pagesPersisted: number;
   pagesFetched: number | null;
@@ -181,6 +221,7 @@ function sourceSummary(input: {
     outcome: input.outcome,
     status: sourceAttemptStatus(input.outcome, input.imported, input.errors ?? []),
     discovered: input.discovered,
+    excluded: input.excluded,
     imported: input.imported,
     fullText: {
       persisted: input.pagesPersisted,

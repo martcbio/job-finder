@@ -90,7 +90,12 @@ async function run(): Promise<void> {
   }
 
   const options = parseOptions(args);
-  const rows = await runPsqlJson<ApplicationListRow[]>(buildListApplicationsSql(options));
+  const rows = await runPsqlJson<ApplicationListRow[]>(
+    buildListApplicationsSql({
+      limit: options.limit,
+      ...(options.status ? { status: options.status } : {}),
+    }),
+  );
 
   if (options.json) {
     console.log(JSON.stringify(rows, null, 2));

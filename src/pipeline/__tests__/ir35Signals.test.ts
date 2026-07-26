@@ -28,6 +28,10 @@ describe("isInsideIr35", () => {
 
     expect(isInsideIr35(text)).toBe(true);
   });
+
+  test("flags day-rate title shorthand ending in inside", () => {
+    expect(isInsideIr35("QA Automation Engineer £250-300 per day inside")).toBe(true);
+  });
 });
 
 describe("classifyIr35Signals", () => {
@@ -54,5 +58,32 @@ describe("classifyIr35Signals", () => {
         compensation: "£600 per day",
       }),
     ).toMatchObject({ outside: true, inside: false, isContract: true, permanentEvidence: false });
+  });
+
+  test("treats explicit negations as negative evidence", () => {
+    expect(
+      classifyIr35Signals({
+        text: "Six month contract; not outside IR35; inside IR35",
+        employmentType: "Contract",
+        compensation: "£600 per day",
+      }),
+    ).toMatchObject({ outside: false, inside: true });
+    expect(
+      classifyIr35Signals({
+        text: "Six month contract; outside IR35: no",
+        employmentType: "Contract",
+        compensation: "£600 per day",
+      }),
+    ).toMatchObject({ outside: false });
+  });
+
+  test("lets affirmative inside IR35 override contradictory outside wording", () => {
+    expect(
+      classifyIr35Signals({
+        text: "Contract advertised as outside IR35 but confirmed inside IR35",
+        employmentType: "Contract",
+        compensation: "£600 per day",
+      }),
+    ).toMatchObject({ outside: false, inside: true });
   });
 });

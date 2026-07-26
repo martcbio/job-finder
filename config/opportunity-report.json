@@ -1,0 +1,7 @@
+{
+  "limit": 25,
+  "maxAgeDays": 45,
+  "pickCount": 12,
+  "staleAfterHours": 48,
+  "expectedSources": ["JobServe", "Lab ATS", "Linear Careers", "Google Careers"]
+}

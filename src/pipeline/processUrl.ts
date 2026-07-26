@@ -141,8 +141,8 @@ export async function processUrl(
       withRetry(
         () =>
           evaluateJob(job, config.openrouterApiKey, {
-            tracker,
-            filters: ctx.filters,
+            ...(tracker ? { tracker } : {}),
+            ...(ctx.filters ? { filters: ctx.filters } : {}),
             model: config.llmModel,
           }),
         {

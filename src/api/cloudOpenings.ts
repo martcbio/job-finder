@@ -16,10 +16,16 @@ const CloudOpeningSchema = z.object({
   locations: z.array(z.string()),
   url: z.string().url(),
   posted_at: z.iso.datetime({ offset: true }).nullable(),
+  location_eligibility: z.enum(["eligible", "ineligible", "undecided"]),
+  location_reason_codes: z.array(z.string()),
+  role_relevance: z.enum(["relevant", "irrelevant", "undecided"]),
+  role_reason_codes: z.array(z.string()),
+  disposition: z.enum(["suitable", "unsuitable_location", "unsuitable_role", "undecided"]),
   first_seen_at: z.iso.datetime({ offset: true }),
   last_seen_at: z.iso.datetime({ offset: true }),
   first_seen_run_id: z.string(),
   last_seen_run_id: z.string(),
+  raw: z.unknown().optional(),
 });
 
 const CloudOpeningRawSchema = z.object({
@@ -37,12 +43,27 @@ const CloudRunSchema = z.object({
   completed_at: z.iso.datetime({ offset: true }),
   health: z.enum(["complete", "degraded", "failed"]),
   matched_openings_count: z.number().int().nonnegative(),
+  raw_openings_count: z.number().int().nonnegative(),
+  eligible_openings_count: z.number().int().nonnegative(),
+  suitable_openings_count: z.number().int().nonnegative(),
+  unsuitable_location_openings_count: z.number().int().nonnegative(),
+  unsuitable_role_openings_count: z.number().int().nonnegative(),
+  undecided_openings_count: z.number().int().nonnegative(),
   substrate: z.enum(["modal", "mac"]),
 });
 
 export type CloudOpening = z.infer<typeof CloudOpeningSchema>;
 export type CloudOpeningRaw = z.infer<typeof CloudOpeningRawSchema>;
 export type CloudRun = z.infer<typeof CloudRunSchema>;
+export interface CloudOpeningCounts {
+  scope: "returned_rows";
+  raw: number;
+  eligible: number;
+  suitable: number;
+  unsuitableLocation: number;
+  unsuitableRole: number;
+  undecided: number;
+}
 export type CloudUnavailableCode =
   | "cloud_not_configured"
   | "cloud_schema_not_exposed"
@@ -59,10 +80,15 @@ export type CloudRowsResult<T> =
       };
     };
 
+export type CloudOpeningsResult =
+  | { status: "available"; rows: CloudOpening[]; counts: CloudOpeningCounts }
+  | Extract<CloudRowsResult<never>, { status: "cloud_unavailable" }>;
+
 interface CloudRequest {
   table: "openings" | "openings_runs";
   select: string;
   limit: number;
+  offset?: number;
   order: string;
   filters?: Record<string, string>;
 }
@@ -84,6 +110,9 @@ function cloudUrl(config: CloudConfig, request: CloudRequest): URL | null {
   url.searchParams.set("select", request.select);
   url.searchParams.set("order", request.order);
   url.searchParams.set("limit", String(request.limit));
+  if (request.offset !== undefined && request.offset > 0) {
+    url.searchParams.set("offset", String(request.offset));
+  }
   for (const [name, value] of Object.entries(request.filters ?? {})) {
     url.searchParams.set(name, value);
   }
@@ -179,22 +208,56 @@ export function parseCloudSince(value: string | null): string | undefined {
   return parsed.data;
 }
 
-export function listCloudOpenings(
+export async function listCloudOpenings(
   context: ApiContext,
-  options: { limit: number; since?: string },
-): Promise<CloudRowsResult<CloudOpening>> {
-  return fetchCloudRows(
-    context,
-    {
-      table: "openings",
-      select:
-        "org,ats,external_id,title,company,location,locations,url,posted_at,first_seen_at,last_seen_at,first_seen_run_id,last_seen_run_id",
-      limit: options.limit,
-      order: "last_seen_at.desc",
-      filters: options.since ? { first_seen_at: `gte.${options.since}` } : undefined,
+  options: {
+    limit: number;
+    since?: string;
+    runId?: string;
+    includeRaw?: boolean;
+    workableLocationsOnly?: boolean;
+  },
+): Promise<CloudOpeningsResult> {
+  const rows: CloudOpening[] = [];
+  while (rows.length < options.limit) {
+    const pageLimit = Math.min(1000, options.limit - rows.length);
+    const page = await fetchCloudRows(
+      context,
+      {
+        table: "openings",
+        select:
+          "org,ats,external_id,title,company,location,locations,url,posted_at,location_eligibility,location_reason_codes,role_relevance,role_reason_codes,disposition,first_seen_at,last_seen_at,first_seen_run_id,last_seen_run_id" +
+          (options.includeRaw ? ",raw" : ""),
+        limit: pageLimit,
+        offset: rows.length,
+        order: "last_seen_at.desc",
+        filters: {
+          ...(options.since ? { first_seen_at: `gte.${options.since}` } : {}),
+          ...(options.runId ? { last_seen_run_id: `eq.${options.runId}` } : {}),
+          ...(options.workableLocationsOnly
+            ? { location_eligibility: "in.(eligible,undecided)" }
+            : {}),
+        },
+      },
+      z.array(CloudOpeningSchema),
+    );
+    if (page.status !== "available") return page;
+    rows.push(...page.rows);
+    if (page.rows.length < pageLimit) break;
+  }
+  return {
+    status: "available",
+    rows,
+    counts: {
+      scope: "returned_rows",
+      raw: rows.length,
+      eligible: rows.filter((row) => row.location_eligibility === "eligible").length,
+      suitable: rows.filter((row) => row.disposition === "suitable").length,
+      unsuitableLocation: rows.filter((row) => row.disposition === "unsuitable_location").length,
+      unsuitableRole: rows.filter((row) => row.disposition === "unsuitable_role").length,
+      undecided: rows.filter((row) => row.disposition === "undecided").length,
     },
-    z.array(CloudOpeningSchema),
-  );
+  };
 }
 
 export function getCloudOpeningRaw(
@@ -226,7 +289,8 @@ export function listCloudRuns(
     context,
     {
       table: "openings_runs",
-      select: "run_id,run_date,completed_at,health,matched_openings_count,substrate",
+      select:
+        "run_id,run_date,completed_at,health,matched_openings_count,raw_openings_count,eligible_openings_count,suitable_openings_count,unsuitable_location_openings_count,unsuitable_role_openings_count,undecided_openings_count,substrate",
       limit,
       order: "completed_at.desc",
     },

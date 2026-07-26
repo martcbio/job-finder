@@ -1,5 +1,6 @@
 import { config } from "../config";
 import { runPsqlJson } from "../db/psql";
+import { loadOpportunityReport } from "../pipeline/opportunityReportData";
 import { runQueueRefresh } from "../pipeline/queueRefresh";
 import { stageApplicationCvWithContext } from "./applicationCvStage";
 import type { ApiContext, JobFinderApiOptions } from "./context";
@@ -25,11 +26,19 @@ export function createJobFinderApiContext(options: JobFinderApiOptions = {}): Ap
     now: options.now ?? (() => new Date()),
     allowOrigins: options.allowOrigins ?? ["http://localhost:3000", "http://localhost:5173"],
     cloudConfig: options.cloudConfig ?? {
-      supabaseUrl: config.supabaseUrl,
-      supabaseServiceKey: config.supabaseServiceKey,
+      ...(config.supabaseUrl ? { supabaseUrl: config.supabaseUrl } : {}),
+      ...(config.supabaseServiceKey ? { supabaseServiceKey: config.supabaseServiceKey } : {}),
     },
     fetch: options.fetch ?? globalThis.fetch,
     stageCv: options.stageCv ?? stageApplicationCvWithContext,
+    opportunityReport:
+      options.opportunityReport ??
+      ((reportOptions) =>
+        loadOpportunityReport({
+          query: options.query ?? ((sql) => runPsqlJson(sql)),
+          env: options.env ?? process.env,
+          ...reportOptions,
+        })),
   };
 }
 

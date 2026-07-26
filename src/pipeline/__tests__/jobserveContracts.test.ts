@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { type JobServeContractRow, rankJobServeContracts } from "../jobserveContracts";
+import {
+  filterRecentJobServeContracts,
+  type JobServeContractRow,
+  rankJobServeContracts,
+} from "../jobserveContracts";
 
 function row(overrides: Partial<JobServeContractRow>): JobServeContractRow {
   return {
@@ -119,5 +123,32 @@ describe("JobServe contract ranking", () => {
     expect(ranked.map((item) => [item.tier, item.whyMatched])).toEqual([
       [1, ["outside IR35", "contract", "agentic"]],
     ]);
+  });
+
+  test("filters stale postings before the output limit is applied", () => {
+    const ranked = rankJobServeContracts(
+      [
+        row({
+          title: "Old Exact Match",
+          lastSeenAt: "2026-07-23T12:00:00.000Z",
+          markdown:
+            "- Outside IR35: yes\n- Employment type: Contract\nPosted date: 22/05/2026 07:00:00\nAgentic AI",
+        }),
+        row({
+          title: "Fresh Adjacent Match",
+          lastSeenAt: "2026-07-23T12:00:00.000Z",
+          markdown:
+            "- Outside IR35: yes\n- Employment type: Contract\nPosted date: 22/07/2026 07:00:00\nLLM",
+        }),
+      ],
+      { limit: 10 },
+    );
+
+    expect(
+      filterRecentJobServeContracts(ranked, {
+        maxAgeDays: 30,
+        now: new Date("2026-07-23T12:00:00.000Z"),
+      }).map((job) => job.title),
+    ).toEqual(["Fresh Adjacent Match"]);
   });
 });

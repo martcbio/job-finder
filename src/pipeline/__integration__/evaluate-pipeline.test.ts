@@ -16,7 +16,8 @@ async function evaluateFullPipeline(
   return evaluateJob(job, apiKey, options);
 }
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY as string;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? "";
+const describeLive = OPENROUTER_API_KEY ? describe : describe.skip;
 const LLM_MODEL = process.env.LLM_MODEL ?? "google/gemini-2.5-flash";
 
 const FIXTURES_DIR = `${import.meta.dir}/fixtures/evaluate`;
@@ -68,7 +69,7 @@ type Result = { name: string; expected: boolean; actual: boolean; reason: string
 
 const results: Result[] = [];
 
-describe("full evaluation pipeline (integration)", () => {
+describeLive("full evaluation pipeline (live integration; requires OPENROUTER_API_KEY)", () => {
   beforeAll(async () => {
     const passFiles = collectFixtures(`${FIXTURES_DIR}/pass`).map((file) => ({
       file,

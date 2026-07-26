@@ -141,8 +141,8 @@ export async function fetchAtsJson<T>(
       },
       onRetry,
       {
-        timeoutMs: options.timeoutMs,
-        baseDelayMs: options.baseDelayMs,
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.baseDelayMs === undefined ? {} : { baseDelayMs: options.baseDelayMs }),
       },
     );
   } catch (error) {

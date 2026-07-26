@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO="${OPPS_REPO:-/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party}"
+export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  opps update                 Refresh lab ATS, direct careers, and company signals
+  opps update --jobserve      Also run the bounded, paced JobServe refresh
+  opps signals                Refresh bookmark hiring/funding company intelligence
+  opps list [options]         Print and email the current mixed-source opportunity list
+  opps json [options]         Emit the current report as JSON
+  opps doctor                 Check the database, API, Modal scanner, and browser UI
+  opps open                   Open the Latest 50 browser view
+
+JobServe is not contacted by default. It requires: opps update --jobserve
+Selections are always emailed through Resend. JSON exports are not.
+EOF
+}
+
+if [[ ! -d "${REPO}" ]]; then
+  printf 'opps: repository not found: %s\n' "${REPO}" >&2
+  exit 1
+fi
+
+command="${1:---help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+cd "${REPO}"
+
+case "${command}" in
+  update)
+    refresh_args=(--refresh-cloud-labs --refresh-direct --refresh-signals --strict-source-health --quiet --email)
+    passthrough=()
+    for arg in "$@"; do
+      if [[ "${arg}" == "--jobserve" ]]; then
+        refresh_args+=(--refresh-jobserve)
+      else
+        passthrough+=("${arg}")
+      fi
+    done
+    if [[ ${#passthrough[@]} -gt 0 ]]; then
+      exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}" "${passthrough[@]}"
+    fi
+    exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}"
+    ;;
+  list)
+    exec bun scripts/list-latest-opportunities.ts --email "$@"
+    ;;
+  json)
+    exec bun scripts/list-latest-opportunities.ts --format json "$@"
+    ;;
+  signals)
+    exec bun run company:signals
+    ;;
+  doctor)
+    failed=0
+    if pg_isready --dbname="${DATABASE_URL}" >/dev/null 2>&1; then
+      printf 'database  ok\n'
+    else
+      printf 'database  unavailable\n' >&2
+      failed=1
+    fi
+    if curl --fail --silent --show-error "http://127.0.0.1:3737/api/opportunities?limit=1" >/dev/null; then
+      printf 'api       ok\n'
+    else
+      printf 'api       unavailable\n' >&2
+      failed=1
+    fi
+    if cloud_ops="$(curl --fail --silent --show-error "http://127.0.0.1:3737/api/cloud/ops")" &&
+      modal_success="$(
+        printf '%s' "${cloud_ops}" |
+          jq -er '
+            .data.doctor.rows[]
+            | select(
+                .task == "careers-lab-openings"
+                and .substrate == "modal"
+                and .stale == false
+                and .unhealthy == false
+              )
+            | .latest_success_at
+          '
+      )"; then
+      printf 'modal     ok %s\n' "${modal_success}"
+    else
+      printf 'modal     unavailable, stale, or unhealthy\n' >&2
+      failed=1
+    fi
+    if curl --fail --silent --show-error "http://127.0.0.1:32002/" >/dev/null; then
+      printf 'ui        http://127.0.0.1:32002/\n'
+    else
+      printf 'ui        unavailable\n' >&2
+      failed=1
+    fi
+    exit "${failed}"
+    ;;
+  open)
+    exec open "http://127.0.0.1:32002/"
+    ;;
+  --help|-h|help)
+    usage
+    ;;
+  *)
+    printf 'opps: unknown command: %s\n\n' "${command}" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

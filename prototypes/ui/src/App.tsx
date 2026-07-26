@@ -4,6 +4,7 @@ import { PROTOTYPES } from "./mockData";
 import BentoCommandPrototype from "./prototypes/BentoCommandPrototype";
 import CloudLanePrototype from "./prototypes/CloudLanePrototype";
 import CockpitPrototype from "./prototypes/CockpitPrototype";
+import OpportunitiesPrototype from "./prototypes/OpportunitiesPrototype";
 import SwipeTriagePrototype from "./prototypes/SwipeTriagePrototype";
 import TimelinePrototype from "./prototypes/TimelinePrototype";
 import type { PrototypeId } from "./types";
@@ -11,7 +12,7 @@ import { useApplicationLifecycle } from "./useApplicationLifecycle";
 import { useJobFinderData } from "./useJobFinderData";
 
 export default function App() {
-  const [active, setActive] = useState<PrototypeId>("cockpit");
+  const [active, setActive] = useState<PrototypeId>("opportunities");
   const data = useJobFinderData();
   const lifecycle = useApplicationLifecycle();
 
@@ -79,6 +80,7 @@ export default function App() {
       </div>
 
       <div key={active}>
+        {active === "opportunities" && <OpportunitiesPrototype />}
         {active === "cloud" && <CloudLanePrototype />}
         {active === "swipe" && (
           <SwipeTriagePrototype

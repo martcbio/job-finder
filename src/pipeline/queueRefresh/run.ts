@@ -63,6 +63,7 @@ function skippedSourceSummary(sourceId: string, reason: string): FastRefreshSour
     outcome: "not_implemented",
     status: sourceAttemptStatus("not_implemented", 0, [reason]),
     discovered: 0,
+    excluded: 0,
     imported: 0,
     fullText: { persisted: 0, fetchedPages: null, status: "pending" },
     classification: { classified: 0 },
@@ -73,7 +74,11 @@ function skippedSourceSummary(sourceId: string, reason: string): FastRefreshSour
   };
 }
 
-export async function runQueueRefresh(input: QueueRefreshOptions = {}): Promise<FastRefreshResult> {
+/** Coordinates bounded refresh lanes with explicit runtime environment dependencies. */
+export async function runQueueRefresh(
+  input: QueueRefreshOptions = {},
+  deps: { env: NodeJS.ProcessEnv } = { env: process.env },
+): Promise<FastRefreshResult> {
   const requestedIds = input.sourceIds && input.sourceIds.length > 0 ? input.sourceIds : undefined;
   const { fastRefreshIds, searchSiteIds, laneImportIds, unsupportedIds } =
     partitionQueueRefreshSourceIds(requestedIds ?? ["jobserve", "linear-careers"]);
@@ -93,10 +98,14 @@ export async function runQueueRefresh(input: QueueRefreshOptions = {}): Promise<
     searchSiteIds.length > 0
       ? await runSourceSearchForSites({
           siteIds: searchSiteIds,
-          keywords: input.searchKeywords,
-          maxQueries: input.searchMaxQueries,
+          ...(input.searchKeywords ? { keywords: input.searchKeywords } : {}),
+          ...(input.searchMaxQueries === undefined ? {} : { maxQueries: input.searchMaxQueries }),
           limitPerQuery: input.searchLimitPerQuery ?? 6,
           timeoutMs: input.timeoutMs ?? 20000,
+          credentials: {
+            braveApiKey: deps.env.BRAVE_API_KEY ?? "",
+            jinaApiKey: deps.env.JINA_API_KEY ?? "",
+          },
         })
       : null;
 
@@ -107,7 +116,10 @@ export async function runQueueRefresh(input: QueueRefreshOptions = {}): Promise<
         await runJobspyLaneRefresh({
           limit: input.directLimit ?? 6,
           timeoutMs: input.timeoutMs ?? 20000,
-          snapshotFile: input.jobspySnapshotFile,
+          ...(input.jobspySnapshotFile === undefined
+            ? {}
+            : { snapshotFile: input.jobspySnapshotFile }),
+          env: deps.env,
         }),
       );
     }

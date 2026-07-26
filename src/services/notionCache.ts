@@ -31,7 +31,7 @@ export async function buildNotionCache(
   do {
     const response = await client.databases.query({
       database_id: databaseId,
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {

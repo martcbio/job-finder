@@ -38,14 +38,16 @@ export function fastRefreshOptionsFromBody(
 ): Partial<FastRefreshOptions> {
   return {
     limit: positiveIntValue(body.limit, "limit", 20, 250),
-    sourceIds:
-      body.sourceIds === undefined
-        ? undefined
-        : nonEmptyStringArray(body.sourceIds, "sourceIds", []).map(fastRefreshSourceId),
-    jobserveQueries:
-      body.jobserveQueries === undefined
-        ? undefined
-        : nonEmptyStringArray(body.jobserveQueries, "jobserveQueries", []),
+    ...(body.sourceIds === undefined
+      ? {}
+      : {
+          sourceIds: nonEmptyStringArray(body.sourceIds, "sourceIds", []).map(fastRefreshSourceId),
+        }),
+    ...(body.jobserveQueries === undefined
+      ? {}
+      : {
+          jobserveQueries: nonEmptyStringArray(body.jobserveQueries, "jobserveQueries", []),
+        }),
     jobserveMaxPages: positiveIntValue(body.jobserveMaxPages, "jobserveMaxPages", 3, 25),
     jobserveImportLimitPerQuery: positiveIntValue(
       body.jobserveImportLimitPerQuery,

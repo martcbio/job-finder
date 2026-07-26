@@ -8,19 +8,20 @@ export interface DirectSourceFetchOptions {
 }
 
 export interface DirectSourceFetchResult {
-  sourceId: "linear-careers";
-  sourceLabel: "Linear Careers";
+  sourceId: "linear-careers" | "google-careers";
+  sourceLabel: "Linear Careers" | "Google Careers";
   jobs: NormalizedJobInput[];
   discovered: number;
 }
 
-interface LinearListing {
+interface DirectListing {
   title: string;
   location: string | null;
   url: string;
 }
 
 const LINEAR_CAREERS_URL = "https://linear.app/careers";
+const GOOGLE_CAREERS_URL = "https://www.google.com/about/careers/applications/jobs/results/";
 
 export async function fetchLinearCareersJobs(
   options: DirectSourceFetchOptions,
@@ -63,9 +64,62 @@ export async function fetchLinearCareersJobs(
   };
 }
 
-export function parseLinearCareersListings(html: string): LinearListing[] {
+export async function fetchGoogleCareersJobs(
+  options: DirectSourceFetchOptions,
+): Promise<DirectSourceFetchResult> {
+  const fetcher = options.fetcher ?? fetch;
+  const listings: DirectListing[] = [];
   const seen = new Set<string>();
-  const listings: LinearListing[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const pageUrl = page === 1 ? GOOGLE_CAREERS_URL : `${GOOGLE_CAREERS_URL}?page=${page}`;
+    const listingHtml = await requestText(fetcher, pageUrl, options.timeoutMs);
+    const pageListings = parseGoogleCareersListings(listingHtml);
+    if (pageListings.length === 0) break;
+    for (const listing of pageListings) {
+      if (seen.has(listing.url)) continue;
+      seen.add(listing.url);
+      listings.push(listing);
+    }
+    if (listings.filter(isRelevantGoogleRole).length >= options.limit) break;
+  }
+  const selected = listings.filter(isRelevantGoogleRole).slice(0, options.limit);
+  const jobs = await Promise.all(
+    selected.map(async (listing): Promise<NormalizedJobInput> => {
+      const detailHtml = await requestText(fetcher, listing.url, options.timeoutMs);
+      return {
+        sourceId: "google-careers",
+        sourceLabel: "Google Careers",
+        searchLabel: "direct-source",
+        searchTerm: "google-careers",
+        title: listing.title,
+        company: "Google",
+        url: listing.url,
+        sourceUrl: GOOGLE_CAREERS_URL,
+        description: extractGoogleJobMarkdown(detailHtml, listing.url),
+        location: listing.location,
+        employmentType: null,
+        compensation: null,
+        raw: {
+          source: "google-careers",
+          title: listing.title,
+          location: listing.location,
+          url: listing.url,
+        },
+      };
+    }),
+  );
+
+  return {
+    sourceId: "google-careers",
+    sourceLabel: "Google Careers",
+    discovered: listings.length,
+    jobs,
+  };
+}
+
+export function parseLinearCareersListings(html: string): DirectListing[] {
+  const seen = new Set<string>();
+  const listings: DirectListing[] = [];
   const linkPattern = /<a\b[^>]*href=(["'])(\/careers\/[0-9a-f-]{36})\1[^>]*>(.*?)<\/a>/gis;
 
   for (const match of html.matchAll(linkPattern)) {
@@ -87,7 +141,41 @@ export function parseLinearCareersListings(html: string): LinearListing[] {
   return listings;
 }
 
-function isRelevantLinearRole(listing: LinearListing): boolean {
+export function parseGoogleCareersListings(html: string): DirectListing[] {
+  const seen = new Set<string>();
+  const listings: DirectListing[] = [];
+  const linkPattern =
+    /<a\b[^>]*href=(["'])jobs\/results\/([^"'?#]+)\1[^>]*aria-label=(["'])Learn more about [^"']+\3[^>]*>/gis;
+
+  for (const match of html.matchAll(linkPattern)) {
+    const slug = match[2];
+    if (!slug || seen.has(slug) || match.index === undefined) continue;
+    const cardStart = html.lastIndexOf('<li class="lLd3Je"', match.index);
+    if (cardStart === -1) continue;
+    const cardPrefix = html.slice(cardStart, match.index);
+    const title = cleanText(
+      cardPrefix.match(/<h3\b[^>]*class=(["'])QJPWVe\1[^>]*>(.*?)<\/h3>/is)?.[2] ?? "",
+    );
+    if (!title) continue;
+    const locations = [
+      ...cardPrefix.matchAll(
+        /<span\b[^>]*class=(["'])[^"']*\br0wTof\b[^"']*\1[^>]*>(.*?)<\/span>/gis,
+      ),
+    ]
+      .map((locationMatch) => cleanText(locationMatch[2] ?? ""))
+      .filter(Boolean);
+    seen.add(slug);
+    listings.push({
+      title,
+      location: [...new Set(locations)].join("; ") || null,
+      url: new URL(slug, GOOGLE_CAREERS_URL).toString(),
+    });
+  }
+
+  return listings;
+}
+
+function isRelevantLinearRole(listing: DirectListing): boolean {
   const title = listing.title.toLowerCase();
   if (
     /\b(?:designer|marketing|product manager|counsel|accounting|sales|account executive)\b/.test(
@@ -98,6 +186,40 @@ function isRelevantLinearRole(listing: LinearListing): boolean {
   }
   return /\b(?:ai|engineer|engineering|solutions)\b/i.test(
     `${listing.title} ${listing.location ?? ""}`,
+  );
+}
+
+function isRelevantGoogleRole(listing: DirectListing): boolean {
+  if (
+    /\b(?:product manager|program manager|sales|marketing|recruiter|counsel|finance)\b/i.test(
+      listing.title,
+    )
+  ) {
+    return false;
+  }
+  if (
+    !/\b(?:ai|machine learning|engineer|engineering|architect|developer|scientist)\b/i.test(
+      listing.title,
+    )
+  ) {
+    return false;
+  }
+  const location = listing.location ?? "";
+  if (!location) return false;
+  const nonUsLocations = location
+    .split(";")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => !isUsLocation(value));
+  return nonUsLocations.length > 0;
+}
+
+function isUsLocation(location: string): boolean {
+  return (
+    /\b(?:United States|USA|U\.S\.|US Remote|Remote US)\b/i.test(location) ||
+    /,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/.test(
+      location,
+    )
   );
 }
 
@@ -151,6 +273,24 @@ export function extractLinearJobMarkdown(html: string, url: string): string {
   return htmlToReadableMarkdown(html, url, {
     contentSelectors: ["main", '[role="main"]', "article"],
   }).slice(0, 24000);
+}
+
+export function extractGoogleJobMarkdown(html: string, url: string): string {
+  const title = cleanText(html.match(/<title\b[^>]*>(.*?)<\/title>/is)?.[1] ?? "").replace(
+    /\s+—\s+Google Careers\s*$/i,
+    "",
+  );
+  const sections = [".KwJkGe", ".aG5W3", ".BDNOWe"]
+    .map((selector) =>
+      htmlToReadableMarkdown(html, url, {
+        contentSelectors: [selector],
+      })
+        .replace(/^Title:.*\n?/m, "")
+        .replace(/^URL Source:.*\n?/m, "")
+        .trim(),
+    )
+    .filter(Boolean);
+  return [`# ${title}`, "", ...sections].join("\n\n").slice(0, 24000);
 }
 
 function cleanText(html: string): string {

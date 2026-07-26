@@ -6,9 +6,13 @@ CREATE TABLE IF NOT EXISTS careers.parity_runs (
     run_id text NOT NULL,
     openings_count integer NOT NULL,
     ids_sha256 text NOT NULL,
+    targets_sha256 text,
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (run_date, substrate, run_id)
 );
+
+ALTER TABLE careers.parity_runs
+    ADD COLUMN IF NOT EXISTS targets_sha256 text;
 
 DO $$
 DECLARE
@@ -96,14 +100,15 @@ INSERT INTO careers.targets (org, ats, company, active)
 VALUES
     ('anthropic', 'greenhouse', 'Anthropic', true),
     ('openai', 'ashby', 'OpenAI', true),
-    ('cursor', NULL, 'Cursor / Anysphere', true),
+    ('cursor', 'ashby', 'Cursor / Anysphere', true),
     ('cognition', 'ashby', 'Cognition', true),
-    ('databricks', NULL, 'Databricks', true),
+    ('databricks', 'greenhouse', 'Databricks', true),
     ('Sierra', 'ashby', 'Sierra', true),
     ('imbue', 'greenhouse', 'Imbue', true),
     ('cohere', 'ashby', 'Cohere', true),
     ('mistral', 'lever', 'Mistral AI', true),
-    ('perplexity', NULL, 'Perplexity', true)
+    ('perplexity', 'ashby', 'Perplexity', true),
+    ('ramp', 'ashby', 'Ramp', true)
 ON CONFLICT (org) DO UPDATE SET
     ats = EXCLUDED.ats,
     company = EXCLUDED.company,

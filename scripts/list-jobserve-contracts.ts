@@ -1,16 +1,23 @@
 import { runPsqlJson } from "../src/db/psql";
 import {
   buildJobServeRowsSql,
+  filterRecentJobServeContracts,
   rankJobServeContracts,
   type JobServeContractRow,
   type RankedJobServeContract,
 } from "../src/pipeline/jobserveContracts";
+import { screenJob, type JobScreeningDecision } from "../src/pipeline/jobScreening";
 
 interface Options {
   limit: number;
   candidateLimit: number;
+  maxAgeDays: number;
   format: "markdown" | "json";
   strictOnly: boolean;
+}
+
+interface ScreenedJobServeContract extends RankedJobServeContract {
+  screening: JobScreeningDecision;
 }
 
 function readStringFlag(args: string[], name: string): string | null {
@@ -38,6 +45,7 @@ function parseOptions(args: string[]): Options {
   return {
     limit: readNumberFlag(args, "--limit", 20),
     candidateLimit: readNumberFlag(args, "--candidate-limit", 1000),
+    maxAgeDays: readNumberFlag(args, "--max-age-days", 30),
     format,
     strictOnly: args.includes("--strict-only"),
   };
@@ -51,13 +59,14 @@ function printUsage(): void {
 Options:
   --limit             Maximum jobs to print. Defaults to 20.
   --candidate-limit   Recent JobServe jobs to scan before ranking. Defaults to 1000.
+  --max-age-days      Exclude postings older than this. Defaults to 30.
   --strict-only       Return only tier-1 matches.
   --format            markdown or json. Defaults to markdown.
 
 Requires DATABASE_URL and JobServe rows imported with jobs:import-normalized or pipeline:run --lane jobserve.`);
 }
 
-function renderMarkdown(rows: RankedJobServeContract[]): string {
+function renderMarkdown(rows: ScreenedJobServeContract[]): string {
   const lines = [
     "# JobServe Outside-IR35 Contract Matches",
     "",
@@ -84,6 +93,7 @@ function renderMarkdown(rows: RankedJobServeContract[]): string {
     );
     lines.push(`   matched: ${row.whyMatched.join(", ")}`);
     if (row.whySoftened) lines.push(`   softened: ${row.whySoftened}`);
+    lines.push(`   screening: ${row.screening.status} — ${row.screening.summary}`);
     lines.push("");
   }
 
@@ -104,10 +114,18 @@ async function run(): Promise<void> {
   const options = parseOptions(args);
   const rows = await runPsqlJson<JobServeContractRow[]>(buildJobServeRowsSql(options.candidateLimit));
   const ranked = rankJobServeContracts(rows, { limit: options.candidateLimit });
-  const selected = (options.strictOnly ? ranked.filter((row) => row.tier === 1) : ranked).slice(
-    0,
-    options.limit,
-  );
+  const fresh = filterRecentJobServeContracts(ranked, { maxAgeDays: options.maxAgeDays });
+  const selected = (options.strictOnly ? fresh.filter((row) => row.tier === 1) : fresh)
+    .slice(0, options.limit)
+    .map((row): ScreenedJobServeContract => ({
+      ...row,
+      screening: screenJob({
+        title: row.title,
+        companyHint: row.company,
+        canonicalUrl: row.url,
+        markdown: [row.markdown, row.description].filter(Boolean).join("\n"),
+      }),
+    }));
 
   if (options.format === "json") {
     console.log(JSON.stringify(selected, null, 2));

@@ -22,6 +22,7 @@ const fixtureAdapter: FastRefreshSourceAdapter = {
       keyword: input.keyword,
       outcome: "success",
       discovered: 1,
+      excluded: 0,
       pagesFetched: null,
       costs: {
         jinaSearchTokens: 0,
@@ -88,6 +89,7 @@ describe("source adapter contract", () => {
       status: "success",
       outcome: "success",
       discovered: 1,
+      excluded: 0,
       candidateCount: 1,
       pagesFetched: null,
       costs: {
@@ -128,6 +130,7 @@ describe("source adapter contract", () => {
         keyword: "agentic",
         outcome: "success",
         discovered: 1,
+        excluded: 0,
         pagesFetched: null,
         costs: {
           jinaSearchTokens: 0,
@@ -170,6 +173,7 @@ describe("source adapter contract", () => {
         keyword: "agentic",
         outcome: "success",
         discovered: 0,
+        excluded: 0,
         pagesFetched: null,
         costs: {
           jinaSearchTokens: 0,
@@ -194,6 +198,7 @@ describe("source adapter contract", () => {
         keyword: "agentic",
         outcome: "zero_results",
         discovered: 1,
+        excluded: 0,
         pagesFetched: null,
         costs: {
           jinaSearchTokens: 0,

@@ -19,7 +19,7 @@ function handlerWithQuery(
 
   return createJobFinderApiHandler({
     query: typedQuery,
-    fastRefresh,
+    ...(fastRefresh ? { fastRefresh } : {}),
     now: () => new Date("2026-05-21T00:00:00.000Z"),
     env: {
       DATABASE_URL: "postgres://mcb@localhost:5432/jobs",
@@ -155,6 +155,7 @@ describe("job-finder API", () => {
               outcome: "success",
               status: "success",
               discovered: 10,
+              excluded: 3,
               imported: 2,
               fullText: { persisted: 2, fetchedPages: 1, status: "success" },
               classification: { classified: 2 },
@@ -204,7 +205,6 @@ describe("job-finder API", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       limit: 3,
-      sourceIds: undefined,
       jobserveQueries: ["agentic"],
       jobserveMaxPages: 1,
       jobserveImportLimitPerQuery: 2,
@@ -214,6 +214,7 @@ describe("job-finder API", () => {
     });
     expect(sources[0]?.outcome).toBe("success");
     expect(sources[0]?.status).toBe("success");
+    expect(sources[0]?.excluded).toBe(3);
     expect((sources[0]?.classification as Record<string, unknown>)?.classified).toBe(2);
     expect(data.elapsedMs).toBe(1250);
   });
@@ -278,6 +279,7 @@ describe("job-finder API", () => {
               outcome: "success",
               status: "success",
               discovered: 18,
+              excluded: 0,
               imported: 2,
               fullText: { persisted: 2, fetchedPages: null, status: "success" },
               classification: { classified: 2 },

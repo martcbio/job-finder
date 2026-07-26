@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { summarizeParity } from "../cloudOps";
 import type { ApiFetch } from "../context";
 import { createJobFinderApiHandler } from "../server";
 
@@ -22,6 +23,32 @@ function handler(fetch: ApiFetch) {
 const empty = () => Response.json([]);
 
 describe("cloud ops boundary", () => {
+  test("distinguishes target-registry drift from an openings mismatch", () => {
+    const common = {
+      run_date: "2026-07-26",
+      openings_count: 42,
+      ids_sha256: "same-openings",
+      created_at: "2026-07-26T08:00:00Z",
+    };
+
+    expect(
+      summarizeParity([
+        {
+          ...common,
+          substrate: "mac",
+          run_id: "mac-1",
+          targets_sha256: "local-targets",
+        },
+        {
+          ...common,
+          substrate: "modal",
+          run_id: "modal-1",
+          targets_sha256: "cloud-targets",
+        },
+      ]),
+    ).toMatchObject([{ runDate: "2026-07-26", status: "targets_mismatch" }]);
+  });
+
   test("falls back to legacy doctor when doctor_v2 is not deployed", async () => {
     const requested: Array<{ path: string; profile: string | null; task: string | null }> = [];
     const fetch: ApiFetch = async (input, init) => {

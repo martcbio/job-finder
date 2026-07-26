@@ -11,21 +11,24 @@ const DEFAULT_SNAPSHOT_CANDIDATES = [
   ".cache/jobspy.json",
 ];
 
-export function resolveJobspySnapshotPath(): string | null {
-  const candidates = [process.env.JOBSPY_SNAPSHOT_FILE, ...DEFAULT_SNAPSHOT_CANDIDATES].filter(
+/** Resolves a JobSpy snapshot from explicit environment configuration and local defaults. */
+export function resolveJobspySnapshotPath(env: NodeJS.ProcessEnv): string | null {
+  const candidates = [env.JOBSPY_SNAPSHOT_FILE, ...DEFAULT_SNAPSHOT_CANDIDATES].filter(
     (value): value is string => Boolean(value),
   );
   return candidates.find((path) => existsSync(path)) ?? null;
 }
 
+/** Imports one bounded JobSpy snapshot lane and returns a source-level outcome. */
 export async function runJobspyLaneRefresh(input: {
   limit: number;
   timeoutMs: number;
   snapshotFile?: string | null;
+  env: NodeJS.ProcessEnv;
 }): Promise<FastRefreshSourceSummary> {
   const started = Date.now();
   const source = sourceAdapterFor("jobspy", "JobSpy", "");
-  const file = input.snapshotFile ?? resolveJobspySnapshotPath();
+  const file = input.snapshotFile ?? resolveJobspySnapshotPath(input.env);
 
   if (!file) {
     return {
@@ -37,6 +40,7 @@ export async function runJobspyLaneRefresh(input: {
         "Set JOBSPY_SNAPSHOT_FILE or place snapshots/jobspy.json",
       ]),
       discovered: 0,
+      excluded: 0,
       imported: 0,
       fullText: { persisted: 0, fetchedPages: null, status: "pending" },
       classification: { classified: 0 },
@@ -58,6 +62,7 @@ export async function runJobspyLaneRefresh(input: {
         outcome: "zero_results",
         status: "zero_results",
         discovered: 0,
+        excluded: 0,
         imported: 0,
         fullText: { persisted: 0, fetchedPages: null, status: "pending" },
         classification: { classified: 0 },
@@ -87,6 +92,7 @@ export async function runJobspyLaneRefresh(input: {
         ingest.errors.map((e) => e.error),
       ),
       discovered: jobs.length,
+      excluded: 0,
       imported: ingest.jobsPersisted,
       fullText: {
         persisted: ingest.pagesPersisted,
@@ -108,6 +114,7 @@ export async function runJobspyLaneRefresh(input: {
       outcome: "http_error",
       status: sourceAttemptStatus("http_error", 0, [message]),
       discovered: 0,
+      excluded: 0,
       imported: 0,
       fullText: { persisted: 0, fetchedPages: null, status: "pending" },
       classification: { classified: 0 },

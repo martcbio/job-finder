@@ -93,7 +93,11 @@ export function mergeCloudOpeningsIntoQueue(
 ): ReviewQueueRow[] {
   const localUrls = new Set(localRows.map((row) => canonicalQueueUrl(row.canonical_url)));
   const cloudRows = openings
-    .filter((opening) => !localUrls.has(canonicalQueueUrl(opening.url)))
+    .filter(
+      (opening) =>
+        opening.disposition === "suitable" &&
+        !localUrls.has(canonicalQueueUrl(opening.url)),
+    )
     .map((opening) => cloudOpeningToQueueRow(opening, latestRunId));
 
   return [...localRows, ...cloudRows].sort((left, right) =>

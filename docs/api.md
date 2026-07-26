@@ -120,6 +120,17 @@ status vocabulary a UI should use:
 
 ### Jobs
 
+`GET /api/opportunities`
+
+Returns the mixed JobServe and lab-ATS opportunity report used by the browser:
+posting date, source, URL, verdict evidence, terms, ChatGPT Picks, Pick-source
+distribution, and acquisition freshness. It reads local Postgres and the latest
+completed lab artifact only; it never refreshes an external source.
+
+Query parameters:
+
+- `limit`: positive integer, default `50`, max `250`
+
 `GET /api/jobs`
 
 Returns the general job export rows used by the Markdown export.

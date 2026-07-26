@@ -26,7 +26,12 @@ async function writeTargets(marketDir: string, targets: unknown): Promise<void> 
   await writeFile(join(marketDir, "targets.json"), `${JSON.stringify(targets, null, 2)}\n`);
 }
 
-function job(source: AtsOrgJob["source"], org: string, id: string): AtsOrgJob {
+function job(
+  source: AtsOrgJob["source"],
+  org: string,
+  id: string,
+  overrides: Partial<AtsOrgJob> = {},
+): AtsOrgJob {
   return {
     source,
     org,
@@ -37,6 +42,7 @@ function job(source: AtsOrgJob["source"], org: string, id: string): AtsOrgJob {
     url: `https://example.test/${org}/${id}`,
     postedAt: "2026-07-12T08:00:00.000Z",
     raw: { id },
+    ...overrides,
   };
 }
 
@@ -134,6 +140,133 @@ describe("lab openings freshness", () => {
       cwd: "/repo",
       argv: ["bun", "run", "labs:openings", "--", "record"],
     });
+  });
+
+  test("publishes every acquired opening with explicit, fully-accounted decisions", async () => {
+    const marketDir = await temporaryMarket();
+    await writeTargets(marketDir, {
+      openai: { ats: "greenhouse", company: "OpenAI" },
+    });
+    const fixtureJobs = [
+      job("greenhouse", "openai", "eu-codex", {
+        title: "Software Engineer, Codex Enterprise",
+        location: "London, UK",
+        locations: ["London, UK"],
+      }),
+      job("greenhouse", "openai", "eu-inference", {
+        title: "Senior Software Engineer, Inference",
+        location: "London, UK",
+        locations: ["London, UK"],
+      }),
+      job("greenhouse", "openai", "eu-deployment", {
+        title: "AI Deployment Engineer",
+        location: "Paris, France",
+        locations: ["Paris, France"],
+      }),
+      job("greenhouse", "openai", "us-ai", {
+        title: "AI Engineer",
+        location: "San Francisco, CA",
+        locations: ["San Francisco, CA"],
+      }),
+      job("greenhouse", "openai", "us-remote", {
+        title: "Agent Engineer",
+        location: "Remote - US",
+        locations: ["Remote - US"],
+      }),
+      job("greenhouse", "openai", "eu-marketing", {
+        title: "Field Marketing Lead",
+        location: "London, UK",
+        locations: ["London, UK"],
+      }),
+      job("greenhouse", "openai", "eu-support", {
+        title: "AI Support Engineer",
+        location: "Dublin, Ireland",
+        locations: ["Dublin, Ireland"],
+      }),
+    ];
+    const module = createLabOpeningsModule({
+      marketDir,
+      now: clock(),
+      makeRunId: () => "run-accounting",
+      listers: {
+        ashby: async () => success("https://example.test/ashby"),
+        greenhouse: async () => success("https://example.test/greenhouse", fixtureJobs),
+        lever: async () => success("https://example.test/lever"),
+      },
+    });
+
+    const result = await module.record();
+    if (result.status === "locked") throw new Error("expected the run to acquire the lock");
+    const rows = (await readFile(join(result.generationDir, "openings.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            id: string;
+            locationEligibility: { status: string; reasonCodes: string[] };
+            roleRelevance: { status: string; reasonCodes: string[] };
+            disposition: string;
+          },
+      );
+    const status = JSON.parse(
+      await readFile(join(result.generationDir, "status.json"), "utf8"),
+    ) as {
+      summary: {
+        acquiredJobs: number;
+        rawOpenings: number;
+        eligibleOpenings: number;
+        suitableOpenings: number;
+        unsuitableLocationOpenings: number;
+        unsuitableRoleOpenings: number;
+        undecidedOpenings: number;
+      };
+    };
+
+    expect(status.summary).toMatchObject({
+      acquiredJobs: 7,
+      rawOpenings: 7,
+      eligibleOpenings: 5,
+      suitableOpenings: 3,
+      unsuitableLocationOpenings: 2,
+      unsuitableRoleOpenings: 2,
+      undecidedOpenings: 0,
+    });
+    expect(rows).toHaveLength(7);
+    expect(rows.map((row) => row.id).sort()).toEqual([
+      "eu-codex",
+      "eu-deployment",
+      "eu-inference",
+      "eu-marketing",
+      "eu-support",
+      "us-ai",
+      "us-remote",
+    ]);
+    expect(
+      rows
+        .filter((row) => row.disposition === "suitable")
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(["eu-codex", "eu-deployment", "eu-inference"]);
+    expect(rows.find((row) => row.id === "us-remote")).toMatchObject({
+      locationEligibility: { status: "ineligible", reasonCodes: ["location.us_only"] },
+      disposition: "unsuitable_location",
+    });
+    expect(rows.find((row) => row.id === "eu-marketing")).toMatchObject({
+      roleRelevance: { status: "irrelevant", reasonCodes: ["role.marketing"] },
+      disposition: "unsuitable_role",
+    });
+    expect(rows.find((row) => row.id === "eu-support")).toMatchObject({
+      roleRelevance: { status: "irrelevant", reasonCodes: ["role.support"] },
+      disposition: "unsuitable_role",
+    });
+
+    const accounted =
+      status.summary.suitableOpenings +
+      status.summary.unsuitableLocationOpenings +
+      status.summary.unsuitableRoleOpenings +
+      status.summary.undecidedOpenings;
+    expect(accounted).toBe(status.summary.rawOpenings);
   });
 
   test("keeps the previous generation current when every configured board fails", async () => {

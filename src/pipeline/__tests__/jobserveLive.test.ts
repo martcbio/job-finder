@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  fetchLiveJobServeRoles,
   jobServeDetailMarkdownFromHtml,
   jobServeRoleToNormalizedJob,
   parseJobServeRolesFromClassicHtml,
@@ -133,5 +134,100 @@ describe("live JobServe parsing", () => {
 
     expect(role?.outside_ir35).toBe(false);
     expect(role?.priority_notes).not.toContain("outside_ir35");
+  });
+
+  test("aborts immediately when JobServe returns its fair-usage restriction page", async () => {
+    let requests = 0;
+    const fetcher = (async () => {
+      requests++;
+      return new Response(
+        "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    await expect(
+      fetchLiveJobServeRoles({
+        query: "agentic",
+        maxPages: 3,
+        timeoutMs: 1000,
+        fetcher,
+      }),
+    ).rejects.toThrow("JobServe usage restricted; aborting all further requests");
+    expect(requests).toBe(1);
+  });
+
+  test("stops detail acquisition and reports a fair-usage block without discarding listings", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const submittedHtml =
+      '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>';
+    const responses = [
+      new Response(seedHtml, { status: 200 }),
+      new Response(submittedHtml, { status: 200 }),
+      new Response(classicHtml, { status: 200 }),
+      new Response(
+        "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+        { status: 200 },
+      ),
+    ];
+    let requests = 0;
+    const fetcher = (async () => {
+      const response = responses[requests++];
+      if (!response) throw new Error("Unexpected request after fair-usage restriction");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 3,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      detailLimit: 5,
+      fetcher,
+    });
+
+    expect(requests).toBe(4);
+    expect(result.roles).toHaveLength(1);
+    expect(result.roles[0]?.detail_status).toBe("error");
+    expect(result.blockedReason).toContain("usage restricted");
+    expect(result.errors).toContain(result.blockedReason as string);
+  });
+
+  test("retains security-clearance exclusions in discovery accounting", async () => {
+    const restrictedHtml = classicHtml
+      .replace("ABC123", "SC123")
+      .replace("Build agentic systems with customers.", "SC clearance required.");
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const responses = [
+      new Response(seedHtml, { status: 200 }),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+        { status: 200 },
+      ),
+      new Response(restrictedHtml, { status: 200 }),
+    ];
+    const fetcher = (async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Unexpected detail request for excluded role");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 1,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(result.roles).toHaveLength(0);
+    expect(result.excludedRoles).toHaveLength(1);
+    expect(result.errors).toEqual(["1 security-clearance role(s) excluded"]);
   });
 });

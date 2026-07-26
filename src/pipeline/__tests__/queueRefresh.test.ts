@@ -7,6 +7,7 @@ describe("queue refresh planning", () => {
     const plan = partitionQueueRefreshSourceIds([
       "jobserve",
       "linear-careers",
+      "google-careers",
       "greenhouse",
       "lever",
       "jobspy",
@@ -14,7 +15,7 @@ describe("queue refresh planning", () => {
       "unknown-board",
     ]);
 
-    expect(plan.fastRefreshIds).toEqual(["jobserve", "linear-careers"]);
+    expect(plan.fastRefreshIds).toEqual(["jobserve", "linear-careers", "google-careers"]);
     expect(plan.searchSiteIds).toEqual(["greenhouse", "lever", "rippling"]);
     expect(plan.laneImportIds).toEqual(["jobspy"]);
     expect(plan.unsupportedIds).toEqual(["unknown-board"]);
@@ -30,6 +31,7 @@ describe("queue refresh planning", () => {
     const ids = allQueueRefreshSourceIds();
     expect(ids).toContain("jobserve");
     expect(ids).toContain("linear-careers");
+    expect(ids).toContain("google-careers");
     expect(ids).toContain("jobspy");
     expect(ids).toContain("greenhouse");
     expect(ids).toContain("ashby");

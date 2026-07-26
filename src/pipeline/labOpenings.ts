@@ -15,6 +15,7 @@ import {
   type ProjectionId,
   type ProjectionRunRecord,
 } from "./freshness";
+import { classifyLabOpening, type LabOpeningDecision } from "./labOpeningDecisions";
 
 const log = logger.child({ component: "pipeline/lab-openings" });
 
@@ -29,8 +30,6 @@ const OWNERLESS_LOCK_GRACE_MS = 5 * 60 * 1000;
 const UNKNOWN_HOST_LOCK_GRACE_MS = 24 * 60 * 60 * 1000;
 const LOCK_HEARTBEAT_INTERVAL_MS = 60_000;
 const MAX_HEARTBEAT_AGE_MS = 30 * 60 * 1000;
-const TITLE_FILTER =
-  /\b(?:ai|ml|agent|forward\.?deployed|solutions|research eng|member of technical staff)\b/i;
 
 const targetSchema = z.record(
   z.string(),
@@ -67,6 +66,8 @@ type LabBoardRun =
       durationMs: number;
       attempts: number;
       totalOpenings: number;
+      eligibleOpenings: number;
+      suitableOpenings: number;
       matchedOpenings: number;
     }
   | {
@@ -88,7 +89,7 @@ type LabBoardRun =
       reason: "no_verified_public_ats_slug";
     };
 
-interface Opening extends AtsOrgJob {
+interface Opening extends AtsOrgJob, LabOpeningDecision {
   company: string;
 }
 
@@ -99,6 +100,12 @@ interface LabOpeningsSummary {
   failedBoards: number;
   skippedBoards: number;
   acquiredJobs: number;
+  rawOpenings: number;
+  eligibleOpenings: number;
+  suitableOpenings: number;
+  unsuitableLocationOpenings: number;
+  unsuitableRoleOpenings: number;
+  undecidedOpenings: number;
   matchedOpenings: number;
 }
 
@@ -217,10 +224,6 @@ function parseTimestamp(value: string, label: string): string {
   return timestamp.toISOString();
 }
 
-function matchesTitle(job: AtsOrgJob): boolean {
-  return TITLE_FILTER.test(job.title ?? "");
-}
-
 function formatLocation(job: AtsOrgJob): string {
   if (job.locations.length > 0) return job.locations.join("; ");
   return job.location || "";
@@ -252,13 +255,14 @@ function markdownFor(
     "",
     "## Board Status",
     "",
-    "| org | company | ats | status | live | matched | error |",
-    "| --- | --- | --- | --- | ---: | ---: | --- |",
+    "| org | company | ats | status | live | eligible | suitable | error |",
+    "| --- | --- | --- | --- | ---: | ---: | ---: | --- |",
   ];
 
   for (const run of runs) {
     const totalOpenings = run.status === "success" ? run.totalOpenings : 0;
-    const matchedOpenings = run.status === "success" ? run.matchedOpenings : 0;
+    const eligibleOpenings = run.status === "success" ? run.eligibleOpenings : 0;
+    const suitableOpenings = run.status === "success" ? run.suitableOpenings : 0;
     const error =
       run.status === "failure"
         ? failureMessage(run.failure)
@@ -266,13 +270,13 @@ function markdownFor(
           ? "no verified public ATS slug"
           : "";
     lines.push(
-      `| ${run.org} | ${run.company} | ${run.ats ?? "null"} | ${run.status} | ${totalOpenings} | ${matchedOpenings} | ${error.replaceAll("|", "\\|")} |`,
+      `| ${run.org} | ${run.company} | ${run.ats ?? "null"} | ${run.status} | ${totalOpenings} | ${eligibleOpenings} | ${suitableOpenings} | ${error.replaceAll("|", "\\|")} |`,
     );
   }
 
-  lines.push("", "## Matched Openings", "");
+  lines.push("", "## Openings", "");
   if (openings.length === 0) {
-    lines.push("No matched openings.");
+    lines.push("No openings.");
     return lines.join("\n");
   }
 
@@ -284,7 +288,9 @@ function markdownFor(
     }
     const location = formatLocation(opening) || "Unspecified";
     const posted = opening.postedAt ? ` - ${opening.postedAt}` : "";
-    lines.push(`- [${opening.title ?? "Untitled"}](${opening.url}) - ${location}${posted}`);
+    lines.push(
+      `- [${opening.title ?? "Untitled"}](${opening.url}) - ${location}${posted} — ${opening.disposition}`,
+    );
   }
 
   return lines.join("\n");
@@ -302,6 +308,9 @@ function jsonlFor(openings: Opening[]): string {
       locations: opening.locations,
       url: opening.url,
       postedAt: opening.postedAt,
+      locationEligibility: opening.locationEligibility,
+      roleRelevance: opening.roleRelevance,
+      disposition: opening.disposition,
       raw: opening.raw,
     }),
   );
@@ -515,6 +524,7 @@ function unexpectedFailure(endpoint: string, error: unknown): AtsAcquisitionFail
 
 function summaryFor(runs: LabBoardRun[], openings: Opening[]): LabOpeningsSummary {
   const successful = runs.filter((run) => run.status === "success");
+  const suitableOpenings = openings.filter((opening) => opening.disposition === "suitable").length;
   return {
     targetCount: runs.length,
     configuredAtsBoards: runs.filter((run) => run.ats !== null).length,
@@ -522,7 +532,18 @@ function summaryFor(runs: LabBoardRun[], openings: Opening[]): LabOpeningsSummar
     failedBoards: runs.filter((run) => run.status === "failure").length,
     skippedBoards: runs.filter((run) => run.status === "skipped").length,
     acquiredJobs: successful.reduce((total, run) => total + run.totalOpenings, 0),
-    matchedOpenings: openings.length,
+    rawOpenings: openings.length,
+    eligibleOpenings: openings.filter(
+      (opening) => opening.locationEligibility.status === "eligible",
+    ).length,
+    suitableOpenings,
+    unsuitableLocationOpenings: openings.filter(
+      (opening) => opening.disposition === "unsuitable_location",
+    ).length,
+    unsuitableRoleOpenings: openings.filter((opening) => opening.disposition === "unsuitable_role")
+      .length,
+    undecidedOpenings: openings.filter((opening) => opening.disposition === "undecided").length,
+    matchedOpenings: suitableOpenings,
   };
 }
 
@@ -539,6 +560,8 @@ function legacyRuns(boardRuns: LabBoardRun[]) {
     ats: run.ats,
     status: run.status === "success" ? "hit" : run.status === "failure" ? "miss" : "skipped",
     totalOpenings: run.status === "success" ? run.totalOpenings : 0,
+    eligibleOpenings: run.status === "success" ? run.eligibleOpenings : 0,
+    suitableOpenings: run.status === "success" ? run.suitableOpenings : 0,
     matchedOpenings: run.status === "success" ? run.matchedOpenings : 0,
     error:
       run.status === "failure"
@@ -574,6 +597,12 @@ async function publishLegacyAttempt(input: {
     startedAt: input.startedAt,
     completedAt: input.completedAt,
     health: input.status,
+    rawOpenings: input.summary.rawOpenings,
+    eligibleOpenings: input.summary.eligibleOpenings,
+    suitableOpenings: input.summary.suitableOpenings,
+    unsuitableLocationOpenings: input.summary.unsuitableLocationOpenings,
+    unsuitableRoleOpenings: input.summary.unsuitableRoleOpenings,
+    undecidedOpenings: input.summary.undecidedOpenings,
     diagnostics: input.diagnostics,
   };
 
@@ -746,10 +775,18 @@ export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}):
             continue;
           }
 
-          const matched = acquisition.jobs
-            .filter(matchesTitle)
-            .map((job) => ({ ...job, company: target.company }));
-          openings.push(...matched);
+          const classified = acquisition.jobs.map((job) => ({
+            ...job,
+            company: target.company,
+            ...classifyLabOpening(job),
+          }));
+          openings.push(...classified);
+          const eligibleOpenings = classified.filter(
+            (opening) => opening.locationEligibility.status === "eligible",
+          ).length;
+          const suitableOpenings = classified.filter(
+            (opening) => opening.disposition === "suitable",
+          ).length;
           boardRuns.push({
             status: "success",
             org,
@@ -761,7 +798,9 @@ export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}):
             durationMs: acquisition.durationMs,
             attempts: acquisition.attempts,
             totalOpenings: acquisition.jobs.length,
-            matchedOpenings: matched.length,
+            eligibleOpenings,
+            suitableOpenings,
+            matchedOpenings: suitableOpenings,
           });
         }
 

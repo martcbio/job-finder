@@ -15,6 +15,20 @@ CREATE TABLE IF NOT EXISTS careers.openings_runs (
     substrate text NOT NULL CHECK (substrate IN ('modal', 'mac'))
 );
 
+ALTER TABLE careers.openings_runs
+    ADD COLUMN IF NOT EXISTS raw_openings_count integer NOT NULL DEFAULT 0
+        CHECK (raw_openings_count >= 0),
+    ADD COLUMN IF NOT EXISTS eligible_openings_count integer NOT NULL DEFAULT 0
+        CHECK (eligible_openings_count >= 0),
+    ADD COLUMN IF NOT EXISTS suitable_openings_count integer NOT NULL DEFAULT 0
+        CHECK (suitable_openings_count >= 0),
+    ADD COLUMN IF NOT EXISTS unsuitable_location_openings_count integer NOT NULL DEFAULT 0
+        CHECK (unsuitable_location_openings_count >= 0),
+    ADD COLUMN IF NOT EXISTS unsuitable_role_openings_count integer NOT NULL DEFAULT 0
+        CHECK (unsuitable_role_openings_count >= 0),
+    ADD COLUMN IF NOT EXISTS undecided_openings_count integer NOT NULL DEFAULT 0
+        CHECK (undecided_openings_count >= 0);
+
 CREATE TABLE IF NOT EXISTS careers.openings (
     org text NOT NULL,
     ats text NOT NULL CHECK (ats IN ('ashby', 'greenhouse', 'lever')),
@@ -32,6 +46,16 @@ CREATE TABLE IF NOT EXISTS careers.openings (
     last_seen_at timestamptz NOT NULL,
     PRIMARY KEY (org, ats, external_id)
 );
+
+ALTER TABLE careers.openings
+    ADD COLUMN IF NOT EXISTS location_eligibility text NOT NULL DEFAULT 'undecided'
+        CHECK (location_eligibility IN ('eligible', 'ineligible', 'undecided')),
+    ADD COLUMN IF NOT EXISTS location_reason_codes text[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS role_relevance text NOT NULL DEFAULT 'undecided'
+        CHECK (role_relevance IN ('relevant', 'irrelevant', 'undecided')),
+    ADD COLUMN IF NOT EXISTS role_reason_codes text[] NOT NULL DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS disposition text NOT NULL DEFAULT 'undecided'
+        CHECK (disposition IN ('suitable', 'unsuitable_location', 'unsuitable_role', 'undecided'));
 
 CREATE INDEX IF NOT EXISTS openings_runs_completed_at_idx
     ON careers.openings_runs (completed_at DESC);
@@ -59,6 +83,11 @@ BEGIN
         NEW.locations := OLD.locations;
         NEW.url := OLD.url;
         NEW.posted_at := OLD.posted_at;
+        NEW.location_eligibility := OLD.location_eligibility;
+        NEW.location_reason_codes := OLD.location_reason_codes;
+        NEW.role_relevance := OLD.role_relevance;
+        NEW.role_reason_codes := OLD.role_reason_codes;
+        NEW.disposition := OLD.disposition;
         NEW.raw := OLD.raw;
         NEW.last_seen_run_id := OLD.last_seen_run_id;
         NEW.last_seen_at := OLD.last_seen_at;

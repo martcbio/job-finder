@@ -25,7 +25,7 @@ do {
       property: "Status",
       select: { equals: "Flagged" },
     },
-    start_cursor: cursor,
+    ...(cursor ? { start_cursor: cursor } : {}),
   });
 
   for (const page of response.results) {

@@ -9,12 +9,16 @@ export type JobScreeningReasonCode =
   | "us_remote_or_auth"
   | "latam_only"
   | "country_local_remote"
-  | "switzerland_local_or_ambiguous"
+  | "locality_restricted_or_ambiguous"
   | "security_clearance"
+  | "citizenship_or_work_authorization"
+  | "candidate_identity_requirement"
   | "language_requirement"
   | "inside_ir35"
+  | "government_ir35_risk"
   | "regular_hybrid_or_onsite"
   | "location_or_remote_unclear"
+  | "missing_job_body"
   | "junior_or_intern"
   | "ops_primary"
   | "not_target_role";
@@ -29,6 +33,7 @@ export interface JobScreeningInput {
   companyHint: string | null;
   canonicalUrl: string;
   markdown: string | null;
+  locationHint?: string | null;
   descriptionSample?: string | null;
   labels?: readonly { label: string }[];
 }
@@ -101,8 +106,6 @@ const US_REMOTE_PATTERNS = [
   /\bauthorized to work in (?:the )?(?:united states|u\.s\.|usa|us)\b/i,
   /\bus work authorization\b/i,
   /\bus persons?\b/i,
-  /\bsan francisco,\s*ca,\s*us\b/i,
-  /\bnew york,\s*ny,\s*us\b/i,
 ];
 
 const US_RESTRICTED_PATTERNS = [
@@ -111,12 +114,19 @@ const US_RESTRICTED_PATTERNS = [
   /\bnorth america\s*\(\s*est\s*\)/i,
   /\bprimary location:\s*(?:united states|u\.s\.|usa|us)\b[\s\S]{0,180}\bworkplace type:\s*remote\b/i,
   /\ball listed locations:\s*(?:united states|u\.s\.|usa|us)\b[\s\S]{0,180}\bworkplace type:\s*remote\b/i,
-  /\b(?:careers\s+)?[a-z0-9 ,/-]+\s+in\s+[a-z .'-]+,\s*(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|washington dc|washington d\.c\.|west virginia|wisconsin|wyoming|dc|d\.c\.)\b/i,
-  /\b(?:tysons corner|sunnyvale|mountain view|san francisco|new york|washington),\s*(?:va|ca|ny|dc|d\.c\.|virginia|california|new york)\b/i,
   /\bfor this position,? we are looking to hire in (?:the )?(?:united states|u\.s\.|usa|us)\b/i,
   /\b(?:focusing on|prioriti[sz]ing) candidates in (?:the )?(?:united states|u\.s\.|usa|us)(?:\/canada)?\b/i,
   /\bmust be based in (?:the )?(?:united states|u\.s\.|usa|us)\b/i,
   /\bmust be based in (?:the )?(?:u\.s\.|us) and\b/i,
+];
+
+const US_ROLE_LOCATION_PATTERNS = [
+  /^(?:united states|u\.s\.|usa|us)\s*$/im,
+  /^north america\s*$/im,
+  /\bsan francisco,\s*ca,\s*us\b/i,
+  /\bnew york,\s*ny,\s*us\b/i,
+  /\b(?:careers\s+)?[a-z0-9 ,/-]+\s+in\s+[a-z .'-]+,\s*(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|washington dc|washington d\.c\.|west virginia|wisconsin|wyoming|dc|d\.c\.)\b/i,
+  /\b(?:tysons corner|sunnyvale|mountain view|san francisco|new york|washington),\s*(?:va|ca|ny|dc|d\.c\.|virginia|california|new york)\b/i,
 ];
 
 const LATAM_PATTERNS = [
@@ -130,26 +140,30 @@ const LATAM_PATTERNS = [
   /\bperu\b/i,
 ];
 
-const SWITZERLAND_PATTERNS = [
-  /\bswitzerland\b/i,
-  /\bswiss\b/i,
-  /\bzurich\b/i,
-  /\bgeneva\b/i,
-  /\bbasel\b/i,
-];
+interface RestrictedLocalityPolicy {
+  label: string;
+  mentionPatterns: readonly RegExp[];
+  restrictionPatterns: readonly RegExp[];
+}
 
-const SWITZERLAND_LOCAL_PATTERNS = [
-  /\bremote within switzerland\b/i,
-  /\bswitzerland[-\s]?only\b/i,
-  /\bswitzerland[-\s]?based\b/i,
-  /\bswiss[-\s]?based\b/i,
-  /\bmust be (?:based|located|resident) in switzerland\b/i,
-  /\bbased in switzerland\b/i,
-  /\bwork(?:ing)? from switzerland\b/i,
-  /\b(?:zurich|geneva|basel)[-\s]?based\b/i,
-  /\b(?:work|working|located|based) (?:from|in) (?:zurich|geneva|basel)\b/i,
-  /\b(?:zurich|geneva|basel).{0,80}\bhybrid\b/i,
-  /\bhybrid.{0,80}\b(?:zurich|geneva|basel)\b/i,
+const RESTRICTED_LOCALITY_POLICIES: readonly RestrictedLocalityPolicy[] = [
+  {
+    label: "Switzerland",
+    mentionPatterns: [/\bswitzerland\b/i, /\bswiss\b/i, /\bzurich\b/i, /\bgeneva\b/i, /\bbasel\b/i],
+    restrictionPatterns: [
+      /\bremote within switzerland\b/i,
+      /\bswitzerland[-\s]?only\b/i,
+      /\bswitzerland[-\s]?based\b/i,
+      /\bswiss[-\s]?based\b/i,
+      /\bmust be (?:based|located|resident) in switzerland\b/i,
+      /\bbased in switzerland\b/i,
+      /\bwork(?:ing)? from switzerland\b/i,
+      /\b(?:zurich|geneva|basel)[-\s]?based\b/i,
+      /\b(?:work|working|located|based) (?:from|in) (?:zurich|geneva|basel)\b/i,
+      /\b(?:zurich|geneva|basel).{0,80}\bhybrid\b/i,
+      /\bhybrid.{0,80}\b(?:zurich|geneva|basel)\b/i,
+    ],
+  },
 ];
 
 const CLEARANCE_PATTERNS = [
@@ -159,25 +173,49 @@ const CLEARANCE_PATTERNS = [
   /\b(?:sc|dv|nppv) clearance\b/i,
   /\b(?:secret|top secret|ts\/sci) clearance\b/i,
   /\bsecurity clearance required\b/i,
+  /\brequired to (?:obtain|undergo|pass).{0,80}\b(?:security )?clearance\b/i,
+  /\b(?:security )?clearance (?:will be|required|must be).{0,80}\b(?:obtained|undertaken|completed)\b/i,
   /\bmust (?:hold|have) .*security clearance\b/i,
   /\bpublic trust\b/i,
-  /\bu\.s\. citizenship\b/i,
+];
+
+const CITIZENSHIP_OR_WORK_AUTHORIZATION_PATTERNS = [
+  /\bmust (?:hold|have|possess) (?:a |an )?(?:valid )?(?:us|u\.s\.|united states|eu|e\.u\.|european union) passport\b/i,
+  /\b(?:us|u\.s\.|united states|eu|e\.u\.|european union) (?:passport|citizenship) (?:is )?(?:required|mandatory)\b/i,
+  /\bmust be (?:a |an )?(?:us|u\.s\.|united states|eu|e\.u\.|european union) citizen\b/i,
+  /\b(?:us|u\.s\.|united states|eu|e\.u\.|european union) citizens? only\b/i,
+  /\bmust (?:have|hold) (?:us|u\.s\.|united states|eu|e\.u\.|european union) work authori[sz]ation\b/i,
+  /\b(?:must be|are) authori[sz]ed to work in (?:the )?(?:us|u\.s\.|united states|eu|e\.u\.|european union)\b/i,
+];
+
+const CANDIDATE_IDENTITY_REQUIREMENT_PATTERNS = [
+  /\b(?:applicants?|candidates?) must be (?:a )?(?:woman|women|female)\b/i,
+  /\b(?:women|female candidates?|women candidates?) only\b/i,
+  /\bopen (?:only|exclusively) to women\b/i,
+  /\bopen to women only\b/i,
 ];
 
 const LANGUAGE_REQUIREMENT_PATTERNS = [
-  /\bfluent (?:communication skills )?in english and (?:hungarian|italian|german|french|spanish)\b/i,
-  /\b(?:hungarian|italian|german|french|spanish) language skills (?:are )?required\b/i,
+  /\bfluent (?:communication skills )?in english and (?:hungarian|italian|german|french|spanish|mandarin)\b/i,
+  /\b(?:are|be)\s+fluent\s+in\s+(?:hungarian|italian|german|french|spanish|mandarin)\b/i,
+  /\b(?:hungarian|italian|german|french|spanish|mandarin) (?:language skills|fluency) (?:are |is )?required\b/i,
   /\bindispensabile la conoscenza fluente di italiano\b/i,
 ];
 
 const HYBRID_PATTERNS = [
   /\bhybrid\b/i,
-  /\b\d+\s+days?\s+(?:a|per)\s+week\s+(?:in|from)\s+(?:the )?office\b/i,
+  /\b(?:\d+|one|two|three|four|five)\s+days?\s+(?:a|per)\s+week.{0,40}\boffice\b/i,
   /\b(?:weekly|monthly)\s+(?:office|onsite|on-site)\b/i,
   /\bmust be able to commute\b/i,
   /\bin[-\s]?office\b/i,
   /\bon[-\s]?site\b/i,
   /\bin[-\s]?person\b/i,
+];
+
+const GOVERNMENT_WORK_PATTERNS = [
+  /\b(?:uk|central|local) government (?:department|agency|client|contract|programme|program|project)\b/i,
+  /\bpublic sector(?:\s+(?:client|contract|organisation|organization|department|agency|programme|program|project|environment))?\b/i,
+  /\bcivil service\b/i,
 ];
 
 const LOCAL_REMOTE_PATTERNS = [
@@ -216,6 +254,11 @@ const NON_TARGET_TITLE_PATTERNS = [
   /\brecruiter\b/i,
   /\bsales executive\b/i,
   /\baccount executive\b/i,
+  /\b(?:pmo|project|product|program|programme|delivery) manage(?:r)?\b/i,
+  /\bbusiness analyst\b/i,
+  /\bvfx artist\b/i,
+  /\bprivacy (?:&|and) responsible ai manager\b/i,
+  /\bresponsible ai governance specialist\b/i,
   /\bcaregiver\b/i,
   /\bdisplay installer\b/i,
   /\bcustomer stories\b/i,
@@ -248,30 +291,28 @@ const ACCEPTABLE_WORK_LOCATION_PATTERNS = [
   /\b(?:singapore|london|united kingdom|uk|uae|dubai|abu dhabi)\b/i,
 ];
 
-const EXCEPTIONAL_AI_PATTERNS = [
-  /\bfrontier ai\b/i,
-  /\bai lab\b/i,
-  /\bresearch lab\b/i,
-  /\bfoundation model\b/i,
-  /\bagentic ai lab\b/i,
-];
-
 export function screenJob(input: JobScreeningInput): JobScreeningDecision {
   const text = [
     input.title,
     input.companyHint ?? "",
     input.canonicalUrl,
+    input.locationHint ?? "",
     input.descriptionSample ?? "",
     input.markdown ?? "",
   ].join("\n");
+  const locationText = input.locationHint
+    ? [input.title, input.canonicalUrl, input.locationHint, input.descriptionSample ?? ""].join(
+        "\n",
+      )
+    : text;
   const hardRejects: JobScreeningReason[] = [];
   const reviewReasons: JobScreeningReason[] = [];
-  const exceptionalAi = matchesAny(text, EXCEPTIONAL_AI_PATTERNS);
   const globalRemote = matchesAny(text, GLOBAL_REMOTE_PATTERNS);
   const hasUsableJobBody = hasUsableJobDescription(text);
   const hasGenericRemoteLocationSignal = matchesAny(text, GENERIC_REMOTE_LOCATION_PATTERNS);
   const hasAcceptableWorkLocationSignal =
     globalRemote || matchesAny(text, ACCEPTABLE_WORK_LOCATION_PATTERNS);
+  const restrictedLocality = detectRestrictedLocality(locationText);
 
   if (matchesAny(text, CLOSED_PATTERNS)) {
     hardRejects.push({
@@ -311,6 +352,7 @@ export function screenJob(input: JobScreeningInput): JobScreeningDecision {
 
   if (
     matchesAny(text, US_RESTRICTED_PATTERNS) ||
+    matchesAny(locationText, US_ROLE_LOCATION_PATTERNS) ||
     (matchesAny(text, US_REMOTE_PATTERNS) && !globalRemote)
   ) {
     hardRejects.push({
@@ -333,22 +375,38 @@ export function screenJob(input: JobScreeningInput): JobScreeningDecision {
     });
   }
 
-  if (matchesAny(text, SWITZERLAND_LOCAL_PATTERNS)) {
+  if (restrictedLocality?.explicitlyRestricted) {
     hardRejects.push({
-      code: "switzerland_local_or_ambiguous",
-      detail: "listing appears Switzerland-local, Swiss-based, or Swiss-hybrid",
+      code: "locality_restricted_or_ambiguous",
+      detail: `listing appears local to ${restrictedLocality.label}, where work eligibility has not been cleared`,
     });
-  } else if (matchesAny(text, SWITZERLAND_PATTERNS) && !globalRemote) {
+  } else if (restrictedLocality && !globalRemote) {
     reviewReasons.push({
-      code: "switzerland_local_or_ambiguous",
-      detail: "Switzerland appears without an explicit outside-Switzerland/global remote signal",
+      code: "locality_restricted_or_ambiguous",
+      detail: `${restrictedLocality.label} appears without an explicit global remote signal`,
     });
   }
 
   if (matchesAny(text, CLEARANCE_PATTERNS)) {
     hardRejects.push({
       code: "security_clearance",
-      detail: "listing appears to require active/current security clearance",
+      detail:
+        "listing requires existing clearance or requires the candidate to obtain/undergo clearance",
+    });
+  }
+
+  if (matchesAny(text, CITIZENSHIP_OR_WORK_AUTHORIZATION_PATTERNS)) {
+    hardRejects.push({
+      code: "citizenship_or_work_authorization",
+      detail:
+        "listing explicitly requires US/EU citizenship, a US/EU passport, or corresponding work authorization",
+    });
+  }
+
+  if (matchesAny(text, CANDIDATE_IDENTITY_REQUIREMENT_PATTERNS)) {
+    hardRejects.push({
+      code: "candidate_identity_requirement",
+      detail: "listing explicitly restricts eligibility to a candidate identity requirement",
     });
   }
 
@@ -383,21 +441,25 @@ export function screenJob(input: JobScreeningInput): JobScreeningDecision {
   }
 
   if (isInsideIr35(text)) {
-    const reason = {
+    reviewReasons.push({
       code: "inside_ir35" as const,
       detail: "Inside IR35 is a strong negative",
-    };
-    if (exceptionalAi) reviewReasons.push(reason);
-    else hardRejects.push(reason);
+    });
+  }
+
+  if (/\bcontract(?:or|ing)?\b/i.test(text) && matchesAny(text, GOVERNMENT_WORK_PATTERNS)) {
+    reviewReasons.push({
+      code: "government_ir35_risk",
+      detail:
+        "government contract requires manual IR35 verification even if advertised outside IR35",
+    });
   }
 
   if (matchesAny(text, HYBRID_PATTERNS) && !isRemoteFirstOptionalOffice(text)) {
-    const reason = {
+    reviewReasons.push({
       code: "regular_hybrid_or_onsite" as const,
       detail: "listing appears to require regular hybrid or on-site attendance",
-    };
-    if (exceptionalAi) reviewReasons.push(reason);
-    else hardRejects.push(reason);
+    });
   }
 
   if (
@@ -458,6 +520,25 @@ function isLatamOnlyRemote(text: string, globalRemote: boolean): boolean {
     /\b(?:based|located|resident) in latam\b/i.test(text) ||
     /\bremote(?:\s+role|\s+job)?\s+(?:for|in)\s+(?:latam|latin america)\b/i.test(text)
   );
+}
+
+function detectRestrictedLocality(
+  text: string,
+): { label: string; explicitlyRestricted: boolean } | null {
+  const roleText = text
+    .split("\n")
+    .filter(
+      (line) => !/\b(?:personal data|privacy notice|privacy shield|data protection)\b/i.test(line),
+    )
+    .join("\n");
+  for (const policy of RESTRICTED_LOCALITY_POLICIES) {
+    if (!matchesAny(roleText, policy.mentionPatterns)) continue;
+    return {
+      label: policy.label,
+      explicitlyRestricted: matchesAny(roleText, policy.restrictionPatterns),
+    };
+  }
+  return null;
 }
 
 function isRemoteFirstOptionalOffice(text: string): boolean {

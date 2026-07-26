@@ -144,7 +144,7 @@ export async function checkFuzzyDuplicate(
     };
     return {
       isDuplicate: input.isDuplicate,
-      matchedTitle: input.matchedTitle ?? undefined,
+      ...(input.matchedTitle ? { matchedTitle: input.matchedTitle } : {}),
     };
   } catch {
     log.warn({ arguments: toolCall.function.arguments }, "Failed to parse dedup tool arguments");

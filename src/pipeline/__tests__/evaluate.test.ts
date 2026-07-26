@@ -7,7 +7,7 @@ import {
   getEvaluationFilters,
 } from "../../config/evaluation";
 import type { JobListing } from "../../types";
-import { evaluateJob, evaluateSingle, type JobEvaluation } from "../evaluate";
+import { evaluateJob, evaluateSingle, type JobEvaluation, parseJobEvaluation } from "../evaluate";
 
 const DUMMY_JOB: JobListing = {
   title: "Senior Engineer",
@@ -45,6 +45,12 @@ describe("evaluate module exports", () => {
     expect(evaluation.reason).toBe("test");
     expect(evaluation.profileName).toBe("crypto-web3");
   });
+
+  test("rejects structurally invalid tool output", () => {
+    expect(() => parseJobEvaluation('{"pass":"yes","reason":"looks good"}')).toThrow(
+      "Evaluation failed: invalid tool arguments",
+    );
+  });
 });
 
 describe("profile and filter types", () => {
@@ -65,13 +71,17 @@ describe("profile and filter types", () => {
     if (!locationFilter) throw new Error("Expected at least one evaluation filter");
 
     expect(locationFilter.name).toBe("location-eligibility");
-    expect(locationFilter.prompt).toContain("US-remote is blocked");
+    expect(locationFilter.prompt).toContain("US-only employment is blocked");
     expect(locationFilter.prompt).toContain("True EU remote is acceptable");
+    expect(locationFilter.prompt).toContain("EU passport");
     expect(locationFilter.prompt).toContain("Occasional business meetings");
     expect(locationFilter.prompt).toContain("Switzerland is suspect");
-    expect(locationFilter.prompt).toContain("Singapore, UAE, London");
+    expect(locationFilter.prompt).toContain("Neither is a rejection by itself");
     expect(locationFilter.prompt).toContain("Inside IR35");
+    expect(locationFilter.prompt).toContain("not a hard blocker");
     expect(locationFilter.prompt).toContain("UK security clearance");
+    expect(locationFilter.prompt).toContain("women only");
+    expect(locationFilter.prompt).not.toContain("ordinary Inside IR35 contractor roles → FAIL");
   });
 
   test("profiles satisfy EvaluationCriteria", () => {

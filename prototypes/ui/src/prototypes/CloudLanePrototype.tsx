@@ -83,15 +83,17 @@ export default function CloudLanePrototype() {
   useEffect(() => {
     let active = true;
     const load = () =>
-      void Promise.all([
-        fetchCloudRows<CloudRunRow>("runs?limit=5"),
-        fetchCloudRows<CloudOpeningRow>("openings?limit=100"),
-      ]).then(([runs, openings]) => {
+      void fetchCloudRows<CloudRunRow>("runs?limit=5").then(async (runs) => {
         if (!active) return;
         if (runs.status === "cloud_unavailable") {
           setState(runs);
           return;
         }
+        const latestRunId = runs.rows[0]?.run_id;
+        const openings = await fetchCloudRows<CloudOpeningRow>(
+          `openings?limit=2000${latestRunId ? `&run_id=${encodeURIComponent(latestRunId)}` : ""}`,
+        );
+        if (!active) return;
         if (openings.status === "cloud_unavailable") {
           setState(openings);
           return;
@@ -167,8 +169,14 @@ export default function CloudLanePrototype() {
               </span>
               <span className="font-mono text-[9px] uppercase text-zinc-600">{run.substrate}</span>
             </div>
-            <p className="mt-4 text-2xl font-semibold text-white">{run.matched_openings_count}</p>
-            <p className="text-[11px] text-zinc-500">matched openings</p>
+            <p className="mt-4 text-2xl font-semibold text-white">
+              {run.suitable_openings_count}
+              <span className="text-sm font-normal text-zinc-600">
+                {" "}
+                / {run.eligible_openings_count} / {run.raw_openings_count}
+              </span>
+            </p>
+            <p className="text-[11px] text-zinc-500">suitable / location-eligible / raw</p>
             <p className="mt-3 font-mono text-[9px] text-zinc-600">{displayDate(run.completed_at)}</p>
           </article>
         ))}
@@ -180,7 +188,9 @@ export default function CloudLanePrototype() {
             <h2 className="font-[family-name:var(--font-display)] text-lg font-semibold text-white">
               Openings
             </h2>
-            <p className="text-xs text-zinc-600">Newest sightings first</p>
+            <p className="text-xs text-zinc-600">
+              Complete raw inventory; the review queue receives suitable rows only
+            </p>
           </div>
           <span className="font-mono text-xs text-zinc-500">{state.data.openings.length} rows</span>
         </div>
@@ -191,6 +201,7 @@ export default function CloudLanePrototype() {
                 <th className="px-5 py-3 font-medium">Opening</th>
                 <th className="px-4 py-3 font-medium">Company / org</th>
                 <th className="px-4 py-3 font-medium">Location</th>
+                <th className="px-4 py-3 font-medium">Decision</th>
                 <th className="px-4 py-3 font-medium">First seen</th>
                 <th className="px-5 py-3 font-medium">Last seen</th>
               </tr>
@@ -226,6 +237,9 @@ export default function CloudLanePrototype() {
                       <span className="ml-1 text-zinc-700">/ {opening.org}</span>
                     </td>
                     <td className="px-4 py-4 text-zinc-400">{opening.location}</td>
+                    <td className="px-4 py-4 font-mono text-[10px] text-zinc-500">
+                      {opening.disposition.replaceAll("_", " ")}
+                    </td>
                     <td className="px-4 py-4 font-mono text-[10px] text-zinc-500">
                       {displayDate(opening.first_seen_at)}
                     </td>

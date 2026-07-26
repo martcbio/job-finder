@@ -7,6 +7,9 @@ dist
 *.tgz
 brian-source-proof*.json
 brian-source-proof-summary.md
+artifacts/latest-opportunities.json
+artifacts/opportunities/
+supabase/.temp/
 
 # code coverage
 coverage

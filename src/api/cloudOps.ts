@@ -60,6 +60,7 @@ const ParityRunSchema = z.object({
   run_id: z.string(),
   openings_count: z.number().int().nonnegative(),
   ids_sha256: z.string(),
+  targets_sha256: z.string().nullable(),
   created_at: timestamp,
 });
 
@@ -68,6 +69,19 @@ export type LegacyDoctorRow = z.infer<typeof LegacyDoctorRowSchema>;
 export type OpsRun = z.infer<typeof OpsRunSchema>;
 export type OpsAlert = z.infer<typeof AlertSchema>;
 export type ParityRun = z.infer<typeof ParityRunSchema>;
+export type ParityComparisonStatus =
+  | "matched"
+  | "incomplete"
+  | "targets_unknown"
+  | "targets_mismatch"
+  | "openings_mismatch";
+
+export interface ParityComparison {
+  runDate: string;
+  status: ParityComparisonStatus;
+  mac: ParityRun | null;
+  modal: ParityRun | null;
+}
 
 type UnavailableReason = {
   code: "cloud_not_configured" | "cloud_upstream_error";
@@ -290,6 +304,36 @@ async function loadRuns(context: ApiContext) {
   return { status: "available" as const, rows };
 }
 
+/** Compares the latest Mac and Modal run for each date, including target-registry identity. */
+export function summarizeParity(rows: readonly ParityRun[]): ParityComparison[] {
+  const byDate = new Map<string, { mac: ParityRun | null; modal: ParityRun | null }>();
+  for (const row of [...rows].sort((left, right) =>
+    right.created_at.localeCompare(left.created_at),
+  )) {
+    const pair = byDate.get(row.run_date) ?? { mac: null, modal: null };
+    if (!pair[row.substrate]) pair[row.substrate] = row;
+    byDate.set(row.run_date, pair);
+  }
+
+  return [...byDate.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .map(([runDate, pair]) => ({
+      runDate,
+      ...pair,
+      status: parityStatus(pair.mac, pair.modal),
+    }));
+}
+
+function parityStatus(mac: ParityRun | null, modal: ParityRun | null): ParityComparisonStatus {
+  if (!mac || !modal) return "incomplete";
+  if (!mac.targets_sha256 || !modal.targets_sha256) return "targets_unknown";
+  if (mac.targets_sha256 !== modal.targets_sha256) return "targets_mismatch";
+  if (mac.openings_count !== modal.openings_count || mac.ids_sha256 !== modal.ids_sha256) {
+    return "openings_mismatch";
+  }
+  return "matched";
+}
+
 export async function getCloudOps(context: ApiContext) {
   const [doctor, runs, alerts, parity] = await Promise.all([
     loadDoctor(context),
@@ -299,7 +343,7 @@ export async function getCloudOps(context: ApiContext) {
       context,
       {
         table: "parity_runs",
-        select: "run_date,substrate,run_id,openings_count,ids_sha256,created_at",
+        select: "run_date,substrate,run_id,openings_count,ids_sha256,targets_sha256,created_at",
         order: "run_date.desc,created_at.desc",
         limit: 100,
         profile: "careers",
@@ -308,5 +352,11 @@ export async function getCloudOps(context: ApiContext) {
     ),
   ]);
 
-  return { doctor, runs, alerts, parity };
+  return {
+    doctor,
+    runs,
+    alerts,
+    parity,
+    parityComparisons: parity.status === "available" ? summarizeParity(parity.rows) : [],
+  };
 }

@@ -109,7 +109,7 @@ function inferWorkplaceLabel(
   if (insideIr35 || codes.has("inside_ir35")) return "Inside IR35";
   if (codes.has("regular_hybrid_or_onsite")) return "Hybrid / onsite";
   if (codes.has("country_local_remote")) return "Country-local remote";
-  if (codes.has("switzerland_local_or_ambiguous")) return "CH-local / hybrid";
+  if (codes.has("locality_restricted_or_ambiguous")) return "Location restricted";
 
   if (
     /\bworldwide\b|\bwork from anywhere\b|\bremote across europe\b|\bremote in europe\b/i.test(text)

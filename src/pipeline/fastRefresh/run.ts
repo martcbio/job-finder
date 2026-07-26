@@ -27,7 +27,7 @@ import { normalizeSourceId } from "./utils";
 export function normalizeFastRefreshOptions(
   input: Partial<FastRefreshOptions> = {},
 ): FastRefreshOptions {
-  return {
+  const options = {
     ...DEFAULT_OPTIONS,
     ...input,
     sourceIds:
@@ -39,6 +39,16 @@ export function normalizeFastRefreshOptions(
         ? input.jobserveQueries
         : DEFAULT_OPTIONS.jobserveQueries,
   };
+  if (options.jobserveQueries.length > 3) {
+    throw new Error("JobServe refresh is limited to 3 queries");
+  }
+  if (options.jobserveMaxPages > 2) {
+    throw new Error("JobServe refresh is limited to 2 pages per query");
+  }
+  if (options.jobserveImportLimitPerQuery > 5) {
+    throw new Error("JobServe refresh is limited to 5 detail pages per query");
+  }
+  return options;
 }
 
 export async function runFastRefresh(
@@ -50,9 +60,10 @@ export async function runFastRefresh(
   await assertMigrationsReady();
 
   const adapters = buildFastRefreshSourceAdapters(options);
-  const sources = await Promise.all(
-    adapters.map((adapter) => ingestSourceAdapter(adapter, options)),
-  );
+  const sources = [];
+  for (const adapter of adapters) {
+    sources.push(await ingestSourceAdapter(adapter, options));
+  }
 
   const runIds = sources.flatMap((item) => (item.runId === null ? [] : [item.runId]));
   const classified: FastRefreshClassificationSummary[] = [];
@@ -83,13 +94,16 @@ export async function runFastRefresh(
   const rankedJobServe = rankJobServeContracts(jobserveRows.map(jobRowToJobServeContract), {
     limit: options.limit,
   });
+  const directSourceIds = options.sourceIds.filter((sourceId) =>
+    ["linear-careers", "google-careers"].includes(sourceId),
+  );
   const directRows =
-    runIds.length > 0 && options.sourceIds.includes("linear-careers")
+    runIds.length > 0 && directSourceIds.length > 0
       ? await runPsqlJson<FastRefreshJobRow[]>(
           buildLatestJobRowsSql({
             limit: options.limit,
             runIds,
-            sourceIds: ["linear-careers"],
+            sourceIds: directSourceIds,
           }),
         )
       : [];

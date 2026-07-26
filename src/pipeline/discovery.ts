@@ -135,7 +135,7 @@ async function fetchBraveSearchWithUsage(
         Accept: "application/json",
         "X-Subscription-Token": braveApiKey,
       },
-      signal: controller?.signal,
+      ...(controller ? { signal: controller.signal } : {}),
     });
     const json = (await res.json()) as BraveSearchResponse;
     return {

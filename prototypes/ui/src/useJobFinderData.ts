@@ -269,15 +269,17 @@ export function useJobFinderData(): JobFinderData {
       ...evergreenFetches,
     ]);
 
-    const [healthData, runsData, metaData, latestRun, cloudOpenings, cloudRuns] = await Promise.all(
-      [
-        fetchApi<SourceHealthRow[]>("/source-health"),
-        fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
-        fetchApi<ApiMeta>("/meta"),
-        fetchApi<RefreshRunRow>("/runs/latest"),
-        fetchApi<CloudRowsResult<CloudOpeningRow>>("/cloud/openings?limit=500"),
-        fetchApi<CloudRowsResult<CloudRunRow>>("/cloud/runs?limit=1"),
-      ],
+    const [healthData, runsData, metaData, latestRun, cloudRuns] = await Promise.all([
+      fetchApi<SourceHealthRow[]>("/source-health"),
+      fetchApi<PipelineRunRow[]>("/pipeline-runs?limit=10"),
+      fetchApi<ApiMeta>("/meta"),
+      fetchApi<RefreshRunRow>("/runs/latest"),
+      fetchApi<CloudRowsResult<CloudRunRow>>("/cloud/runs?limit=1"),
+    ]);
+    const latestCloudRunId =
+      cloudRuns.data?.status === "available" ? cloudRuns.data.rows[0]?.run_id : undefined;
+    const cloudOpenings = await fetchApi<CloudRowsResult<CloudOpeningRow>>(
+      `/cloud/openings?limit=2000${latestCloudRunId ? `&run_id=${encodeURIComponent(latestCloudRunId)}` : ""}`,
     );
 
     let mergedTriage = queueData;

@@ -71,7 +71,7 @@ export async function queryAppliedCompanies(
         property: "Application Date",
         date: { on_or_after: toDateString(sixMonthsAgo) },
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {
@@ -105,7 +105,7 @@ export async function queryJobsByStatus(
         property: "Status",
         select: { equals: status },
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {
@@ -142,7 +142,7 @@ export async function queryJobsByStatusAndCompany(
           { property: "Company", rich_text: { equals: company } },
         ],
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {
@@ -172,7 +172,7 @@ export async function queryJobsWithApplicationDateNotStatus(
           { property: "Status", select: { does_not_equal: excludeStatus } },
         ],
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {
@@ -206,7 +206,7 @@ export async function queryJobsByCompany(
         property: "Company",
         rich_text: { equals: company },
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {
@@ -268,7 +268,7 @@ export async function queryRecentJobsByStatus(
           },
         ],
       },
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
     });
 
     for (const page of response.results) {

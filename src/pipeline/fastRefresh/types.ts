@@ -28,6 +28,7 @@ export interface FastRefreshSourceSummary {
   outcome: SourceOutcome;
   status: SourceAttemptStatus;
   discovered: number;
+  excluded: number;
   imported: number;
   fullText: {
     persisted: number;
@@ -193,22 +194,14 @@ export interface FastRefreshJobRow {
   review_events: unknown[];
 }
 
-const DEFAULT_JOBSERVE_QUERIES = [
-  "agentic",
-  "langchain",
-  "forward deployed engineer",
-  "inference engineer",
-  "ai enablement",
-  "ai automation",
-  "internal ai",
-];
+const DEFAULT_JOBSERVE_QUERIES = ["AI engineer", "agentic AI", "LLM engineer"];
 
 export const DEFAULT_FAST_REFRESH_OPTIONS: FastRefreshOptions = {
   limit: 20,
-  sourceIds: ["jobserve", "linear-careers"],
+  sourceIds: ["jobserve", "linear-careers", "google-careers"],
   jobserveQueries: DEFAULT_JOBSERVE_QUERIES,
-  jobserveMaxPages: 3,
-  jobserveImportLimitPerQuery: 8,
+  jobserveMaxPages: 2,
+  jobserveImportLimitPerQuery: 5,
   directLimit: 6,
   timeoutMs: 20000,
   classifyLimit: 250,

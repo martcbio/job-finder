@@ -207,7 +207,7 @@ function rankingForJob(
       softened: ranked.whySoftened,
     };
   }
-  if (row.source_id === "linear-careers") {
+  if (row.source_id === "linear-careers" || row.source_id === "google-careers") {
     return {
       tier: null,
       score: 72,
@@ -271,6 +271,14 @@ export function sourceAdapterFor(
     return {
       id,
       label: sourceLabel ?? "Linear Careers",
+      kind: "direct_employer",
+      quality: "high",
+    };
+  }
+  if (id === "google-careers") {
+    return {
+      id,
+      label: sourceLabel ?? "Google Careers",
       kind: "direct_employer",
       quality: "high",
     };

@@ -87,7 +87,7 @@ export async function fetchJinaSearchWithUsage(
   try {
     const res = await fetchWithRetry(url, {
       headers,
-      signal: controller?.signal,
+      ...(controller ? { signal: controller.signal } : {}),
     });
     const json = (await res.json()) as JinaSearchResponse;
     return {
@@ -141,7 +141,10 @@ export async function fetchJinaReaderWithUsage(
       : null;
 
   try {
-    const res = await fetchWithRetry(jinaUrl, { headers, signal: controller?.signal });
+    const res = await fetchWithRetry(jinaUrl, {
+      headers,
+      ...(controller ? { signal: controller.signal } : {}),
+    });
     return {
       markdown: await res.text(),
       usage: {

@@ -119,6 +119,19 @@ describe("screenJob", () => {
     expect(decision.reasons.map((reason) => reason.code)).toContain("us_remote_or_auth");
   });
 
+  test("rejects an exact North America structured location", () => {
+    const decision = screenJob({
+      title: "Senior Product Engineer, AI",
+      companyHint: "Linear",
+      canonicalUrl: "https://linear.app/careers/example",
+      locationHint: "North America",
+      markdown: "About the role. Responsibilities include building production AI products.",
+    });
+
+    expect(decision.status).toBe("rejected");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("us_remote_or_auth");
+  });
+
   test("rejects explicit US city/state role titles", () => {
     const decision = screen(
       "About the role. Responsibilities include building agentic AI systems for mission customers.",
@@ -147,6 +160,38 @@ describe("screenJob", () => {
     expect(decision.status).toBe("high_signal");
   });
 
+  test("does not treat a non-US role as US-only because the body lists US offices", () => {
+    const decision = screenJob({
+      title: "Senior Research Scientist",
+      companyHint: "Cohere",
+      canonicalUrl: "https://jobs.example.com/cohere/research-scientist",
+      locationHint: "London",
+      markdown: [
+        "About the role",
+        "Lead frontier machine-learning research from our London team.",
+        "We are co-headquartered in Toronto and San Francisco, with offices in London, New York City, Montreal, Paris, and more.",
+        "Responsibilities include original research, publications, mentoring, and building production machine-learning systems.",
+        "Requirements include extensive research experience, machine-learning expertise, and scientific leadership.",
+      ]
+        .join("\n")
+        .repeat(4),
+    });
+
+    expect(decision.reasons.map((reason) => reason.code)).not.toContain("us_remote_or_auth");
+  });
+
+  test("rejects an explicit structured US role location", () => {
+    const decision = screenJob({
+      title: "Senior Research Scientist",
+      companyHint: "Cohere",
+      canonicalUrl: "https://jobs.example.com/cohere/research-scientist",
+      locationHint: "United States",
+      markdown: "About the role. Lead frontier machine-learning research.",
+    });
+
+    expect(decision.reasons.map((reason) => reason.code)).toContain("us_remote_or_auth");
+  });
+
   test("rejects LATAM-only remote roles", () => {
     const decision = screen("Remote role for LATAM. Candidates must be based in Latin America.");
 
@@ -166,7 +211,7 @@ describe("screenJob", () => {
 
     expect(decision.status).toBe("needs_human_review");
     expect(decision.reasons.map((reason) => reason.code)).toContain(
-      "switzerland_local_or_ambiguous",
+      "locality_restricted_or_ambiguous",
     );
   });
 
@@ -175,7 +220,7 @@ describe("screenJob", () => {
 
     expect(decision.status).toBe("rejected");
     expect(decision.reasons.map((reason) => reason.code)).toContain(
-      "switzerland_local_or_ambiguous",
+      "locality_restricted_or_ambiguous",
     );
   });
 
@@ -184,7 +229,7 @@ describe("screenJob", () => {
 
     expect(decision.status).toBe("rejected");
     expect(decision.reasons.map((reason) => reason.code)).toContain(
-      "switzerland_local_or_ambiguous",
+      "locality_restricted_or_ambiguous",
     );
   });
 
@@ -192,6 +237,20 @@ describe("screenJob", () => {
     const decision = screen("Remote across Europe. Locations include Spain, Germany, Switzerland.");
 
     expect(decision.status).toBe("high_signal");
+  });
+
+  test("ignores Switzerland mentioned only in recruiter privacy boilerplate", () => {
+    const decision = screen(
+      [
+        "Security Cloud Engineer contract. Location: London, UK.",
+        "Your personal data will be processed as described in our Online Privacy Notice.",
+        "Personal data may be stored in the UK, EEA, Switzerland and the USA.",
+      ].join("\n"),
+    );
+
+    expect(decision.reasons.map((reason) => reason.code)).not.toContain(
+      "locality_restricted_or_ambiguous",
+    );
   });
 
   test("keeps generic remote-only ATS roles for review", () => {
@@ -238,8 +297,76 @@ describe("screenJob", () => {
     expect(decision.reasons.map((reason) => reason.code)).toContain("location_or_remote_unclear");
   });
 
+  test("uses an explicit London location hint when the body does not repeat the location", () => {
+    const decision = screenJob({
+      title: "Senior Software Engineer, AI",
+      companyHint: "Google",
+      canonicalUrl: "https://careers.example.com/jobs/ai",
+      locationHint: "London, UK",
+      markdown: [
+        "About the role",
+        "Build production AI systems and reliable customer-facing services.",
+        "Responsibilities include architecture, implementation, evaluation, and operations.",
+        "Requirements include distributed systems, TypeScript, Python, and applied AI.",
+      ]
+        .join(" ")
+        .repeat(8),
+    });
+
+    expect(decision.status).toBe("high_signal");
+    expect(decision.reasons).toEqual([]);
+  });
+
   test("rejects security-clearance requirements", () => {
     const decision = screen("Requires active UK SC clearance.");
+
+    expect(decision.status).toBe("rejected");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("security_clearance");
+  });
+
+  test("rejects explicit US citizenship or passport requirements regardless of work mode", () => {
+    for (const markdown of [
+      "On-site in New York. Applicants must hold a US passport.",
+      "Work from anywhere. US citizenship is required for this position.",
+    ]) {
+      const decision = screen(markdown);
+      expect(decision.status).toBe("rejected");
+      expect(decision.reasons.map((reason) => reason.code)).toContain(
+        "citizenship_or_work_authorization",
+      );
+    }
+  });
+
+  test("rejects explicit EU passport or citizenship requirements", () => {
+    const decision = screen(
+      "Remote across Europe. Candidates must hold an EU passport or EU citizenship.",
+    );
+
+    expect(decision.status).toBe("rejected");
+    expect(decision.reasons.map((reason) => reason.code)).toContain(
+      "citizenship_or_work_authorization",
+    );
+  });
+
+  test("rejects identity requirements but not inclusive recruitment boilerplate", () => {
+    const blocked = screen("Applicants must be women. This programme is open to women only.");
+    const inclusive = screen(
+      "We are an equal opportunity employer. Women are encouraged to apply.",
+    );
+
+    expect(blocked.status).toBe("rejected");
+    expect(blocked.reasons.map((reason) => reason.code)).toContain(
+      "candidate_identity_requirement",
+    );
+    expect(inclusive.reasons.map((reason) => reason.code)).not.toContain(
+      "candidate_identity_requirement",
+    );
+  });
+
+  test("rejects roles that require the successful candidate to undergo clearance", () => {
+    const decision = screen(
+      "The successful candidate will be required to undergo a basic level of security clearance before undertaking the assignment.",
+    );
 
     expect(decision.status).toBe("rejected");
     expect(decision.reasons.map((reason) => reason.code)).toContain("security_clearance");
@@ -261,6 +388,21 @@ describe("screenJob", () => {
     expect(decision.reasons.map((reason) => reason.code)).toContain("language_requirement");
   });
 
+  test("rejects roles that require Mandarin fluency in the body", () => {
+    const decision = screen(
+      [
+        "About the role",
+        "Serve as the technical advisor for customer implementations.",
+        "You might thrive in this role if you are fluent in Mandarin.",
+        "Responsibilities include deploying production AI systems.",
+      ].join("\n"),
+      "AI Success Engineer",
+    );
+
+    expect(decision.status).toBe("rejected");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("language_requirement");
+  });
+
   test("rejects internships and junior roles", () => {
     const decision = screen("Data Science Intern. New grads ok.");
 
@@ -268,10 +410,10 @@ describe("screenJob", () => {
     expect(decision.reasons.map((reason) => reason.code)).toContain("junior_or_intern");
   });
 
-  test("rejects ordinary Inside IR35 contracts", () => {
+  test("flags ordinary Inside IR35 contracts without rejecting them", () => {
     const decision = screen("Six month contract. Inside IR35. Generic enterprise migration.");
 
-    expect(decision.status).toBe("rejected");
+    expect(decision.status).toBe("needs_human_review");
     expect(decision.reasons.map((reason) => reason.code)).toContain("inside_ir35");
   });
 
@@ -286,6 +428,35 @@ describe("screenJob", () => {
     );
 
     expect(decision.reasons.map((reason) => reason.code)).not.toContain("inside_ir35");
+  });
+
+  test("flags government contracts for IR35 review even when advertised outside IR35", () => {
+    const decision = screen(
+      "Outside IR35 remote contract supporting a major UK Government Department.",
+      "Data Architect",
+    );
+
+    expect(decision.status).toBe("needs_human_review");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("government_ir35_risk");
+  });
+
+  test("flags contracts supporting a public sector organisation as an IR35 caveat", () => {
+    const decision = screen(
+      "Outside IR35 remote contract supporting a public sector organisation. Category: Public Sector.",
+      "Data Architect - AI Governance",
+    );
+
+    expect(decision.status).toBe("needs_human_review");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("government_ir35_risk");
+  });
+
+  test("flags regular hybrid or on-site attendance without rejecting the role", () => {
+    const decision = screen(
+      "Senior AI Engineer. Three days per week in the London office. Build production LLM systems.",
+    );
+
+    expect(decision.status).toBe("needs_human_review");
+    expect(decision.reasons.map((reason) => reason.code)).toContain("regular_hybrid_or_onsite");
   });
 
   test("rejects DevOps and SRE primary roles", () => {
@@ -306,6 +477,25 @@ describe("screenJob", () => {
 
     expect(decision.status).toBe("rejected");
     expect(decision.reasons.map((reason) => reason.code)).toContain("not_target_role");
+  });
+
+  test("rejects management, analysis, governance, and creative titles that mention AI or data", () => {
+    const titles = [
+      "PMO Manager",
+      "AI Delivery Manager",
+      "Agentic AI Product Manager",
+      "Agentic AI Product Manage",
+      "Project Manager (AI & Data Transformation)",
+      "IT Business Analyst (Governance/Data/BI)",
+      "Senior AI VFX Artist",
+      "Privacy & Responsible AI Manager",
+      "Responsible AI Governance Specialist",
+    ];
+
+    for (const title of titles) {
+      const decision = screen("Enterprise AI programme contract.", title);
+      expect(decision.reasons.map((reason) => reason.code)).toContain("not_target_role");
+    }
   });
 
   test("rejects non-job content pages from broad keyword collisions", () => {

@@ -1,6 +1,6 @@
 # Lab-openings Modal arm
 
-This is the cloud half of the dual-arm lab-openings scanner. Modal runs every three hours in UTC and writes only to a container scratch directory plus the estate Supabase `careers` schema; the macOS launchd arm writes the local market artifacts. Both are operational arms and publish comparable parity rows. Modal never mounts or writes `/Users/mcb/Claudelocal/careers/market`. Active targets come from `careers.targets`; `cloud/targets.json` is the fallback used when that read is empty or fails.
+This is the cloud half of the dual-arm lab-openings scanner. Modal runs every three hours in UTC and writes only to a container scratch directory plus the estate Supabase `careers` schema; the macOS launchd arm writes the local market artifacts. Both are operational arms and publish comparable parity rows. Modal never mounts or writes `/Users/mcb/Claudelocal/careers/market`. Active targets come from `careers.targets`; `cloud/targets.json` fills missing ATS mappings and is the fallback when the remote target read fails.
 
 ## Parity digest contract
 
@@ -26,22 +26,27 @@ modal run cloud/modal_app.py::run_once
 Gate 0 passes only when `run_once` exits zero and prints a final JSON summary shaped like:
 
 ```json
-{"health":"complete","matched_openings_count":12,"persisted_openings":12,"run_id":"...","scanner_exit_status":0}
+{"eligible_openings_count":50,"health":"complete","matched_openings_count":12,"persisted_openings":723,"raw_openings_count":723,"run_id":"...","scanner_exit_status":0,"suitable_openings_count":12}
 ```
 
 `health` may honestly be `degraded`, but `failed`, a nonzero scanner exit, an artifact error, a PostgREST error, or a missing final summary fails the gate. This run is the datacenter-egress check for Ashby, Greenhouse, and Lever before trusting the cron.
+
+After parity passes, `opps update` downloads the latest complete Modal candidate
+set through the local API, validates its count and full ATS bodies, and writes an
+atomic local projection. It visibly falls back to the Mac scanner on any
+failure; it never moves authenticated or session-bound acquisition to Modal.
 
 ## Check authenticated reads
 
 Use a signed-in user's access token, not the service-role key:
 
 ```sh
-curl --fail-with-body "$SUPABASE_URL/rest/v1/openings_runs?select=run_id,completed_at,health,matched_openings_count,substrate&order=completed_at.desc&limit=5" \
+curl --fail-with-body "$SUPABASE_URL/rest/v1/openings_runs?select=run_id,completed_at,health,raw_openings_count,eligible_openings_count,suitable_openings_count,substrate&order=completed_at.desc&limit=5" \
   -H "apikey: $SUPABASE_ANON_KEY" \
   -H "Authorization: Bearer $SUPABASE_USER_JWT" \
   -H "Accept-Profile: careers"
 
-curl --fail-with-body "$SUPABASE_URL/rest/v1/openings?select=org,ats,external_id,title,first_seen_at,last_seen_at&order=last_seen_at.desc&limit=20" \
+curl --fail-with-body "$SUPABASE_URL/rest/v1/openings?select=org,ats,external_id,title,location_eligibility,role_relevance,disposition,first_seen_at,last_seen_at&order=last_seen_at.desc&limit=20" \
   -H "apikey: $SUPABASE_ANON_KEY" \
   -H "Authorization: Bearer $SUPABASE_USER_JWT" \
   -H "Accept-Profile: careers"

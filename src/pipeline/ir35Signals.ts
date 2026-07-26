@@ -1,7 +1,11 @@
 const INSIDE_METADATA_RE = /^-\s*Inside IR35:\s*(yes|no)\b/im;
 const OUTSIDE_METADATA_RE = /^-\s*Outside IR35:\s*(yes|no)\b/im;
 
-const AFFIRMATIVE_INSIDE_PATTERNS = [/\binside[\s-]*ir35\b/i, /\bin[\s-]*scope of ir35\b/i];
+const AFFIRMATIVE_INSIDE_PATTERNS = [
+  /\binside[\s-]*ir35\b/i,
+  /\bin[\s-]*scope of ir35\b/i,
+  /(?:£\s*)?\d{2,4}(?:\s*-\s*\d{2,4})?\s*(?:per day|p\/?d)\b.{0,80}\binside\b/i,
+];
 
 export interface Ir35SignalInput {
   text: string;
@@ -70,7 +74,11 @@ export function classifyIr35Signals(input: Ir35SignalInput): Ir35SignalClassific
 }
 
 function hasPositiveIr35Signal(text: string, polarity: "outside" | "inside"): boolean {
-  const negated = new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\s*:\\s*no\\b`, "i");
-  if (negated.test(text)) return false;
+  const negatedPatterns = [
+    new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\s*:\\s*no\\b`, "i"),
+    new RegExp(`\\bnot\\s+${polarity}[\\s-]*ir3[45]\\b`, "i"),
+  ];
+  if (negatedPatterns.some((pattern) => pattern.test(text))) return false;
+  if (polarity === "outside" && hasPositiveIr35Signal(text, "inside")) return false;
   return new RegExp(`\\b${polarity}[\\s-]*ir3[45]\\b`, "i").test(text);
 }

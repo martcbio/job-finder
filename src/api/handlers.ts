@@ -124,10 +124,32 @@ export async function handleApiRequest(
     });
   }
 
+  if (route.method === "GET" && route.path === "/api/opportunities") {
+    if (!context.opportunityReport) {
+      throw new ApiError(
+        500,
+        "opportunity_report_unavailable",
+        "Opportunity report is unavailable",
+      );
+    }
+    const data = await context.opportunityReport({
+      limit: positiveIntParam(route.search, "limit", 50, 250),
+      now: context.now(),
+    });
+    return jsonResponse({ ok: true, data });
+  }
+
   if (route.method === "GET" && route.path === "/api/cloud/openings") {
+    const since = parseCloudSince(route.search.get("since"));
+    const runId = route.search.get("run_id") || undefined;
     const data = await listCloudOpenings(context, {
-      limit: positiveIntParam(route.search, "limit", 100, 500),
-      since: parseCloudSince(route.search.get("since")),
+      limit: positiveIntParam(route.search, "limit", 100, 2000),
+      ...(since ? { since } : {}),
+      ...(runId ? { runId } : {}),
+      includeRaw: ["1", "true"].includes(route.search.get("include_raw") ?? ""),
+      workableLocationsOnly: ["1", "true"].includes(
+        route.search.get("workable_locations_only") ?? "",
+      ),
     });
     return jsonResponse({ ok: true, data });
   }
@@ -165,11 +187,12 @@ export async function handleApiRequest(
     route.method === "GET" &&
     (route.path === "/api/jobs/queue" || route.path === "/api/review-queue")
   ) {
+    const sourceIds = sourceIdsFromSearch(route.search);
     const rows = await context.query<ReviewQueueRow[]>(
       buildReviewQueueSql({
         limit: positiveIntParam(route.search, "limit", 25, 250),
         states: reviewStatesFromSearch(route.search),
-        sourceIds: sourceIdsFromSearch(route.search),
+        ...(sourceIds ? { sourceIds } : {}),
       }),
     );
     return jsonResponse({ ok: true, data: rows });

@@ -6,6 +6,12 @@ import type {
 
 export const PROTOTYPES = [
   {
+    id: "opportunities",
+    name: "Latest 50",
+    tagline: "Mixed-source ranked opportunities with explicit verdicts",
+    accent: "#fbbf24",
+  },
+  {
     id: "cockpit",
     name: "Signal Cockpit",
     tagline: "Dense ops console — every metric visible",

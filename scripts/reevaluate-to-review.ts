@@ -55,7 +55,7 @@ async function fetchToReview(): Promise<ToReview[]> {
       database_id: databaseId!,
       filter: { property: "Status", select: { equals: "To Review" } },
       sorts: [{ property: "Date Scraped", direction: "descending" }],
-      start_cursor: cursor,
+      ...(cursor ? { start_cursor: cursor } : {}),
       page_size: 100,
     });
     for (const page of resp.results) {

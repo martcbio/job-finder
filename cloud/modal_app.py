@@ -30,6 +30,10 @@ REPO_ROOT = Path("/opt/job-finder-cursor-party")
 TARGETS_PATH = REPO_ROOT / "cloud" / "targets.json"
 SCAN_TIMEOUT_SECONDS = 1_650
 PARITY_CONFLICT_COLUMNS = "run_date,substrate,run_id"
+OPENINGS_UPSERT_BATCH_SIZE = 200
+OPENINGS_UPSERT_MAX_ATTEMPTS = 3
+OPENINGS_UPSERT_RETRY_SECONDS = 1.0
+TARGETS_FALLBACK_PREFIX = "careers.targets fallback:"
 
 
 def _ignore_repo_path(path: Path) -> bool:
@@ -82,6 +86,32 @@ def _string(value: dict[str, Any], key: str) -> str:
     return item
 
 
+def _non_negative_integer(value: dict[str, Any], key: str) -> int:
+    item = value.get(key)
+    if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+        raise ValueError(f"{key} must be a non-negative integer")
+    return item
+
+
+def _decision(
+    opening: dict[str, Any],
+    key: str,
+    allowed_statuses: set[str],
+) -> tuple[str, list[str]]:
+    value = opening.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"opening {key} must be an object")
+    status = value.get("status")
+    reason_codes = value.get("reasonCodes")
+    if status not in allowed_statuses:
+        raise ValueError(f"opening {key}.status is unsupported")
+    if not isinstance(reason_codes, list) or not all(
+        isinstance(item, str) for item in reason_codes
+    ):
+        raise ValueError(f"opening {key}.reasonCodes must be an array of strings")
+    return status, reason_codes
+
+
 def _parse_jsonl(content: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(content.splitlines(), 1):
@@ -110,6 +140,25 @@ def ids_sha256(jsonl_content: str) -> str:
     return hashlib.sha256("\n".join(triples).encode("utf-8")).hexdigest()
 
 
+def targets_sha256(targets: dict[str, Any]) -> str:
+    """Hash sorted org:ats:company triples without a trailing LF."""
+    triples = [
+        ":".join(
+            (
+                org,
+                _required_string(target, "ats"),
+                _required_string(target, "company"),
+            )
+        )
+        for org, target in targets.items()
+        if isinstance(target, dict)
+    ]
+    if len(triples) != len(targets):
+        raise ValueError("target entries must be objects")
+    triples.sort(key=lambda item: item.encode("utf-8"))
+    return hashlib.sha256("\n".join(triples).encode("utf-8")).hexdigest()
+
+
 def shape_rows(
     status: dict[str, Any],
     jsonl_content: str,
@@ -122,9 +171,17 @@ def shape_rows(
     health = _required_string(status, "health")
     if health not in {"complete", "degraded", "failed"}:
         raise ValueError(f"unsupported scanner health: {health}")
-    matched_count = status.get("openings")
-    if isinstance(matched_count, bool) or not isinstance(matched_count, int) or matched_count < 0:
-        raise ValueError("openings must be a non-negative integer")
+    matched_count = _non_negative_integer(status, "openings")
+    raw_count = _non_negative_integer(status, "rawOpenings")
+    eligible_count = _non_negative_integer(status, "eligibleOpenings")
+    suitable_count = _non_negative_integer(status, "suitableOpenings")
+    unsuitable_location_count = _non_negative_integer(status, "unsuitableLocationOpenings")
+    unsuitable_role_count = _non_negative_integer(status, "unsuitableRoleOpenings")
+    undecided_count = _non_negative_integer(status, "undecidedOpenings")
+    if matched_count != suitable_count:
+        raise ValueError("openings must equal suitableOpenings")
+    if suitable_count + unsuitable_location_count + unsuitable_role_count + undecided_count != raw_count:
+        raise ValueError("opening decision counts must account for rawOpenings")
     board_status = status.get("runs")
     diagnostics = status.get("diagnostics")
     if not isinstance(board_status, list):
@@ -140,6 +197,12 @@ def shape_rows(
         "completed_at": completed_at,
         "health": health,
         "matched_openings_count": matched_count,
+        "raw_openings_count": raw_count,
+        "eligible_openings_count": eligible_count,
+        "suitable_openings_count": suitable_count,
+        "unsuitable_location_openings_count": unsuitable_location_count,
+        "unsuitable_role_openings_count": unsuitable_role_count,
+        "undecided_openings_count": undecided_count,
         "board_status": board_status,
         "diagnostics": diagnostics,
         "substrate": substrate,
@@ -152,6 +215,20 @@ def shape_rows(
             raise ValueError("opening locations must be an array of strings")
         title = _optional_string(opening, "title")
         posted_at = _optional_string(opening, "postedAt")
+        location_eligibility, location_reason_codes = _decision(
+            opening, "locationEligibility", {"eligible", "ineligible", "undecided"}
+        )
+        role_relevance, role_reason_codes = _decision(
+            opening, "roleRelevance", {"relevant", "irrelevant", "undecided"}
+        )
+        disposition = _required_string(opening, "disposition")
+        if disposition not in {
+            "suitable",
+            "unsuitable_location",
+            "unsuitable_role",
+            "undecided",
+        }:
+            raise ValueError("opening disposition is unsupported")
         opening_rows.append(
             {
                 "org": _required_string(opening, "org"),
@@ -163,6 +240,11 @@ def shape_rows(
                 "locations": locations,
                 "url": _required_string(opening, "url"),
                 "posted_at": posted_at,
+                "location_eligibility": location_eligibility,
+                "location_reason_codes": location_reason_codes,
+                "role_relevance": role_relevance,
+                "role_reason_codes": role_reason_codes,
+                "disposition": disposition,
                 "raw": opening.get("raw"),
                 "first_seen_run_id": run_id,
                 "first_seen_at": completed_at,
@@ -170,9 +252,9 @@ def shape_rows(
                 "last_seen_at": completed_at,
             }
         )
-    if health == "complete" and len(opening_rows) != matched_count:
+    if health == "complete" and len(opening_rows) != raw_count:
         raise ValueError(
-            f"complete run reported {matched_count} openings but JSONL contained {len(opening_rows)}"
+            f"complete run reported {raw_count} raw openings but JSONL contained {len(opening_rows)}"
         )
     return run_row, opening_rows
 
@@ -210,6 +292,12 @@ def _fallback_status(
         "completedAt": completed_at,
         "health": "failed",
         "openings": 0,
+        "rawOpenings": 0,
+        "eligibleOpenings": 0,
+        "suitableOpenings": 0,
+        "unsuitableLocationOpenings": 0,
+        "unsuitableRoleOpenings": 0,
+        "undecidedOpenings": 0,
         "runs": [],
         "diagnostics": [diagnostic, f"scanner exit status: {exit_status}"],
     }
@@ -330,6 +418,9 @@ def _career_headers(*, representation: bool) -> dict[str, str]:
 
 def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path) -> str | None:
     try:
+        baked_targets = json.loads(TARGETS_PATH.read_text(encoding="utf-8"))
+        if not isinstance(baked_targets, dict):
+            raise ValueError("baked targets config must contain an object")
         response = client.get(
             f"{base_url}/rest/v1/targets",
             params={"active": "eq.true", "select": "org,ats,company", "order": "org.asc"},
@@ -340,21 +431,52 @@ def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path
         if not isinstance(rows, list) or not rows:
             raise ValueError("careers.targets returned no active rows")
         targets: dict[str, dict[str, str | None]] = {}
+        filled_ats: list[str] = []
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("careers.targets returned a non-object row")
             org = _required_string(row, "org")
             ats = _optional_string(row, "ats")
             company = _required_string(row, "company")
+            if ats is None:
+                baked_target = baked_targets.get(org)
+                baked_ats = (
+                    baked_target.get("ats")
+                    if isinstance(baked_target, dict)
+                    else None
+                )
+                if not isinstance(baked_ats, str) or not baked_ats:
+                    raise ValueError(
+                        f"careers.targets has no ATS and baked config has no mapping: {org}"
+                    )
+                ats = baked_ats
+                filled_ats.append(f"{org}={ats}")
             targets[org] = {"ats": ats, "company": company}
         (market_dir / "targets.json").write_text(
             f"{json.dumps(targets, indent=2, sort_keys=True)}\n",
             encoding="utf-8",
         )
-        return None
+        return (
+            "careers.targets filled ATS from baked config: " + ", ".join(filled_ats)
+            if filled_ats
+            else None
+        )
     except Exception as error:
         shutil.copyfile(TARGETS_PATH, market_dir / "targets.json")
-        return f"careers.targets fallback: {type(error).__name__}: {error}"
+        return f"{TARGETS_FALLBACK_PREFIX} {type(error).__name__}: {error}"
+
+
+def _apply_targets_diagnostic(
+    run_row: dict[str, Any],
+    targets_diagnostic: str | None,
+) -> dict[str, Any]:
+    """Preserve target-source degradation in persisted run health and diagnostics."""
+    if targets_diagnostic is None:
+        return run_row
+    updated = {**run_row, "diagnostics": [*run_row["diagnostics"], targets_diagnostic]}
+    if targets_diagnostic.startswith(TARGETS_FALLBACK_PREFIX) and updated["health"] == "complete":
+        updated["health"] = "degraded"
+    return updated
 
 
 def _upsert_scan_rows(
@@ -372,13 +494,48 @@ def _upsert_scan_rows(
     _expect_one(run_response, "careers openings run upsert")
     if not opening_rows:
         return
-    openings_response = client.post(
-        f"{base_url}/rest/v1/openings",
-        params={"on_conflict": "org,ats,external_id"},
-        headers=_career_headers(representation=False),
-        json=opening_rows,
-    )
-    openings_response.raise_for_status()
+    batches = [
+        opening_rows[index : index + OPENINGS_UPSERT_BATCH_SIZE]
+        for index in range(0, len(opening_rows), OPENINGS_UPSERT_BATCH_SIZE)
+    ]
+    for batch_index, batch in enumerate(batches, 1):
+        for attempt in range(1, OPENINGS_UPSERT_MAX_ATTEMPTS + 1):
+            try:
+                response = client.post(
+                    f"{base_url}/rest/v1/openings",
+                    params={"on_conflict": "org,ats,external_id"},
+                    headers=_career_headers(representation=False),
+                    json=batch,
+                )
+            except httpx.TransportError as error:
+                if attempt == OPENINGS_UPSERT_MAX_ATTEMPTS:
+                    raise RuntimeError(
+                        f"opening batch {batch_index}/{len(batches)} failed after "
+                        f"{attempt} attempts: {type(error).__name__}: {error}"
+                    ) from error
+                print(
+                    f"opening batch {batch_index}/{len(batches)} transport failure; "
+                    f"retrying attempt {attempt + 1}/{OPENINGS_UPSERT_MAX_ATTEMPTS}"
+                )
+                time.sleep(OPENINGS_UPSERT_RETRY_SECONDS * attempt)
+                continue
+
+            if response.is_success:
+                break
+
+            response_body = response.text.strip().replace("\n", " ")[:1_000]
+            retryable = response.status_code == 429 or response.status_code >= 500
+            if not retryable or attempt == OPENINGS_UPSERT_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"opening batch {batch_index}/{len(batches)} failed after "
+                    f"{attempt} attempts: HTTP {response.status_code}: {response_body}"
+                )
+            print(
+                f"opening batch {batch_index}/{len(batches)} returned HTTP "
+                f"{response.status_code}; retrying attempt "
+                f"{attempt + 1}/{OPENINGS_UPSERT_MAX_ATTEMPTS}: {response_body}"
+            )
+            time.sleep(OPENINGS_UPSERT_RETRY_SECONDS * attempt)
 
 
 def _upsert_parity_run(
@@ -386,6 +543,7 @@ def _upsert_parity_run(
     base_url: str,
     status: dict[str, Any],
     jsonl_content: str,
+    targets: dict[str, Any],
 ) -> None:
     response = client.post(
         f"{base_url}/rest/v1/parity_runs",
@@ -397,6 +555,7 @@ def _upsert_parity_run(
             "run_id": _required_string(status, "runId"),
             "openings_count": len(_parse_jsonl(jsonl_content)),
             "ids_sha256": ids_sha256(jsonl_content),
+            "targets_sha256": targets_sha256(targets),
         },
     )
     _expect_one(response, "careers parity run upsert")
@@ -481,8 +640,23 @@ def _execute_once() -> dict[str, Any]:
                     jsonl_content = ""
 
                 run_row, opening_rows = shape_rows(status, jsonl_content)
+                run_row = _apply_targets_diagnostic(run_row, targets_diagnostic)
                 _upsert_scan_rows(client, base_url, run_row, opening_rows)
-                _upsert_parity_run(client, base_url, status, jsonl_content)
+                parity_status = "skipped_degraded"
+                if run_row["health"] == "complete" and scanner_exit_status == 0:
+                    runtime_targets = json.loads(
+                        (market_dir / "targets.json").read_text(encoding="utf-8")
+                    )
+                    if not isinstance(runtime_targets, dict):
+                        raise ValueError("runtime targets must contain an object")
+                    _upsert_parity_run(
+                        client,
+                        base_url,
+                        status,
+                        jsonl_content,
+                        runtime_targets,
+                    )
+                    parity_status = "persisted"
                 effective_exit_status = (
                     scanner_exit_status
                     if scanner_exit_status != 0
@@ -492,7 +666,11 @@ def _execute_once() -> dict[str, Any]:
                     "scanner_exit_status": scanner_exit_status,
                     "health": run_row["health"],
                     "matched_openings_count": run_row["matched_openings_count"],
+                    "raw_openings_count": run_row["raw_openings_count"],
+                    "eligible_openings_count": run_row["eligible_openings_count"],
+                    "suitable_openings_count": run_row["suitable_openings_count"],
                     "persisted_openings": len(opening_rows),
+                    "parity_status": parity_status,
                 }
                 if targets_diagnostic is not None:
                     notes["targets_diagnostic"] = targets_diagnostic
@@ -536,6 +714,9 @@ def _execute_once() -> dict[str, Any]:
             "run_id": run_row["run_id"],
             "health": run_row["health"],
             "matched_openings_count": run_row["matched_openings_count"],
+            "raw_openings_count": run_row["raw_openings_count"],
+            "eligible_openings_count": run_row["eligible_openings_count"],
+            "suitable_openings_count": run_row["suitable_openings_count"],
             "persisted_openings": len(opening_rows),
             "scanner_exit_status": scanner_exit_status,
         }

@@ -58,6 +58,20 @@ describe("htmlToReadableMarkdown", () => {
     expect(markdown).not.toContain("Privacy Policy");
     expect(markdown).not.toContain("limited number of features");
   });
+
+  test("scopes a selector when the target is the first class token", () => {
+    const markdown = htmlToReadableMarkdown(
+      `<body>
+        <div class="target"><p>Full job description</p></div>
+        <div><p>Unrelated US job recommendations</p></div>
+      </body>`,
+      "https://jobs.example.com/42",
+      { contentSelectors: [".target"] },
+    );
+
+    expect(markdown).toContain("Full job description");
+    expect(markdown).not.toContain("Unrelated US job recommendations");
+  });
 });
 
 describe("fetchHttpPageMarkdown", () => {

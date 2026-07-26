@@ -172,9 +172,9 @@ function extractElementByAttr(html: string, attrName: string, attrValue: string)
 
 function extractElementByClass(html: string, className: string): string | null {
   const pattern = new RegExp(
-    `<([a-z][a-z0-9:-]*)\\b[^>]*\\bclass=(["'])[^"']*(?:^|\\s)${escapeRegExp(
+    `<([a-z][a-z0-9:-]*)\\b[^>]*\\bclass=(["'])(?:[^"']*\\s)?${escapeRegExp(
       className,
-    )}(?:\\s|$)[^"']*\\2[^>]*>`,
+    )}(?:\\s[^"']*)?\\2[^>]*>`,
     "i",
   );
   const match = pattern.exec(html);
@@ -185,7 +185,6 @@ function extractElementByClass(html: string, className: string): string | null {
 function extractBalancedElement(html: string, startIndex: number, tagName: string): string | null {
   const tag = escapeRegExp(tagName);
   const tagPattern = new RegExp(`<\\/?${tag}\\b[^>]*>`, "gi");
-  tagPattern.lastIndex = startIndex;
   let depth = 0;
 
   for (const match of html.slice(startIndex).matchAll(tagPattern)) {

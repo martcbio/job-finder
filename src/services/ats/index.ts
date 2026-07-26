@@ -48,22 +48,11 @@ export async function fetchAtsData(
 }
 
 /**
- * Deterministic reject based on ATS metadata. workplaceType=OnSite is
- * essentially never a false reject in practice — employers who set OnSite in
- * their ATS mean it, and the body cannot override that signal. Hybrid is
- * deliberately NOT a hard reject: the MONEI case showed that some Hybrid
- * listings are actually 100% remote in the body, and that judgement is left
- * to the location-eligibility filter.
- *
- * Returns { pass: true } when there's nothing to reject (including null data,
- * meaning ATS enrichment was unavailable).
+ * ATS work mode is evidence for the downstream location assessment, not a
+ * deterministic blocker. Hybrid and on-site requirements must remain visible
+ * as caveats rather than being dropped before the full listing is screened.
  */
-export function atsStructuralFilter(data: AtsJobData | null): { pass: boolean; reason: string } {
-  if (!data) return { pass: true, reason: "" };
-  if (data.workplaceType === "OnSite") {
-    const where = data.location || data.country || "unspecified";
-    return { pass: false, reason: `ATS workplaceType=OnSite (${where})` };
-  }
+export function atsStructuralFilter(_data: AtsJobData | null): { pass: boolean; reason: string } {
   return { pass: true, reason: "" };
 }
 

@@ -1,4 +1,5 @@
 import type OpenAI from "openai";
+import { z } from "zod";
 import {
   EVALUATION_PROFILES,
   type EvaluationCriteria,
@@ -14,6 +15,14 @@ export interface JobEvaluation {
   reason: string;
   profileName?: string;
 }
+
+const jobEvaluationSchema = z
+  .object({
+    pass: z.boolean(),
+    reason: z.string().min(1),
+    profileName: z.string().min(1).optional(),
+  })
+  .strict();
 
 const log = logger.child({ component: "evaluate" });
 
@@ -60,7 +69,7 @@ ${job.description}`;
   const response = await client.chat.completions.create({
     model,
     max_tokens: 256,
-    temperature: options?.temperature,
+    ...(options?.temperature === undefined ? {} : { temperature: options.temperature }),
     messages: [
       { role: "system", content: criteria.prompt },
       { role: "user", content: userMessage },
@@ -83,12 +92,22 @@ ${job.description}`;
     throw new Error("Evaluation failed: no function tool_call in response");
   }
 
+  return parseJobEvaluation(toolCall.function.arguments);
+}
+
+/** Parses and validates the model tool payload at the untrusted LLM boundary. */
+export function parseJobEvaluation(argumentsJson: string): JobEvaluation {
   try {
-    return JSON.parse(toolCall.function.arguments) as JobEvaluation;
-  } catch {
-    throw new Error(
-      `Evaluation failed: could not parse tool arguments: ${toolCall.function.arguments}`,
-    );
+    const parsed = jobEvaluationSchema.parse(JSON.parse(argumentsJson));
+    return {
+      pass: parsed.pass,
+      reason: parsed.reason,
+      ...(parsed.profileName ? { profileName: parsed.profileName } : {}),
+    };
+  } catch (error) {
+    throw new Error(`Evaluation failed: invalid tool arguments: ${argumentsJson}`, {
+      cause: error,
+    });
   }
 }
 
@@ -110,7 +129,10 @@ export async function evaluateJob(
   const tracker = deps?.tracker;
   const tempOpts =
     deps?.temperature !== undefined || deps?.model !== undefined
-      ? { temperature: deps.temperature, model: deps.model }
+      ? {
+          ...(deps.temperature === undefined ? {} : { temperature: deps.temperature }),
+          ...(deps.model === undefined ? {} : { model: deps.model }),
+        }
       : undefined;
 
   // Phase 1: AND filters — run in parallel, reject on first failure in results
@@ -144,7 +166,12 @@ export async function evaluateJob(
 
   for (const [i, result] of results.entries()) {
     if (result.status === "fulfilled" && result.value.pass) {
-      return { pass: true, reason: result.value.reason, profileName: profiles[i]?.name };
+      const profileName = profiles[i]?.name;
+      return {
+        pass: true,
+        reason: result.value.reason,
+        ...(profileName ? { profileName } : {}),
+      };
     }
     if (result.status === "fulfilled") {
       lastRejection = { pass: false, reason: result.value.reason };

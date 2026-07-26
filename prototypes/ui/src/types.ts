@@ -158,15 +158,24 @@ export interface CreateApplicationInput {
 
 export interface CvStageResult {
   application: ApplicationRow;
-  caseRef: string;
-  caseDir: string;
-  sourcePath: string;
-  htmlPaths: string[];
-  pdfPaths: string[];
-  renderStatus: "dummy_rendered";
-  identity: "dummy";
+  /** "resume4:applications/<site>/<jobId>-<roleSlug>"; legacy rows are bare resume3 paths. */
+  cvRef: string;
+  cvRefKind: "resume4-staged";
+  applicationPath: string;
+  applicationDir: string;
+  resume4Root: string;
+  capture: {
+    mode: "job_markdown_stdin" | "job_url";
+    site: string;
+    jobId: string;
+    role: string;
+    url: string | null;
+  };
+  prepared: boolean;
   description: { available: boolean; source: string };
-  fragments: { available: number; selected: number };
+  /** Staging stops here; composing and facts are the human's job in resume4. */
+  humanGate: "compose_and_facts";
+  nextSteps: string[];
 }
 
 export type ApplicationCloudResult<T> =

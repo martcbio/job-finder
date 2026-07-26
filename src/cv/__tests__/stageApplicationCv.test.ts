@@ -1,12 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildComposition,
-  buildResume3ProcessSpecs,
+  buildCaptureSpec,
+  buildJobMarkdown,
+  buildPrepareSpec,
+  type CvJobSource,
+  chooseCaptureMode,
+  cvRefKind,
   finalizeApplicationCvStage,
-  parseResumeFragments,
+  findExistingStage,
+  type ProcessOutput,
+  parseCapturedApplicationDir,
+  parseCvRef,
+  RESUME4_CV_REF_PREFIX,
+  type Resume4ProcessSpec,
   type StageApplication,
-  selectResumeFragments,
+  stageApplicationCv,
 } from "../stageApplicationCv";
+
+const RESUME4_ROOT = "/resume4";
+
+const noStage = { exists: () => false, list: () => [] as string[] };
 
 const application: StageApplication = {
   id: "42",
@@ -25,83 +38,247 @@ const application: StageApplication = {
   updated_at: "2026-07-17T10:00:00Z",
 };
 
-describe("mechanical CV fragment selection", () => {
-  test("ranks agentic evidence above unrelated evidence", () => {
-    const fragments = parseResumeFragments(`
-## Agentic systems
-- Built agentic tool orchestration with evals and human review.
-- Shipped multi-agent workflows with durable state and retries.
+const jobSource: CvJobSource = {
+  title: "Agentic AI Engineer",
+  company: "Acme",
+  description: "Build agentic AI systems with evals, retries, and human review.",
+  descriptionSource: "local_job_page",
+};
 
-## Finance operations
-- Reconciled quarterly invoices and supplier purchase orders.
-`);
-    const selected = selectResumeFragments(
-      fragments,
-      "Build agentic AI agents, tool orchestration, evals, retries, and human review.",
-      3,
-    );
+function recordingRunner(): {
+  specs: Resume4ProcessSpec[];
+  run: (spec: Resume4ProcessSpec) => Promise<ProcessOutput>;
+} {
+  const specs: Resume4ProcessSpec[] = [];
+  return {
+    specs,
+    run: async (spec) => {
+      specs.push(spec);
+      return {
+        stdout:
+          spec.label === "capture"
+            ? `> resume\n${RESUME4_ROOT}/applications/greenhouse/123-agentic-ai-engineer\n`
+            : "",
+      };
+    },
+  };
+}
 
-    expect(selected).toHaveLength(2);
-    expect(selected[0]?.text).toContain("agentic tool orchestration");
-    expect(selected[0]?.score).toBeGreaterThan(selected[1]?.score ?? 0);
-    expect(selected.some((fragment) => fragment.text.includes("invoices"))).toBe(false);
+describe("cv_ref generations", () => {
+  test("resume4 refs carry the prefix and resolve under resume4", () => {
+    const parsed = parseCvRef(`${RESUME4_CV_REF_PREFIX}applications/jobserve/abc-role`, {
+      resume4Root: RESUME4_ROOT,
+    });
+    expect(parsed.kind).toBe("resume4-staged");
+    expect(parsed.relativePath).toBe("applications/jobserve/abc-role");
+    expect(parsed.absolutePath).toBe("/resume4/applications/jobserve/abc-role");
+  });
+
+  test("legacy resume3 refs stay readable against the resume3 root", () => {
+    const parsed = parseCvRef("pipeline/apply/app-42-acme-agentic-ai-engineer", {
+      resume3Root: "/resume3",
+    });
+    expect(parsed.kind).toBe("resume3-legacy");
+    expect(parsed.absolutePath).toBe("/resume3/pipeline/apply/app-42-acme-agentic-ai-engineer");
+    expect(cvRefKind("pipeline/apply/x")).toBe("resume3-legacy");
+    expect(cvRefKind(null)).toBeNull();
   });
 });
 
-describe("resume3 case contract", () => {
-  test("generates the existing composition.json shape", () => {
-    const composition = buildComposition(application, "app-42-acme-agentic-ai-engineer");
-    expect(composition).toMatchObject({
-      job_id: "app-42",
-      job_slug: "app-42-acme-agentic-ai-engineer",
-      profile_label: "Agentic AI Engineer",
-      sync_from: { resume_root: "../../../resume" },
-      recipe: {
-        experience_order: ["recent", "historical"],
-        historical_include: [],
-      },
-      layers: {
-        historical: "inputs/historical",
-        adaptive: "inputs/recent.md",
-        education_languages: "inputs/education-languages.md",
-      },
-      output: { source: "outputs/source.md" },
-      render: {
-        html_dir: "outputs/html",
-        pdf_dir: "outputs/pdf",
-        catalog: "preferred",
-      },
-    });
-  });
-
-  test("sets AGENT_MODE and dummy identity on every resume3 subprocess", () => {
-    const specs = buildResume3ProcessSpecs("/cases/app-42", "/resume3", {
+describe("resume4 capture contract", () => {
+  test("stored postings go in on stdin and never via --job-file", () => {
+    const spec = buildCaptureSpec(application, jobSource, "job_markdown_stdin", RESUME4_ROOT, {
       PATH: "/usr/bin",
       RESUME_IDENTITY_JSON: "must-not-be-forwarded",
     });
-    for (const spec of [specs.sync, specs.compose]) {
-      expect(spec.env.AGENT_MODE).toBe("1");
-      expect(spec.env.RESUME_IDENTITY_JSON).toBeUndefined();
-      expect(spec.argv).toContain("--identity=dummy");
-    }
-    expect(specs.compose.argv).toContain("--render");
+    expect(spec.argv).toEqual([
+      "npm",
+      "run",
+      "resume",
+      "--",
+      "new",
+      "--site",
+      "greenhouse",
+      "--job-id",
+      "123",
+      "--role",
+      "Agentic AI Engineer",
+    ]);
+    expect(spec.argv).not.toContain("--job-file");
+    expect(spec.stdin).toContain("# Agentic AI Engineer");
+    expect(spec.stdin).toContain("Build agentic AI systems");
+    expect(spec.env.RESUME_IDENTITY_JSON).toBeUndefined();
+    expect(spec.env.AGENT_MODE).toBe("1");
   });
 
-  test("patches cv_ref before transitioning to cv_staged as wired by the adapter", async () => {
+  test("stdin is the default; URL capture only on an explicit override", () => {
+    const bare: CvJobSource = {
+      ...jobSource,
+      description: null,
+      descriptionSource: "application_only",
+    };
+    expect(chooseCaptureMode(application, bare)).toBe("job_markdown_stdin");
+    expect(chooseCaptureMode(application, jobSource)).toBe("job_markdown_stdin");
+    const spec = buildCaptureSpec(application, bare, "job_url", RESUME4_ROOT, {});
+    expect(spec.argv).toEqual([
+      "npm",
+      "run",
+      "resume",
+      "--",
+      "new",
+      "--url",
+      "https://example.com/jobs/123",
+    ]);
+    expect(spec.stdin).toBeNull();
+  });
+
+  test("prepare runs against the repository-relative application path", () => {
+    const spec = buildPrepareSpec("applications/greenhouse/123-role", RESUME4_ROOT, {});
+    expect(spec.argv).toEqual([
+      "npm",
+      "run",
+      "resume",
+      "--",
+      "prepare",
+      "applications/greenhouse/123-role",
+    ]);
+  });
+
+  test("the staged markdown carries no instructions to the model", () => {
+    const markdown = buildJobMarkdown(application, jobSource);
+    expect(markdown.startsWith("# Agentic AI Engineer")).toBe(true);
+    expect(markdown).toContain("Company: Acme");
+    expect(markdown).toContain("staged from job-finder application 42");
+  });
+
+  test("the printed application directory is parsed out of npm noise", () => {
+    expect(
+      parseCapturedApplicationDir(
+        "> jobfinder@ resume\n> node tools/resume.mjs\n/resume4/applications/jobserve/abc-role\n",
+        RESUME4_ROOT,
+      ),
+    ).toBe("/resume4/applications/jobserve/abc-role");
+    expect(() => parseCapturedApplicationDir("nothing useful", RESUME4_ROOT)).toThrow(
+      /did not print an application directory/,
+    );
+  });
+});
+
+describe("staging pipeline", () => {
+  test("captures, prepares, stores a resume4 cv_ref, and stops at the human gate", async () => {
+    const runner = recordingRunner();
     const calls: string[] = [];
-    const staged = { ...application, status: "cv_staged", cv_ref: "pipeline/apply/app-42" };
-    const result = await finalizeApplicationCvStage(application.id, "pipeline/apply/app-42", {
-      patchCvRef: async (id, cvRef) => {
-        calls.push(`patch:${id}:${cvRef}`);
-        return { ...application, cv_ref: cvRef };
+    const result = await stageApplicationCv(
+      application,
+      {
+        resolveJobSource: async () => jobSource,
+        patchCvRef: async (id, ref) => {
+          calls.push(`patch:${id}:${ref}`);
+          return { ...application, cv_ref: ref };
+        },
+        transitionToCvStaged: async (id) => {
+          calls.push(`transition:${id}:cv_staged:agent`);
+          return { ...application, status: "cv_staged" };
+        },
+        runProcess: runner.run,
+      },
+      { resume4Root: RESUME4_ROOT, processEnv: {}, fs: noStage },
+    );
+
+    expect(runner.specs.map((spec) => spec.label)).toEqual(["capture", "prepare"]);
+    expect(result.cvRef).toBe(
+      `${RESUME4_CV_REF_PREFIX}applications/greenhouse/123-agentic-ai-engineer`,
+    );
+    expect(result.cvRefKind).toBe("resume4-staged");
+    expect(result.applicationPath).toBe("applications/greenhouse/123-agentic-ai-engineer");
+    expect(result.humanGate).toBe("compose_and_facts");
+    expect(result.nextSteps.length).toBeGreaterThan(0);
+    expect(calls).toEqual([
+      `patch:42:${RESUME4_CV_REF_PREFIX}applications/greenhouse/123-agentic-ai-engineer`,
+      "transition:42:cv_staged:agent",
+    ]);
+    expect(result).not.toHaveProperty("pdfPaths");
+  });
+
+  test("refuses to re-stage over an existing resume4 application directory", async () => {
+    const runner = recordingRunner();
+    await expect(
+      stageApplicationCv(
+        application,
+        {
+          resolveJobSource: async () => jobSource,
+          patchCvRef: async () => application,
+          transitionToCvStaged: async () => application,
+          runProcess: runner.run,
+        },
+        {
+          resume4Root: RESUME4_ROOT,
+          processEnv: {},
+          fs: { exists: () => true, list: () => ["123-agentic-ai-engineer"] },
+        },
+      ),
+    ).rejects.toThrow(/already staged into resume4/);
+    expect(runner.specs).toHaveLength(0);
+  });
+
+  test("refuses to re-stage when cv_ref already points at resume4", async () => {
+    const runner = recordingRunner();
+    await expect(
+      stageApplicationCv(
+        { ...application, cv_ref: `${RESUME4_CV_REF_PREFIX}applications/greenhouse/123-role` },
+        {
+          resolveJobSource: async () => jobSource,
+          patchCvRef: async () => application,
+          transitionToCvStaged: async () => application,
+          runProcess: runner.run,
+        },
+        { resume4Root: RESUME4_ROOT, processEnv: {}, fs: noStage },
+      ),
+    ).rejects.toThrow(/already staged into resume4/);
+    expect(runner.specs).toHaveLength(0);
+  });
+
+  test("legacy resume3 cv_ref rows are not treated as already staged", () => {
+    expect(
+      findExistingStage(
+        { ...application, cv_ref: "pipeline/apply/app-42-acme" },
+        RESUME4_ROOT,
+        noStage,
+      ),
+    ).toBeNull();
+  });
+
+  test("refuses to stage an application that is not shortlisted", async () => {
+    const runner = recordingRunner();
+    await expect(
+      stageApplicationCv(
+        { ...application, status: "interested" },
+        {
+          resolveJobSource: async () => jobSource,
+          patchCvRef: async () => application,
+          transitionToCvStaged: async () => application,
+          runProcess: runner.run,
+        },
+        { resume4Root: RESUME4_ROOT, processEnv: {}, fs: noStage },
+      ),
+    ).rejects.toThrow(/must be shortlisted/);
+    expect(runner.specs).toHaveLength(0);
+  });
+
+  test("patches cv_ref before transitioning to cv_staged", async () => {
+    const calls: string[] = [];
+    const staged = { ...application, status: "cv_staged", cv_ref: "resume4:applications/x/y" };
+    const result = await finalizeApplicationCvStage(application.id, "resume4:applications/x/y", {
+      patchCvRef: async (id, ref) => {
+        calls.push(`patch:${id}:${ref}`);
+        return { ...application, cv_ref: ref };
       },
       transitionToCvStaged: async (id) => {
         calls.push(`transition:${id}:cv_staged:agent`);
         return staged;
       },
     });
-
-    expect(calls).toEqual(["patch:42:pipeline/apply/app-42", "transition:42:cv_staged:agent"]);
+    expect(calls).toEqual(["patch:42:resume4:applications/x/y", "transition:42:cv_staged:agent"]);
     expect(result).toEqual(staged);
   });
 });

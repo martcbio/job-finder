@@ -1,4 +1,16 @@
-# Phase-3 CV staging
+# CV staging
+
+> **Rewritten 2026-07-26.** `cv:stage` now stages into **resume4** and no longer runs any resume3
+> code. It captures the stored job posting into resume4 over stdin, runs resume4 `prepare`, stores
+> `resume4:applications/<site>/<jobId>-<roleSlug>` in `cv_ref`, and stops. It produces no CV and no
+> PDF: resume4 is human-gated. Re-staging an already-staged job is refused by default. The
+> authoritative description of the route lives in [api.md](api.md#post-apiapplicationsidstage-cv).
+>
+> **TODO:** the sections below still describe the retired resume3 flow (fragment selection,
+> `pipeline/apply/`, dummy render). They are accurate only for reading historical `cv_ref` rows.
+> Rewrite them against the resume4 flow.
+
+## Historical: the retired resume3 flow
 
 `bun run cv:stage -- <applicationId>` stages a shortlisted `careers.applications` row in
 resume3. It creates `pipeline/apply/app-<id>-<slug>/`, syncs resume3's safe per-case inputs,

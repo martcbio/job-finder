@@ -433,11 +433,38 @@ owner already performed.
 
 `POST /api/applications/:id/stage-cv`
 
-Stages a dummy-rendered resume3 CV for a shortlisted application using the same deterministic core
-as `bun run cv:stage -- <id>`. The route writes only inside the application's resume3 per-case
-directory, sets `cv_ref`, and transitions to `cv_staged` as `agent`. It fails if the application is
-not shortlisted or if resume3 sync/render fails. See [CV staging](cv-staging.md) for selection and
-identity-safety details.
+Stages a shortlisted application into resume4 using the same deterministic core as
+`bun run cv:stage -- <id>`. The route captures the stored job posting into resume4 (Markdown on
+stdin to resume4's CLI; `--job-file` is forbidden there), runs resume4 `prepare` so classification
+and retrieval exist, sets `cv_ref`, and transitions to `cv_staged` as `agent`.
+
+It produces no CV and no PDF. resume4 is human-gated: composing, fact approval, council,
+reconciliation, audits and the sealed render all require a human, so the response returns
+`nextSteps` instead of artifact paths.
+
+`cv_ref` is now `resume4:applications/<site>/<jobId>-<roleSlug>`. The `resume4:` prefix is the
+discriminator; legacy rows written by the retired resume3 bridge are bare `pipeline/apply/...`
+paths and stay readable via `parseCvRef` in `src/cv/stageApplicationCv.ts`. No data migration was
+performed.
+
+The route fails if the application is not shortlisted, if resume4 capture or prepare fails, or if
+the job is already staged. Re-staging is refused by default: resume4's `new` will not reuse an
+existing directory and `prepare` clears review artifacts, so a second run could destroy signed
+human work. Response shape:
+
+```json
+{
+  "cvRef": "resume4:applications/jobserve/2E38F0265A6FDFDBDC-agentic-ai-engineer",
+  "cvRefKind": "resume4-staged",
+  "applicationPath": "applications/jobserve/2E38F0265A6FDFDBDC-agentic-ai-engineer",
+  "capture": { "mode": "job_markdown_stdin", "site": "jobserve", "jobId": "...", "role": "..." },
+  "prepared": true,
+  "humanGate": "compose_and_facts",
+  "nextSteps": ["Human: compose into .../working.md from .../compose-packet.md (resume4)."]
+}
+```
+
+See [CV staging](cv-staging.md) for job-source resolution and identity-safety details.
 
 ### CV Support
 

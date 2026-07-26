@@ -1,12 +1,12 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { parseCvRef } from "../src/cv/stageApplicationCv";
 
 const apiBase = (process.env.JOB_FINDER_API_URL ?? "http://127.0.0.1:3737/api").replace(
   /\/$/,
   "",
 );
 const repoRoot = path.resolve(import.meta.dir, "..");
-const resume3Root = "/Users/mcb/Claudelocal/careers/resume3";
 
 interface ApplicationRow {
   id: string;
@@ -99,23 +99,20 @@ try {
   if (!staged?.cv_ref || staged.status !== "cv_staged") {
     throw new Error(`Application ${applicationId} did not reach cv_staged with a cv_ref.`);
   }
-  const caseDir = path.join(resume3Root, staged.cv_ref);
-  const sourcePath = path.join(caseDir, "outputs/source.md");
-  await readFile(sourcePath, "utf8");
-  const htmlPaths = (await readdir(path.join(caseDir, "outputs/html")))
-    .filter((name) => name.endsWith(".html"))
-    .sort()
-    .map((name) => path.join(caseDir, "outputs/html", name));
-  const pdfPaths = (await readdir(path.join(caseDir, "outputs/pdf")))
-    .filter((name) => name.endsWith(".pdf"))
-    .sort()
-    .map((name) => path.join(caseDir, "outputs/pdf", name));
-  if (htmlPaths.length === 0 || pdfPaths.length === 0) {
-    throw new Error(`Missing rendered HTML/PDF in ${caseDir}`);
+  const parsed = parseCvRef(staged.cv_ref);
+  if (parsed.kind !== "resume4-staged") {
+    throw new Error(`Expected a resume4-staged cv_ref; got ${staged.cv_ref}`);
   }
-  for (const artifactPath of [...htmlPaths, ...pdfPaths]) {
+  const applicationDir = parsed.absolutePath;
+  // The bridge only stages. Verify preparation ran; never expect a rendered CV,
+  // and never read working.md, facts, council output, or any sealed artifact.
+  const preparedFiles = ["job.md", "classification.yaml", "retrieval.md", "compose-packet.md"];
+  for (const name of preparedFiles) {
+    const artifactPath = path.join(applicationDir, name);
     if ((await stat(artifactPath)).size === 0) throw new Error(`Empty artifact: ${artifactPath}`);
   }
+  const jobSnapshot = await readFile(path.join(applicationDir, "job.md"), "utf8");
+  if (!jobSnapshot.trim()) throw new Error(`Empty job snapshot in ${applicationDir}`);
 
   await post(`/applications/${applicationId}/transition`, {
     to: "closed",
@@ -126,14 +123,15 @@ try {
   console.log(
     JSON.stringify(
       {
-        e2e: "phase-3-cv-stage",
+        e2e: "resume4-cv-stage",
         applicationId,
         finalStatus: "closed",
         localJobId: job.id,
-        caseRef: staged.cv_ref,
-        sourcePath,
-        htmlPaths,
-        pdfPaths,
+        cvRef: staged.cv_ref,
+        cvRefKind: parsed.kind,
+        applicationDir,
+        preparedFiles,
+        renderedCv: "none (resume4 is human-gated)",
         stageOutput: stageStdout.trim().split(/\r?\n/),
       },
       null,

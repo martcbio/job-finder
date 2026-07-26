@@ -14,7 +14,7 @@ test("POST /api/applications/:id/stage-cv invokes the shared stage runner", asyn
     url: "https://example.com/jobs/123",
     status: "cv_staged",
     status_history: [],
-    cv_ref: "pipeline/apply/app-42-acme-agentic-ai-engineer",
+    cv_ref: "resume4:applications/greenhouse/123-agentic-ai-engineer",
     notes: null,
     created_at: null,
     updated_at: null,
@@ -25,15 +25,22 @@ test("POST /api/applications/:id/stage-cv invokes the shared stage runner", asyn
       called.push(id);
       return {
         application,
-        caseRef: application.cv_ref,
-        caseDir: "/resume3/pipeline/apply/app-42-acme-agentic-ai-engineer",
-        sourcePath: "/resume3/pipeline/apply/app-42-acme-agentic-ai-engineer/outputs/source.md",
-        htmlPaths: ["/resume3/pipeline/apply/app-42-acme-agentic-ai-engineer/outputs/html/cv.html"],
-        pdfPaths: ["/resume3/pipeline/apply/app-42-acme-agentic-ai-engineer/outputs/pdf/cv.pdf"],
-        renderStatus: "dummy_rendered",
-        identity: "dummy",
+        cvRef: application.cv_ref,
+        cvRefKind: "resume4-staged",
+        applicationPath: "applications/greenhouse/123-agentic-ai-engineer",
+        applicationDir: "/resume4/applications/greenhouse/123-agentic-ai-engineer",
+        resume4Root: "/resume4",
+        capture: {
+          mode: "job_markdown_stdin",
+          site: "greenhouse",
+          jobId: "123",
+          role: "Agentic AI Engineer",
+          url: null,
+        },
+        prepared: true,
         description: { available: true, source: "lab_opening_raw" },
-        fragments: { available: 12, selected: 7 },
+        humanGate: "compose_and_facts",
+        nextSteps: ["Human: compose in resume4"],
       };
     },
   });
@@ -43,7 +50,7 @@ test("POST /api/applications/:id/stage-cv invokes the shared stage runner", asyn
   );
   const body = (await response.json()) as {
     ok: boolean;
-    data: { renderStatus: string; caseRef: string };
+    data: { cvRefKind: string; cvRef: string; humanGate: string };
   };
 
   expect(response.status).toBe(200);
@@ -51,8 +58,9 @@ test("POST /api/applications/:id/stage-cv invokes the shared stage runner", asyn
   expect(body).toMatchObject({
     ok: true,
     data: {
-      renderStatus: "dummy_rendered",
-      caseRef: "pipeline/apply/app-42-acme-agentic-ai-engineer",
+      cvRefKind: "resume4-staged",
+      cvRef: "resume4:applications/greenhouse/123-agentic-ai-engineer",
+      humanGate: "compose_and_facts",
     },
   });
 });

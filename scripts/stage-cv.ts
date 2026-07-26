@@ -25,18 +25,17 @@ try {
     throw new Error(message);
   }
   const result = body.data;
-  console.log(`Staged application ${applicationId}: ${result.caseRef}`);
+  console.log(`Staged application ${applicationId} into resume4: ${result.cvRef}`);
+  console.log(`Application directory: ${result.applicationDir}`);
   console.log(
     result.description.available
-      ? `Description: ${result.description.source}`
-      : "Description: unavailable; selected against title + company only",
+      ? `Job source: ${result.description.source} (capture mode ${result.capture.mode})`
+      : `Job source: unavailable; captured title + company only (capture mode ${result.capture.mode})`,
   );
-  console.log(
-    `Fragments: ${result.fragments.selected}/${result.fragments.available} mechanically selected`,
-  );
-  console.log(`Source: ${result.sourcePath}`);
-  for (const htmlPath of result.htmlPaths) console.log(`Dummy HTML: ${htmlPath}`);
-  for (const pdfPath of result.pdfPaths) console.log(`Dummy PDF: ${pdfPath}`);
+  console.log(result.prepared ? "Prepared: classification and retrieval written" : "Prepared: no");
+  console.log("");
+  console.log("No CV was produced. resume4 is human-gated; next steps:");
+  for (const step of result.nextSteps) console.log(`  - ${step}`);
 } catch (error) {
   console.error(error instanceof Error ? error.stack || error.message : error);
   process.exit(1);

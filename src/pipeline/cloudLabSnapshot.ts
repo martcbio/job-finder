@@ -99,7 +99,7 @@ export function buildCloudLabSnapshot(
         undecidedOpenings: run.undecided_openings_count,
       },
       boards: [],
-      diagnostics: ["synced from complete Modal careers-lab-openings run"],
+      diagnostics: ["synced from complete Modal jobsradar run"],
     },
     rows,
   };

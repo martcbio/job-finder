@@ -34,7 +34,7 @@ source "${REPO_ROOT}/scripts/lib/resolve-openings-artifacts.sh"
 source "${REPO_ROOT}/scripts/lib/scheduled-run-policy.sh"
 
 start_payload="$(jq -cn \
-  --arg task "careers-lab-openings" \
+  --arg task "jobsradar" \
   --arg substrate "mac" \
   --arg scheduled_at "${SCHEDULED_AT}" \
   '{task: $task, substrate: $substrate, scheduled_at: $scheduled_at, started_at: $scheduled_at}')"

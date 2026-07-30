@@ -26,7 +26,7 @@ if (runsPayload.status !== "available" || !Array.isArray(runsPayload.rows)) {
 const run = runsPayload.rows.find(
   (candidate) => candidate.substrate === "modal" && candidate.health === "complete",
 );
-if (!run) throw new Error("No complete Modal careers-lab-openings run is available");
+if (!run) throw new Error("No complete Modal jobsradar run is available");
 const ageHours = (Date.now() - new Date(run.completed_at).getTime()) / 3_600_000;
 if (!Number.isFinite(ageHours) || ageHours < 0 || ageHours > MAX_AGE_HOURS) {
   throw new Error(

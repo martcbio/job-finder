@@ -86,7 +86,7 @@ test("opps doctor verifies the healthy Modal careers dependency", async () => {
 for arg in "$@"; do url="$arg"; done
 case "$url" in
   */api/cloud/ops)
-    printf '%s\\n' '{"ok":true,"data":{"doctor":{"status":"available","rows":[{"task":"careers-lab-openings","substrate":"modal","stale":false,"unhealthy":false,"latest_success_at":"2026-07-25T06:41:17Z"}]}}}'
+    printf '%s\\n' '{"ok":true,"data":{"doctor":{"status":"available","rows":[{"task":"jobsradar","substrate":"modal","stale":false,"unhealthy":false,"latest_success_at":"2026-07-25T06:41:17Z"}]}}}'
     ;;
   *) printf '%s\\n' '{}';;
 esac

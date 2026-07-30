@@ -21,8 +21,8 @@ except ModuleNotFoundError:  # Pure row-shaping tests do not require the Modal S
     modal = None  # type: ignore[assignment]
 
 
-APP_NAME = "careers-lab-openings"
-TASK_NAME = "careers-lab-openings"
+APP_NAME = "jobsradar"
+TASK_NAME = "jobsradar"
 SUBSTRATE = "modal"
 CADENCE_SECONDS = 10_800
 REPO_SOURCE = Path(__file__).resolve().parents[1]
@@ -616,7 +616,7 @@ def _execute_once() -> dict[str, Any]:
         targets_diagnostic: str | None = None
 
         try:
-            with tempfile.TemporaryDirectory(prefix="careers-lab-openings-") as temp_dir:
+            with tempfile.TemporaryDirectory(prefix="jobsradar-") as temp_dir:
                 market_dir = Path(temp_dir)
                 targets_diagnostic = _write_runtime_targets(client, base_url, market_dir)
                 try:

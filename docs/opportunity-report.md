@@ -61,7 +61,7 @@ bun run jobs:opportunities -- \
 or its acquisition snapshot is older than the configured threshold. Freshness
 uses acquisition timestamps, not the newest job's posting date.
 
-`opps doctor` also fails when the scheduled `careers-lab-openings` Modal task is
+`opps doctor` also fails when the scheduled `jobsradar` Modal task is
 stale or unhealthy. Cloud output becomes reusable only after a complete run and
 row-count validation; parity uses the full `org:ats:id` digest.
 

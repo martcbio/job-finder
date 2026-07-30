@@ -268,7 +268,7 @@ async function loadAlerts(context: ApiContext) {
 }
 
 async function loadRuns(context: ApiContext) {
-  const filters = ["like.careers-*", "eq.subauth-pilot", "eq.funding-ingest"];
+  const filters = ["eq.jobsradar", "like.careers-*", "eq.subauth-pilot", "eq.funding-ingest"];
   const results = await Promise.all(
     filters.map((task) =>
       fetchRows(

@@ -55,9 +55,9 @@ curl --fail-with-body "$SUPABASE_URL/rest/v1/openings?select=org,ats,external_id
 In the Supabase SQL editor, verify the control-plane lifecycle and doctor state:
 
 ```sql
-select * from runs where task = 'careers-lab-openings' order by created_at desc limit 5;
-select * from heartbeats where task = 'careers-lab-openings' order by beat_at desc limit 5;
-select * from doctor where task = 'careers-lab-openings';
+select * from runs where task = 'jobsradar' order by created_at desc limit 5;
+select * from heartbeats where task = 'jobsradar' order by beat_at desc limit 5;
+select * from doctor where task = 'jobsradar';
 ```
 
 The doctor becomes stale when the last successful control-plane run is older than twice the registered 10,800-second cadence. Keep both arms running and use `careers.parity_runs` plus the operations UI to investigate count or digest divergence.
@@ -65,5 +65,5 @@ The doctor becomes stale when the last successful control-plane run is older tha
 ## Kill switch
 
 ```sh
-modal app stop careers-lab-openings
+modal app stop jobsradar
 ```

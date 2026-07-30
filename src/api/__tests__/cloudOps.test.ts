@@ -62,7 +62,7 @@ describe("cloud ops boundary", () => {
         "/rest/v1/doctor_v2": Response.json({ code: "42P01" }, { status: 404 }),
         "/rest/v1/doctor": Response.json([
           {
-            task: "careers-lab-openings",
+            task: "jobsradar",
             substrate: "mac",
             cadence_seconds: 86400,
             latest_success_at: "2026-07-15T10:00:00Z",
@@ -84,7 +84,7 @@ describe("cloud ops boundary", () => {
     expect(body.data.doctor).toMatchObject({
       status: "doctor_not_deployed",
       source: "doctor",
-      rows: [{ task: "careers-lab-openings", substrate: "mac" }],
+      rows: [{ task: "jobsradar", substrate: "mac" }],
     });
     expect(requested).toContainEqual({ path: "/rest/v1/alerts", profile: "ops", task: null });
     expect(requested).toContainEqual({
@@ -94,7 +94,7 @@ describe("cloud ops boundary", () => {
     });
     expect(
       requested.filter(({ path }) => path === "/rest/v1/runs").map(({ task }) => task),
-    ).toEqual(["like.careers-*", "eq.subauth-pilot", "eq.funding-ingest"]);
+    ).toEqual(["eq.jobsradar", "like.careers-*", "eq.subauth-pilot", "eq.funding-ingest"]);
   });
 
   test("maps an unexposed ops schema to alerts_unavailable without degrading other sections", async () => {

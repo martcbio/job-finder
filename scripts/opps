@@ -77,7 +77,7 @@ case "${command}" in
           jq -er '
             .data.doctor.rows[]
             | select(
-                .task == "careers-lab-openings"
+                .task == "jobsradar"
                 and .substrate == "modal"
                 and .stale == false
                 and .unhealthy == false

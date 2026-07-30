@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mcb.jobsradar.doctor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN_EXECUTABLE__</string>
+    <string>__JOBSRADAR_ROOT__/scripts/jobsradar-doctor.ts</string>
+    <string>run-pending</string>
+    <string>--automatic</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__JOBSRADAR_ROOT__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/mcb</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>JOBSRADAR_DOCTOR_CODEX_PATH</key>
+    <string>__CODEX_EXECUTABLE__</string>
+    <key>JOBSRADAR_DOCTOR_GIT_PATH</key>
+    <string>__GIT_EXECUTABLE__</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__JOBSRADAR_ROOT__/logs/doctor/launchd-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>__JOBSRADAR_ROOT__/logs/doctor/launchd-stderr.log</string>
+</dict>
+</plist>

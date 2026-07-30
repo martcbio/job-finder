@@ -48,6 +48,7 @@
     "jobs:import-normalized": "bun scripts/import-normalized-jobs.ts",
     "jobs:fast-refresh": "bun scripts/fast-refresh.ts",
     "jobsradar": "bun scripts/jobsradar.ts",
+    "jobsradar:doctor": "bun scripts/jobsradar-doctor.ts",
     "jobs:opportunities": "bun scripts/list-latest-opportunities.ts",
     "jobs:opportunities:update": "bun scripts/list-latest-opportunities.ts --refresh-labs --strict-source-health --quiet",
     "jobserve:contracts": "bun scripts/list-jobserve-contracts.ts",

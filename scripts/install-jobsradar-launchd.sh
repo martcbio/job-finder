@@ -4,6 +4,9 @@ set -euo pipefail
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly CANONICAL_ROOT="${HOME:?HOME is required}/Claudelocal/careers/jobsradar"
 readonly TARGET="${1:-all}"
+readonly BUN_EXECUTABLE="$(command -v bun)"
+readonly CODEX_EXECUTABLE="$(command -v codex)"
+readonly GIT_EXECUTABLE="$(command -v git)"
 
 if [[ "${ROOT}" != "${CANONICAL_ROOT}" ]]; then
   printf 'refusing: move the checkout to %s before installing services; current root is %s\n' \
@@ -12,8 +15,8 @@ if [[ "${ROOT}" != "${CANONICAL_ROOT}" ]]; then
 fi
 
 case "${TARGET}" in
-  api|ui|fast-refresh|all) ;;
-  *) printf 'usage: %s [api|ui|fast-refresh|all]\n' "$0" >&2; exit 2 ;;
+  api|ui|fast-refresh|doctor|all) ;;
+  *) printf 'usage: %s [api|ui|fast-refresh|doctor|all]\n' "$0" >&2; exit 2 ;;
 esac
 
 install_agent() {
@@ -24,8 +27,9 @@ install_agent() {
   local destination="${HOME}/Library/LaunchAgents/${label}.plist"
   local retired_destination="${HOME}/Library/LaunchAgents/${retired_label}.plist"
 
-  /opt/homebrew/bin/bun "${ROOT}/scripts/render-jobsradar-launchd.ts" \
-    "${template}" "${destination}" "${ROOT}"
+  "${BUN_EXECUTABLE}" "${ROOT}/scripts/render-jobsradar-launchd.ts" \
+    "${template}" "${destination}" "${ROOT}" \
+    "${CODEX_EXECUTABLE}" "${GIT_EXECUTABLE}" "${BUN_EXECUTABLE}"
   launchctl bootout "gui/$(id -u)/${retired_label}" 2>/dev/null || true
   launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
   rm -f "${retired_destination}"
@@ -59,4 +63,12 @@ if [[ "${TARGET}" == "fast-refresh" || "${TARGET}" == "all" ]]; then
     "${ROOT}/launchd/com.mcb.jobsradar.fast-refresh.plist.template" \
     "com.mcb.jobsradar.fast-refresh" \
     "com.mcb.job-finder.fast-refresh"
+fi
+if [[ "${TARGET}" == "doctor" || "${TARGET}" == "all" ]]; then
+  mkdir -p "${ROOT}/logs/doctor"
+  install_agent \
+    "Doctor" \
+    "${ROOT}/launchd/com.mcb.jobsradar.doctor.plist.template" \
+    "com.mcb.jobsradar.doctor" \
+    "com.mcb.job-finder.doctor"
 fi

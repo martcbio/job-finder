@@ -1,3 +1,26 @@
+import { fileURLToPath } from "node:url";
+import {
+  launchDetachedDoctorDispatcher,
+  DetachedDispatcherError,
+} from "../src/doctor/detachedDispatcher";
+import {
+  classifyIngestResult,
+  classifyIngestThrow,
+  type DoctorClassification,
+} from "../src/doctor/incident";
+import {
+  resolveCodexExecutable,
+  resolveGitExecutable,
+  resolveRepoHead,
+  type DoctorGitError,
+} from "../src/doctor/gitWorktree";
+import {
+  attachDoctorIncidentRepoHead,
+  recordDoctorIncident,
+  recordDoctorLauncherFailure,
+  type DoctorSpoolError,
+} from "../src/doctor/spool";
+import { err, ok, type Result } from "../src/doctor/result";
 import { runJobIngest, type JobIngestOptionsInput } from "../src/pipeline/jobIngest";
 
 interface CliOptions {
@@ -6,6 +29,14 @@ interface CliOptions {
   help: boolean;
   ingest: JobIngestOptionsInput;
 }
+
+class JobsradarCliError extends Error {
+  readonly _tag = "JobsradarCliError" as const;
+}
+
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+const doctorSpoolRoot =
+  process.env.JOBSRADAR_DOCTOR_SPOOL ?? `${repoRoot}/logs/doctor`;
 
 function usage(): string {
   return [
@@ -18,21 +49,29 @@ function usage(): string {
   ].join("\n");
 }
 
-function requiredValue(argv: string[], index: number, flag: string): string {
+function requiredValue(
+  argv: string[],
+  index: number,
+  flag: string,
+): Result<string, JobsradarCliError> {
   const value = argv[index + 1];
-  if (!value) throw new Error(`${flag} requires a value`);
-  return value;
+  return value
+    ? ok(value)
+    : err(new JobsradarCliError(`${flag} requires a value`));
 }
 
-function positiveInteger(value: string, flag: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${flag} requires a positive integer`);
+function positiveInteger(value: string, flag: string): Result<number, JobsradarCliError> {
+  if (!/^[1-9]\d*$/.test(value)) {
+    return err(new JobsradarCliError(`${flag} requires a positive integer`));
   }
-  return parsed;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    return err(new JobsradarCliError(`${flag} requires a safe positive integer`));
+  }
+  return ok(parsed);
 }
 
-function parseArgs(argv: string[]): CliOptions {
+function parseArgs(argv: string[]): Result<CliOptions, JobsradarCliError> {
   let command: CliOptions["command"] = "ingest";
   let json = false;
   let help = false;
@@ -47,35 +86,52 @@ function parseArgs(argv: string[]): CliOptions {
       continue;
     }
     if (argument === "--source") {
-      sourceIds.push(requiredValue(argv, index, argument));
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      sourceIds.push(value.value);
       index++;
       continue;
     }
     if (argument === "--jobserve-query") {
-      jobserveQueries.push(requiredValue(argv, index, argument));
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      jobserveQueries.push(value.value);
       index++;
       continue;
     }
     if (argument === "--jobserve-max-pages") {
-      ingest.jobserveMaxPages = positiveInteger(requiredValue(argv, index, argument), argument);
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      const parsed = positiveInteger(value.value, argument);
+      if (parsed._tag === "err") return parsed;
+      ingest.jobserveMaxPages = parsed.value;
       index++;
       continue;
     }
     if (argument === "--jobserve-detail-limit") {
-      ingest.jobserveImportLimitPerQuery = positiveInteger(
-        requiredValue(argv, index, argument),
-        argument,
-      );
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      const parsed = positiveInteger(value.value, argument);
+      if (parsed._tag === "err") return parsed;
+      ingest.jobserveImportLimitPerQuery = parsed.value;
       index++;
       continue;
     }
     if (argument === "--direct-limit") {
-      ingest.directLimit = positiveInteger(requiredValue(argv, index, argument), argument);
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      const parsed = positiveInteger(value.value, argument);
+      if (parsed._tag === "err") return parsed;
+      ingest.directLimit = parsed.value;
       index++;
       continue;
     }
     if (argument === "--timeout-ms") {
-      ingest.timeoutMs = positiveInteger(requiredValue(argv, index, argument), argument);
+      const value = requiredValue(argv, index, argument);
+      if (value._tag === "err") return value;
+      const parsed = positiveInteger(value.value, argument);
+      if (parsed._tag === "err") return parsed;
+      ingest.timeoutMs = parsed.value;
       index++;
       continue;
     }
@@ -87,12 +143,12 @@ function parseArgs(argv: string[]): CliOptions {
       help = true;
       continue;
     }
-    throw new Error(`Unknown argument: ${argument}\n\n${usage()}`);
+    return err(new JobsradarCliError(`Unknown argument: ${argument}\n\n${usage()}`));
   }
 
   if (sourceIds.length > 0) ingest.sourceIds = sourceIds;
   if (jobserveQueries.length > 0) ingest.jobserveQueries = jobserveQueries;
-  return { command, json, help, ingest };
+  return ok({ command, json, help, ingest });
 }
 
 function renderResult(result: Awaited<ReturnType<typeof runJobIngest>>): string {
@@ -106,15 +162,104 @@ function renderResult(result: Awaited<ReturnType<typeof runJobIngest>>): string 
   return lines.join("\n");
 }
 
+export async function dispatchDoctor(
+  classification: DoctorClassification,
+  context: {
+    readonly repoRoot: string;
+    readonly spoolRoot: string;
+    readonly environment: NodeJS.ProcessEnv;
+  } = { repoRoot, spoolRoot: doctorSpoolRoot, environment: process.env },
+): Promise<
+  Result<"not_needed" | "launched", DoctorSpoolError | DetachedDispatcherError | DoctorGitError>
+> {
+  if (classification._tag !== "repair") return ok("not_needed");
+  const now = new Date();
+  const recorded = await recordDoctorIncident(
+    context.spoolRoot,
+    classification.incident,
+    null,
+    now,
+  );
+  if (recorded._tag === "err") return recorded;
+  const gitExecutable = await resolveGitExecutable(context.environment);
+  if (gitExecutable._tag === "err") {
+    await recordDoctorLauncherFailure(context.spoolRoot, gitExecutable.error.message, now);
+    return gitExecutable;
+  }
+  const repoHead = await resolveRepoHead(
+    context.repoRoot,
+    gitExecutable.value,
+    context.environment,
+  );
+  if (repoHead._tag === "err") {
+    await recordDoctorLauncherFailure(context.spoolRoot, repoHead.error.message, now);
+    return repoHead;
+  }
+  if (recorded.value.incident.repoHead === null) {
+    const attached = await attachDoctorIncidentRepoHead(
+      context.spoolRoot,
+      recorded.value.path,
+      recorded.value.incident.fingerprint,
+      repoHead.value,
+    );
+    if (attached._tag === "err") return attached;
+  }
+  const codexExecutable = await resolveCodexExecutable(context.environment);
+  if (codexExecutable._tag === "err") {
+    await recordDoctorLauncherFailure(context.spoolRoot, codexExecutable.error.message, now);
+    return codexExecutable;
+  }
+  const launched = await launchDetachedDoctorDispatcher(
+    {
+      repoRoot: context.repoRoot,
+      spoolRoot: context.spoolRoot,
+      bunExecutable: process.execPath,
+      dispatcherScript: `${context.repoRoot}/scripts/jobsradar-doctor.ts`,
+      codexExecutable: codexExecutable.value,
+      gitExecutable: gitExecutable.value,
+    },
+    now,
+  );
+  return launched._tag === "err" ? launched : ok("launched");
+}
+
+async function handleTerminalClassification(classification: DoctorClassification): Promise<void> {
+  const dispatched = await dispatchDoctor(classification);
+  if (dispatched._tag === "err") {
+    const artifact =
+      dispatched.error instanceof DetachedDispatcherError && dispatched.error.failureArtifact
+        ? `; recoverable failure artifact: ${dispatched.error.failureArtifact}`
+        : "";
+    console.error(
+      `jobsradar doctor dispatch failed: ${dispatched.error.message}${artifact}; recover with bun run jobsradar:doctor -- run-pending`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed._tag === "err") {
+    console.error(parsed.error.message);
+    process.exitCode = 2;
+    await handleTerminalClassification(classifyIngestThrow(parsed.error));
+    return;
+  }
+  const options = parsed.value;
   if (options.help) {
     console.log(usage());
     return;
   }
-  const result = await runJobIngest(options.ingest);
-  console.log(options.json ? JSON.stringify(result, null, 2) : renderResult(result));
-  process.exitCode = result.status === "complete" ? 0 : 1;
+  try {
+    const result = await runJobIngest(options.ingest);
+    console.log(options.json ? JSON.stringify(result, null, 2) : renderResult(result));
+    process.exitCode = result.status === "complete" ? 0 : 1;
+    await handleTerminalClassification(classifyIngestResult(result));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+    await handleTerminalClassification(classifyIngestThrow(error));
+  }
 }
 
 if (import.meta.main) {

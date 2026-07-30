@@ -1,0 +1,162 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AtsOrgAcquisition } from "../../services/ats/types";
+import { type JobIngestSourceReceipt, normalizeJobIngestOptions, runJobIngest } from "../jobIngest";
+import { runLabRawIngest } from "../labRawIngest";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
+
+function completeReceipt(id: string): JobIngestSourceReceipt {
+  return {
+    id,
+    label: id,
+    status: "complete",
+    runId: 1,
+    discovered: 1,
+    imported: 1,
+    evidencePath: null,
+    errors: [],
+    elapsedMs: 1,
+  };
+}
+
+describe("jobsradar raw ingestion boundary", () => {
+  test("defaults to lab and direct sources while keeping JobServe opt-in", () => {
+    expect(normalizeJobIngestOptions().sourceIds).toEqual([
+      "lab-ats",
+      "linear-careers",
+      "google-careers",
+    ]);
+    expect(normalizeJobIngestOptions({ includeJobServe: true }).sourceIds).toEqual([
+      "lab-ats",
+      "linear-careers",
+      "google-careers",
+      "jobserve",
+    ]);
+  });
+
+  test("orchestrates only raw source ingestion and returns health receipts", async () => {
+    const calls: string[] = [];
+    const result = await runJobIngest(
+      { sourceIds: ["lab-ats", "linear-careers"] },
+      {
+        ensureReady: async () => {
+          calls.push("ready");
+        },
+        runLab: async () => {
+          calls.push("lab");
+          return completeReceipt("lab-ats");
+        },
+        runSources: async () => {
+          calls.push("sources");
+          return [completeReceipt("linear-careers")];
+        },
+      },
+    );
+
+    expect(calls).toEqual(["ready", "lab", "sources"]);
+    expect(result.status).toBe("complete");
+    expect(result.sources.map((source) => source.id)).toEqual(["lab-ats", "linear-careers"]);
+    expect("classified" in result).toBe(false);
+    expect("latest" in result).toBe(false);
+  });
+
+  test("writes independent lab raw evidence without screening fields", async () => {
+    const marketDir = await mkdtemp(join(tmpdir(), "lab-raw-ingest-test-"));
+    temporaryDirectories.push(marketDir);
+    await writeFile(
+      join(marketDir, "targets.json"),
+      `${JSON.stringify({
+        anthropic: { ats: "greenhouse", company: "Anthropic" },
+      })}\n`,
+    );
+    const acquisition: AtsOrgAcquisition = {
+      status: "success",
+      endpoint: "https://example.test/anthropic",
+      attempts: 1,
+      durationMs: 4,
+      jobs: [
+        {
+          source: "greenhouse",
+          org: "anthropic",
+          id: "job-1",
+          title: "AI Infrastructure Engineer",
+          location: "London, UK",
+          locations: ["London, UK"],
+          url: "https://example.test/anthropic/job-1",
+          postedAt: "2026-07-30T08:00:00.000Z",
+          raw: { id: "job-1", content: "Build reliable AI infrastructure." },
+        },
+      ],
+    };
+    let persistedJobs: unknown[] = [];
+
+    const result = await runLabRawIngest({
+      marketDir,
+      now: () => new Date("2026-07-30T09:00:00.000Z"),
+      makeRunId: () => "raw-run-1",
+      listers: {
+        ashby: async () => acquisition,
+        greenhouse: async () => acquisition,
+        lever: async () => acquisition,
+      },
+      persist: async (input) => {
+        persistedJobs = input.jobs;
+        return {
+          runId: 7,
+          queryId: 8,
+          jobsSeen: input.jobs.length,
+          jobsPersisted: input.jobs.length,
+          pagesPersisted: input.jobs.length,
+          errors: [],
+        };
+      },
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.imported).toBe(1);
+    expect(persistedJobs).toHaveLength(1);
+    const rows = (await readFile(result.evidencePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.raw).toEqual({
+      id: "job-1",
+      content: "Build reliable AI infrastructure.",
+    });
+    expect(rows[0]).not.toHaveProperty("disposition");
+    expect(rows[0]).not.toHaveProperty("locationEligibility");
+    expect(rows[0]).not.toHaveProperty("roleRelevance");
+  });
+});
+
+test("jobsradar CLI exposes raw ingest without report or email behavior", async () => {
+  const child = Bun.spawn(["bash", "scripts/jobsradar", "--help"], {
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+
+  expect(exitCode).toBe(0);
+  expect(stderr).toBe("");
+  expect(stdout).toContain("jobsradar ingest");
+  expect(stdout).toContain("JobServe is opt-in");
+  expect(stdout).not.toContain("email");
+  expect(stdout).not.toContain("rank");
+});

@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "jobfinder",
+      "name": "jobsradar",
       "dependencies": {
         "@notionhq/client": "2.3.0",
         "openai": "6.33.0",

@@ -1,6 +1,6 @@
 # UI prototypes (gallery)
 
-Experimental visual directions for the job-finder review UI. **Not production code.**
+Experimental visual directions for the jobsradar review UI. **Not production code.**
 
 ## Gallery vs wired
 
@@ -13,9 +13,9 @@ Keep the gallery intact when promoting a direction — we may return to unused p
 
 ## Serve locally
 
-Host Caddy snippet: `~/Codelocal/caddy/dev.d/job-finder.caddy`
+Host Caddy snippet: `~/Codelocal/caddy/dev.d/jobsradar.caddy`
 
-- https://job-finder.test:8443/ (preferred)
-- https://job-finder.auto.test:8443/
+- https://jobsradar.test:8443/ (preferred)
+- https://jobsradar.auto.test:8443/
 
 See [ui/README.md](ui/README.md) for install, LaunchAgent, and API notes.

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Scheduled fast-refresh wrapper, run by launchd (com.mcb.job-finder.fast-refresh).
+# Scheduled fast-refresh wrapper, run by launchd (com.mcb.jobsradar.fast-refresh).
 # Sources the login profile so JINA_API_KEY / OPENROUTER_API_KEY are available.
 set -euo pipefail
 

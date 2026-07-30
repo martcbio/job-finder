@@ -12,7 +12,7 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.mcb.job-finder-api</string>
+	<string>com.mcb.jobsradar-api</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/bash</string>
@@ -22,10 +22,10 @@
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/Users/mcb/Library/Logs/job-finder-api.err.log</string>
+	<string>/Users/mcb/Library/Logs/jobsradar-api.err.log</string>
 	<key>StandardOutPath</key>
-	<string>/Users/mcb/Library/Logs/job-finder-api.out.log</string>
+	<string>/Users/mcb/Library/Logs/jobsradar-api.out.log</string>
 	<key>WorkingDirectory</key>
-	<string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party</string>
+	<string>__JOBSRADAR_ROOT__</string>
 </dict>
 </plist>

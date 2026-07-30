@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.mcb.job-finder-ui</string>
+  <string>com.mcb.jobsradar-ui</string>
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/bun</string>
@@ -11,7 +11,7 @@
     <string>dev</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party/prototypes/ui</string>
+  <string>__JOBSRADAR_ROOT__/prototypes/ui</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -22,8 +22,8 @@
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/mcb/Library/Logs/job-finder-ui.out.log</string>
+  <string>/Users/mcb/Library/Logs/jobsradar-ui.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/mcb/Library/Logs/job-finder-ui.err.log</string>
+  <string>/Users/mcb/Library/Logs/jobsradar-ui.err.log</string>
 </dict>
 </plist>

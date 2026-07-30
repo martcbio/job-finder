@@ -82,7 +82,7 @@ describe("lab openings freshness", () => {
   test("resolves cloud paths from env without changing local defaults", () => {
     expect(resolveLabOpeningsPaths({})).toEqual({
       marketDir: "/Users/mcb/Claudelocal/careers/market",
-      projectDir: "/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party",
+      projectDir: join(import.meta.dir, "..", "..", ".."),
     });
     expect(
       resolveLabOpeningsPaths({

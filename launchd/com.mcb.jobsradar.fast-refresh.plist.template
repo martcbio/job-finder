@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.mcb.job-finder.fast-refresh</string>
+  <string>com.mcb.jobsradar.fast-refresh</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party/scripts/scheduled-fast-refresh.sh</string>
+    <string>__JOBSRADAR_ROOT__/scripts/scheduled-fast-refresh.sh</string>
   </array>
   <key>StartInterval</key>
   <integer>21600</integer>
   <key>RunAtLoad</key>
   <false/>
   <key>StandardOutPath</key>
-  <string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party/logs/scheduled/launchd.out.log</string>
+  <string>__JOBSRADAR_ROOT__/logs/scheduled/launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party/logs/scheduled/launchd.err.log</string>
+  <string>__JOBSRADAR_ROOT__/logs/scheduled/launchd.err.log</string>
   <key>ProcessType</key>
   <string>Background</string>
 </dict>

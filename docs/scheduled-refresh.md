@@ -9,22 +9,21 @@ skips cleanly when Postgres is down, and writes each run's markdown report to
 ## Install (one-time)
 
 ```bash
-cp launchd/com.mcb.job-finder.fast-refresh.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mcb.job-finder.fast-refresh.plist
+./scripts/install-jobsradar-launchd.sh fast-refresh
 ```
 
 ## Operate
 
 ```bash
 # run now, without waiting for the interval
-launchctl kickstart gui/$(id -u)/com.mcb.job-finder.fast-refresh
+launchctl kickstart gui/$(id -u)/com.mcb.jobsradar.fast-refresh
 
 # check last run
 cat logs/scheduled/latest.md
 
 # uninstall
-launchctl bootout gui/$(id -u)/com.mcb.job-finder.fast-refresh
-rm ~/Library/LaunchAgents/com.mcb.job-finder.fast-refresh.plist
+launchctl bootout gui/$(id -u)/com.mcb.jobsradar.fast-refresh
+rm ~/Library/LaunchAgents/com.mcb.jobsradar.fast-refresh.plist
 ```
 
 The run itself is the default `bun scripts/fast-refresh.ts` profile: JobServe

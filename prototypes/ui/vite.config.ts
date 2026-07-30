@@ -9,12 +9,12 @@ export default defineConfig({
     port: 32002,
     strictPort: true,
     allowedHosts: [
-      "job-finder.test",
-      ".job-finder.test",
-      "job-finder.auto.test",
+      "jobsradar.test",
+      ".jobsradar.test",
+      "jobsradar.auto.test",
     ],
     hmr: {
-      host: "job-finder.test",
+      host: "jobsradar.test",
       clientPort: 8443,
       protocol: "wss",
     },

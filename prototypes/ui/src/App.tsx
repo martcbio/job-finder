@@ -46,7 +46,7 @@ export default function App() {
         <div className="mx-auto flex max-w-[1400px] flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
           <div className="flex items-center gap-3">
             <span className="font-[family-name:var(--font-display)] text-sm font-bold tracking-tight text-white">
-              Job Finder
+              Jobsradar
             </span>
             <span className="hidden text-zinc-700 md:inline">/</span>
             <span className="hidden text-xs text-zinc-500 md:inline">Prototype Gallery</span>
@@ -108,7 +108,7 @@ export default function App() {
       <footer className="border-t border-white/5 px-6 py-4 text-center">
         <p className="text-[11px] text-zinc-600">
           Branch <code className="text-zinc-500">cursor-party-ui</code> ·{" "}
-          <code className="text-zinc-500">https://job-finder.test:8443</code> · {current.name}{" "}
+          <code className="text-zinc-500">https://jobsradar.test:8443</code> · {current.name}{" "}
           accent {current.accent}
         </p>
       </footer>

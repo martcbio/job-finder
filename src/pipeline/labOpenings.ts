@@ -20,8 +20,7 @@ import { classifyLabOpening, type LabOpeningDecision } from "./labOpeningDecisio
 const log = logger.child({ component: "pipeline/lab-openings" });
 
 const DEFAULT_MARKET_DIR = "/Users/mcb/Claudelocal/careers/market";
-const DEFAULT_PROJECT_DIR =
-  "/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party";
+const DEFAULT_PROJECT_DIR = join(import.meta.dir, "..", "..");
 const PACKAGE_VERSION = "2026.05.02.1";
 const IMPLEMENTATION_REVISION = "lab-openings-v1";
 const FRESH_FOR_MS = 30 * 60 * 60 * 1000;
@@ -904,7 +903,7 @@ export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}):
           status,
           freshUntil,
           implementation: {
-            name: "job-finder-cursor-party",
+            name: "jobsradar",
             version: PACKAGE_VERSION,
             revision: IMPLEMENTATION_REVISION,
           },

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPO_ROOT="/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party"
+readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly CONTROL_PLANE_ENV="${HOME:?HOME is required}/.config/estate-control-plane.env"
 
 if [[ ! -r "${CONTROL_PLANE_ENV}" ]]; then

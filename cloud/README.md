@@ -11,7 +11,7 @@ Both arms parse the run JSONL into `org:ats:id` triples, sort those complete UTF
 Run these from the repository root, in order:
 
 ```sh
-cd /Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party
+cd /Users/mcb/Claudelocal/careers/jobsradar
 supabase db query --linked -f cloud/schema.sql
 supabase db query --linked -f cloud/schema_additions.sql
 ```

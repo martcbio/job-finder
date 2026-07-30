@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${OPPS_REPO:-/Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${OPPS_REPO:-$(dirname "${SCRIPT_DIR}")}"
 export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
 
 usage() {

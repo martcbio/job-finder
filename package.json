@@ -1,5 +1,5 @@
 {
-  "name": "jobfinder",
+  "name": "jobsradar",
   "version": "2026.05.02.1",
   "description": "Local Postgres-backed job search pipeline with source fanout, review queues, and CV/application support.",
   "license": "MIT",

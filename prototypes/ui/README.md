@@ -1,6 +1,6 @@
-# Job Finder UI Prototype Gallery
+# Jobsradar UI Prototype Gallery
 
-Four visual directions for the job-finder review UI. **Signal Cockpit** is wired to
+Four visual directions for the jobsradar review UI. **Signal Cockpit** is wired to
 live Postgres data and fast refresh; the others read the same API hook.
 
 Reads from the local JSON API when available; falls back to mock data when the API is offline.
@@ -9,10 +9,10 @@ Reads from the local JSON API when available; falls back to mock data when the A
 
 Host Caddy serves the app at:
 
-- **https://job-finder.test:8443/** (preferred)
-- **https://job-finder.auto.test:8443/** (same upstream; explicit snippet overrides the socket router)
+- **https://jobsradar.test:8443/** (preferred)
+- **https://jobsradar.auto.test:8443/** (same upstream; explicit snippet overrides the socket router)
 
-Snippet: `~/Codelocal/caddy/dev.d/job-finder.caddy`
+Snippet: `~/Codelocal/caddy/dev.d/jobsradar.caddy`
 
 **Persistent dev server (recommended):**
 

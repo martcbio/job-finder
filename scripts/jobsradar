@@ -3,5 +3,6 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
 
 exec bun "$PROJECT_DIR/scripts/jobsradar.ts" "$@"

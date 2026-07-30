@@ -7,7 +7,7 @@ import { resolveLabOpeningsPaths } from "./labOpenings";
 import { runLabRawIngest } from "./labRawIngest";
 
 const ALLOWED_SOURCE_IDS = new Set(["lab-ats", "jobserve", "linear-careers", "google-careers"]);
-const DEFAULT_SOURCE_IDS = ["lab-ats", "linear-careers", "google-careers"];
+const DEFAULT_SOURCE_IDS = ["lab-ats", "linear-careers", "google-careers", "jobserve"];
 
 export interface JobIngestOptions
   extends Pick<
@@ -22,9 +22,7 @@ export interface JobIngestOptions
   marketDir: string;
 }
 
-export interface JobIngestOptionsInput extends Partial<JobIngestOptions> {
-  includeJobServe?: boolean;
-}
+export type JobIngestOptionsInput = Partial<JobIngestOptions>;
 
 export interface JobIngestSourceReceipt {
   id: string;
@@ -56,7 +54,6 @@ interface JobIngestDependencies {
 export function normalizeJobIngestOptions(input: JobIngestOptionsInput = {}): JobIngestOptions {
   const requested = input.sourceIds?.length ? input.sourceIds : DEFAULT_SOURCE_IDS;
   const sourceIds = [...new Set(requested.map(normalizeSourceId))];
-  if (input.includeJobServe && !sourceIds.includes("jobserve")) sourceIds.push("jobserve");
   for (const sourceId of sourceIds) {
     if (!ALLOWED_SOURCE_IDS.has(sourceId)) throw new Error(`Unknown ingest source: ${sourceId}`);
   }

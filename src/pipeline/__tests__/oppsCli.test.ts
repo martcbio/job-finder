@@ -18,12 +18,12 @@ test("opps exposes the short safe workflow", async () => {
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
   expect(stdout).toContain("opps update");
-  expect(stdout).toContain("opps update --jobserve");
-  expect(stdout).toContain("JobServe is not contacted by default");
+  expect(stdout).toContain("all configured sources");
+  expect(stdout).toContain("JobServe contracts");
   expect(stdout).toContain("Selections are always emailed through Resend");
 });
 
-test("opps update works with no passthrough flags and keeps JobServe opt-in", async () => {
+test("opps update refreshes every configured source without a JobServe flag", async () => {
   const fakeBin = await mkdtemp(join(tmpdir(), "opps-test-"));
   const argsPath = join(fakeBin, "args");
   const fakeBun = join(fakeBin, "bun");
@@ -43,9 +43,11 @@ test("opps update works with no passthrough flags and keeps JobServe opt-in", as
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
     expect(args).toContain("--refresh-cloud-labs");
+    expect(args).toContain("--refresh-direct");
+    expect(args).toContain("--refresh-signals");
+    expect(args).toContain("--refresh-jobserve");
     expect(args).toContain("--strict-source-health");
     expect(args).toContain("--email");
-    expect(args).not.toContain("--refresh-jobserve");
   } finally {
     await rm(fakeBin, { recursive: true, force: true });
   }

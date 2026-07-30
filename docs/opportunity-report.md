@@ -19,14 +19,13 @@ Other useful commands:
 opps list
 opps json --limit 10
 opps doctor
-opps update --jobserve
 ```
 
 `opps update` syncs the latest fresh, complete Modal lab-ATS run—including full
-job bodies—then refreshes direct careers and bookmark company signals. If the
-cloud snapshot is stale, unavailable, or inconsistent, it reports that failure
-and runs the Mac lab scanner. JobServe is not contacted unless
-`opps update --jobserve` is explicitly supplied.
+job bodies—then refreshes direct careers, bookmark company signals, and bounded
+JobServe contracts. If the cloud snapshot is stale, unavailable, or
+inconsistent, it reports that failure and runs the Mac lab scanner. No source
+toggle is required for the normal update.
 
 Without a refresh flag, this reads only the latest complete lab-opening
 generation and stored JobServe rows. It does not contact JobServe.
@@ -39,9 +38,9 @@ bun run jobs:opportunities -- --refresh-labs
 ```
 
 The first command uses Modal with a visible Mac fallback. The second forces a
-native Mac ATS scan. Add
-`--refresh-jobserve` only when a bounded JobServe refresh is wanted. `--refresh`
-runs both sequentially and fails immediately if either refresh fails.
+native Mac ATS scan. These lower-level diagnostic commands can isolate sources;
+the normal `opps update` always fetches all configured sources and fails
+immediately if any required refresh fails.
 
 JobServe safety is enforced below the CLI: at most three queries, two result
 pages per query, five detail pages per query, paced requests, and immediate

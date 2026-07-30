@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AtsOrgAcquisition } from "../../services/ats/types";
@@ -31,13 +31,8 @@ function completeReceipt(id: string): JobIngestSourceReceipt {
 }
 
 describe("jobsradar raw ingestion boundary", () => {
-  test("defaults to lab and direct sources while keeping JobServe opt-in", () => {
+  test("defaults to every configured source, including bounded JobServe", () => {
     expect(normalizeJobIngestOptions().sourceIds).toEqual([
-      "lab-ats",
-      "linear-careers",
-      "google-careers",
-    ]);
-    expect(normalizeJobIngestOptions({ includeJobServe: true }).sourceIds).toEqual([
       "lab-ats",
       "linear-careers",
       "google-careers",
@@ -156,7 +151,27 @@ test("jobsradar CLI exposes raw ingest without report or email behavior", async 
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
   expect(stdout).toContain("jobsradar ingest");
-  expect(stdout).toContain("JobServe is opt-in");
+  expect(stdout).toContain("Default sources include bounded JobServe");
   expect(stdout).not.toContain("email");
   expect(stdout).not.toContain("rank");
+});
+
+test("jobsradar wrapper supplies the standard local database without flags", async () => {
+  const fakeBin = await mkdtemp(join(tmpdir(), "jobsradar-wrapper-test-"));
+  temporaryDirectories.push(fakeBin);
+  const databasePath = join(fakeBin, "database-url");
+  const fakeBun = join(fakeBin, "bun");
+  await writeFile(fakeBun, `#!/bin/sh\nprintf '%s' "$DATABASE_URL" > "${databasePath}"\n`);
+  await chmod(fakeBun, 0o755);
+
+  const child = Bun.spawn(["sh", "scripts/jobsradar", "ingest"], {
+    cwd: process.cwd(),
+    env: { ...process.env, DATABASE_URL: "", PATH: `${fakeBin}:${process.env.PATH ?? ""}` },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await child.exited;
+
+  expect(exitCode).toBe(0);
+  expect(await readFile(databasePath, "utf8")).toBe("postgres://mcb@localhost:5432/jobs");
 });

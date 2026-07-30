@@ -10,11 +10,11 @@ interface CliOptions {
 function usage(): string {
   return [
     "Usage:",
-    "  jobsradar ingest [--source <id>] [--jobserve] [--json]",
+    "  jobsradar ingest [--source <id>] [--json]",
     "",
     "Raw acquisition only: fetch, preserve evidence, normalize, and persist.",
-    "Default sources: lab-ats, linear-careers, google-careers.",
-    "JobServe is opt-in and remains bounded to its fair-use envelope.",
+    "Default sources include bounded JobServe plus lab ATS, Linear, and Google Careers.",
+    "JobServe runs locally with pacing and immediate fair-use aborts.",
   ].join("\n");
 }
 
@@ -36,7 +36,6 @@ function parseArgs(argv: string[]): CliOptions {
   let command: CliOptions["command"] = "ingest";
   let json = false;
   let help = false;
-  let includeJobServe = false;
   const sourceIds: string[] = [];
   const jobserveQueries: string[] = [];
   const ingest: JobIngestOptionsInput = {};
@@ -50,10 +49,6 @@ function parseArgs(argv: string[]): CliOptions {
     if (argument === "--source") {
       sourceIds.push(requiredValue(argv, index, argument));
       index++;
-      continue;
-    }
-    if (argument === "--jobserve") {
-      includeJobServe = true;
       continue;
     }
     if (argument === "--jobserve-query") {
@@ -97,7 +92,6 @@ function parseArgs(argv: string[]): CliOptions {
 
   if (sourceIds.length > 0) ingest.sourceIds = sourceIds;
   if (jobserveQueries.length > 0) ingest.jobserveQueries = jobserveQueries;
-  if (includeJobServe) ingest.includeJobServe = true;
   return { command, json, help, ingest };
 }
 

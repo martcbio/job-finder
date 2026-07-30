@@ -132,7 +132,11 @@ if ((scanner_status == 0 && signals_status == 0 && parity_status == 0)); then
   (
     cd "${REPO_ROOT}" &&
       PATH="/opt/homebrew/bin:${HOME}/.local/bin:${PATH}" \
-        "${REPO_ROOT}/scripts/opps" list --refresh-direct --strict-source-health --quiet
+        "${REPO_ROOT}/scripts/opps" list \
+          --refresh-direct \
+          --refresh-jobserve \
+          --strict-source-health \
+          --quiet
   ) || report_status=$?
 else
   printf 'lab-openings-scheduled: daily report skipped for scanner=%d signals=%d parity=%d\n' \

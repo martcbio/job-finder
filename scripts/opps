@@ -8,15 +8,14 @@ export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
 usage() {
   cat <<'EOF'
 Usage:
-  opps update                 Refresh lab ATS, direct careers, and company signals
-  opps update --jobserve      Also run the bounded, paced JobServe refresh
+  opps update                 Refresh all configured sources and email the selection
   opps signals                Refresh bookmark hiring/funding company intelligence
   opps list [options]         Print and email the current mixed-source opportunity list
   opps json [options]         Emit the current report as JSON
   opps doctor                 Check the database, API, Modal scanner, and browser UI
   opps open                   Open the Latest 50 browser view
 
-JobServe is not contacted by default. It requires: opps update --jobserve
+Every update includes bounded, paced JobServe contracts. It aborts on fair-use restriction.
 Selections are always emailed through Resend. JSON exports are not.
 EOF
 }
@@ -34,19 +33,8 @@ cd "${REPO}"
 
 case "${command}" in
   update)
-    refresh_args=(--refresh-cloud-labs --refresh-direct --refresh-signals --strict-source-health --quiet --email)
-    passthrough=()
-    for arg in "$@"; do
-      if [[ "${arg}" == "--jobserve" ]]; then
-        refresh_args+=(--refresh-jobserve)
-      else
-        passthrough+=("${arg}")
-      fi
-    done
-    if [[ ${#passthrough[@]} -gt 0 ]]; then
-      exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}" "${passthrough[@]}"
-    fi
-    exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}"
+    refresh_args=(--refresh-cloud-labs --refresh-direct --refresh-signals --refresh-jobserve --strict-source-health --quiet --email)
+    exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}" "$@"
     ;;
   list)
     exec bun scripts/list-latest-opportunities.ts --email "$@"

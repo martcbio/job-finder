@@ -49,32 +49,35 @@ reference/integration code, but new UI work should not depend on them.
 
 ## Refresh jobs (day-to-day)
 
-Generate the current mixed-source shortlist from the latest native lab snapshot
-and stored JobServe rows:
+Refresh every configured source—including the fresh Modal ATS snapshot, Linear,
+Google Careers, bookmark signals, and bounded JobServe contracts—then email the
+selection:
 
 ```bash
-export DATABASE_URL=postgres://mcb@localhost:5432/jobs
-bun run jobs:opportunities
+opps update
 ```
 
-Prefer the fresh complete Modal ATS snapshot, with a loud native-Mac fallback:
+JobServe runs locally with pacing, tight request limits, and immediate abort on
+a fair-usage restriction page. It is part of every normal update; no source
+toggle is required.
+
+Read or email the stored selection without refreshing:
+
+```bash
+opps json --limit 30
+opps list
+```
+
+Lower-level source-isolation commands remain available for diagnostics:
 
 ```bash
 bun run jobs:opportunities -- --refresh-cloud-labs
-```
-
-Use `--refresh-labs` to force a native Mac ATS scan.
-
-JobServe refresh is deliberately opt-in because it enforces bounded queries,
-pacing, and immediate abort on a usage-restriction page:
-
-```bash
+bun run jobs:opportunities -- --refresh-labs
 bun run jobs:opportunities -- --refresh-jobserve
 ```
 
-Use `--refresh` to run both refreshes, or omit all refresh flags to make no
-network requests. `--format json`, `--output artifacts/opportunities/latest.md`,
-and `--strict-source-health` support scripts and automation. Defaults live in
+`--format json`, `--output artifacts/opportunities/latest.md`, and
+`--strict-source-health` support scripts and automation. Defaults live in
 [`config/opportunity-report.json`](config/opportunity-report.json); the full
 operating contract is in
 [`docs/opportunity-report.md`](docs/opportunity-report.md).

@@ -71,6 +71,11 @@ export async function launchDetachedDoctorDispatcher(
     );
   }
   try {
+    const policyEnvironment = Object.fromEntries(
+      Object.entries(process.env).filter(([key, value]) => {
+        return key.startsWith("JOBSRADAR_DOCTOR_") && value !== undefined;
+      }),
+    );
     const child = spawn(
       config.bunExecutable,
       [config.dispatcherScript, "run-pending", "--automatic"],
@@ -80,6 +85,7 @@ export async function launchDetachedDoctorDispatcher(
         stdio: "ignore",
         env: {
           ...doctorAgentEnvironment(process.env),
+          ...policyEnvironment,
           JOBSRADAR_DOCTOR_SPOOL: config.spoolRoot,
           JOBSRADAR_DOCTOR_CODEX_PATH: config.codexExecutable,
           JOBSRADAR_DOCTOR_GIT_PATH: config.gitExecutable,

@@ -131,6 +131,10 @@ BEGIN
   kind := jsonb_typeof(input);
   IF kind = 'number' THEN
     numeric_value := (input #>> '{}')::numeric;
+    IF trunc(numeric_value) = numeric_value
+       AND abs(numeric_value) > 9007199254740991 THEN
+      RETURN false;
+    END IF;
     BEGIN
       float_value := (input #>> '{}')::double precision;
     EXCEPTION
@@ -299,6 +303,17 @@ CREATE TABLE IF NOT EXISTS job_search.ingest_listing_versions (
   CONSTRAINT ingest_listing_versions_created_at_millisecond CHECK (
     date_trunc('milliseconds', created_at) = created_at
   )
+);
+
+CREATE TABLE IF NOT EXISTS job_search.ingest_run_listing_versions (
+  run_id bigint NOT NULL REFERENCES job_search.ingest_runs(id) ON DELETE RESTRICT,
+  listing_version_id bigint NOT NULL REFERENCES job_search.ingest_listing_versions(id) ON DELETE RESTRICT,
+  registered_by_scope_id bigint NOT NULL REFERENCES job_search.ingest_source_scopes(id) ON DELETE RESTRICT,
+  created_at timestamptz NOT NULL DEFAULT date_trunc('milliseconds', clock_timestamp()),
+  CONSTRAINT ingest_run_listing_versions_created_at_millisecond CHECK (
+    date_trunc('milliseconds', created_at) = created_at
+  ),
+  PRIMARY KEY (run_id, listing_version_id)
 );
 
 CREATE TABLE IF NOT EXISTS job_search.ingest_observation_versions (
@@ -543,6 +558,8 @@ BEGIN
       INTO parent_run_id
       FROM job_search.ingest_source_scopes source_scope
       WHERE source_scope.id = OLD.created_by_scope_id;
+    WHEN 'ingest_run_listing_versions' THEN
+      parent_run_id := OLD.run_id;
     WHEN 'ingest_observation_versions' THEN
       SELECT source_scope.run_id
       INTO parent_run_id
@@ -683,6 +700,78 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION job_search.guard_ingest_run_listing_version_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  scope_run_id bigint;
+  run_contract_version integer;
+  listing_contract_version integer;
+BEGIN
+  run_contract_version := job_search.require_collecting_ingest_run(NEW.run_id);
+
+  SELECT run_id
+  INTO scope_run_id
+  FROM job_search.ingest_source_scopes
+  WHERE id = NEW.registered_by_scope_id
+  FOR UPDATE;
+
+  IF scope_run_id IS NULL THEN
+    RAISE EXCEPTION 'ingest source scope % does not exist', NEW.registered_by_scope_id
+      USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  IF scope_run_id IS DISTINCT FROM NEW.run_id THEN
+    RAISE EXCEPTION 'listing version registration scope must belong to its run'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  SELECT contract_version
+  INTO listing_contract_version
+  FROM job_search.ingest_listing_versions
+  WHERE id = NEW.listing_version_id;
+
+  IF listing_contract_version IS NULL THEN
+    RAISE EXCEPTION 'ingest listing version % does not exist', NEW.listing_version_id
+      USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  IF listing_contract_version IS DISTINCT FROM run_contract_version THEN
+    RAISE EXCEPTION 'listing version registration cannot cross ingest contract versions'
+      USING ERRCODE = 'check_violation';
+  END IF;
+
+  NEW.created_at := date_trunc('milliseconds', clock_timestamp());
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION job_search.register_created_ingest_listing_version()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  parent_run_id bigint;
+BEGIN
+  SELECT run_id
+  INTO STRICT parent_run_id
+  FROM job_search.ingest_source_scopes
+  WHERE id = NEW.created_by_scope_id;
+
+  INSERT INTO job_search.ingest_run_listing_versions (
+    run_id,
+    listing_version_id,
+    registered_by_scope_id
+  )
+  VALUES (
+    parent_run_id,
+    NEW.id,
+    NEW.created_by_scope_id
+  );
+
+  RETURN NEW;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION job_search.guard_ingest_observation_version_insert()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -691,10 +780,11 @@ DECLARE
   parent_run_id bigint;
   run_contract_version integer;
   scope_status text;
+  observation_scope_id bigint;
   database_created_at timestamptz;
 BEGIN
-  SELECT source_scope.run_id
-  INTO parent_run_id
+  SELECT source_scope.run_id, source_scope.id
+  INTO parent_run_id, observation_scope_id
   FROM job_search.ingest_observations observation
   JOIN job_search.ingest_source_scopes source_scope ON source_scope.id = observation.scope_id
   WHERE observation.id = NEW.observation_id;
@@ -726,6 +816,18 @@ BEGIN
     RAISE EXCEPTION 'cannot append provenance to an observation in source scope state %', scope_status
       USING ERRCODE = 'check_violation';
   END IF;
+
+  INSERT INTO job_search.ingest_run_listing_versions (
+    run_id,
+    listing_version_id,
+    registered_by_scope_id
+  )
+  VALUES (
+    parent_run_id,
+    NEW.listing_version_id,
+    observation_scope_id
+  )
+  ON CONFLICT (run_id, listing_version_id) DO NOTHING;
 
   SELECT GREATEST(
     date_trunc('milliseconds', clock_timestamp()),
@@ -980,10 +1082,8 @@ BEGIN
 
     IF EXISTS (
       SELECT 1
-      FROM job_search.ingest_listing_versions listing_version
-      JOIN job_search.ingest_source_scopes producer_scope
-        ON producer_scope.id = listing_version.created_by_scope_id
-      WHERE producer_scope.run_id = NEW.id
+      FROM job_search.ingest_run_listing_versions run_version
+      WHERE run_version.run_id = NEW.id
         AND NOT EXISTS (
           SELECT 1
           FROM job_search.ingest_observation_versions provenance
@@ -991,7 +1091,7 @@ BEGIN
             ON observation.id = provenance.observation_id
           JOIN job_search.ingest_source_scopes observation_scope
             ON observation_scope.id = observation.scope_id
-          WHERE provenance.listing_version_id = listing_version.id
+          WHERE provenance.listing_version_id = run_version.listing_version_id
             AND observation_scope.run_id = NEW.id
         )
     ) THEN
@@ -1054,15 +1154,11 @@ AS $$
     ),
     'versionHashes', COALESCE(
       (
-        SELECT jsonb_agg(referenced_version.version_hash ORDER BY referenced_version.version_hash)
-        FROM (
-          SELECT DISTINCT listing_version.version_hash
-          FROM job_search.ingest_source_scopes source_scope
-          JOIN job_search.ingest_observations observation ON observation.scope_id = source_scope.id
-          JOIN job_search.ingest_observation_versions provenance ON provenance.observation_id = observation.id
-          JOIN job_search.ingest_listing_versions listing_version ON listing_version.id = provenance.listing_version_id
-          WHERE source_scope.run_id = ingest_run.id
-        ) referenced_version
+        SELECT jsonb_agg(listing_version.version_hash ORDER BY listing_version.version_hash)
+        FROM job_search.ingest_run_listing_versions run_version
+        JOIN job_search.ingest_listing_versions listing_version
+          ON listing_version.id = run_version.listing_version_id
+        WHERE run_version.run_id = ingest_run.id
       ),
       '[]'::jsonb
     ),
@@ -1139,7 +1235,11 @@ BEGIN
   SELECT
     count(DISTINCT source_scope.id)::integer,
     count(DISTINCT observation.id)::integer,
-    count(DISTINCT provenance.listing_version_id)::integer,
+    (
+      SELECT count(*)::integer
+      FROM job_search.ingest_run_listing_versions run_version
+      WHERE run_version.run_id = NEW.run_id
+    ),
     count(DISTINCT (provenance.observation_id, provenance.listing_version_id))::integer
   INTO actual_scope_count, actual_observation_count, actual_listing_version_count, actual_edge_count
   FROM job_search.ingest_source_scopes source_scope
@@ -1247,10 +1347,8 @@ BEGIN
 
   IF EXISTS (
     SELECT 1
-    FROM job_search.ingest_listing_versions listing_version
-    JOIN job_search.ingest_source_scopes producer_scope
-      ON producer_scope.id = listing_version.created_by_scope_id
-    WHERE producer_scope.run_id = requested_run_id
+    FROM job_search.ingest_run_listing_versions run_version
+    WHERE run_version.run_id = requested_run_id
       AND NOT EXISTS (
         SELECT 1
         FROM job_search.ingest_observation_versions provenance
@@ -1258,7 +1356,7 @@ BEGIN
           ON observation.id = provenance.observation_id
         JOIN job_search.ingest_source_scopes observation_scope
           ON observation_scope.id = observation.scope_id
-        WHERE provenance.listing_version_id = listing_version.id
+        WHERE provenance.listing_version_id = run_version.listing_version_id
           AND observation_scope.run_id = requested_run_id
       )
   ) THEN
@@ -1269,7 +1367,11 @@ BEGIN
   SELECT
     count(DISTINCT source_scope.id)::integer,
     count(DISTINCT observation.id)::integer,
-    count(DISTINCT provenance.listing_version_id)::integer,
+    (
+      SELECT count(*)::integer
+      FROM job_search.ingest_run_listing_versions run_version
+      WHERE run_version.run_id = requested_run_id
+    ),
     count(DISTINCT (provenance.observation_id, provenance.listing_version_id))::integer
   INTO actual_scope_count, actual_observation_count, actual_listing_version_count, actual_edge_count
   FROM job_search.ingest_source_scopes source_scope
@@ -1334,6 +1436,7 @@ REVOKE INSERT, UPDATE, DELETE, TRUNCATE
 REVOKE INSERT (created_at) ON job_search.ingest_runs FROM PUBLIC;
 REVOKE INSERT (created_at) ON job_search.ingest_observations FROM PUBLIC;
 REVOKE INSERT (created_at) ON job_search.ingest_listing_versions FROM PUBLIC;
+REVOKE INSERT (created_at) ON job_search.ingest_run_listing_versions FROM PUBLIC;
 REVOKE INSERT (created_at) ON job_search.ingest_observation_versions FROM PUBLIC;
 
 DO $privileges$
@@ -1354,7 +1457,7 @@ BEGIN
       ambient_role
     );
     EXECUTE pg_catalog.format(
-      'REVOKE INSERT (created_at) ON job_search.ingest_runs, job_search.ingest_observations, job_search.ingest_listing_versions, job_search.ingest_observation_versions FROM %I',
+      'REVOKE INSERT (created_at) ON job_search.ingest_runs, job_search.ingest_observations, job_search.ingest_listing_versions, job_search.ingest_run_listing_versions, job_search.ingest_observation_versions FROM %I',
       ambient_role
     );
   END LOOP;
@@ -1401,6 +1504,18 @@ CREATE TRIGGER ingest_listing_versions_reject_mutation
 BEFORE UPDATE OR DELETE ON job_search.ingest_listing_versions
 FOR EACH ROW EXECUTE FUNCTION job_search.reject_ingest_child_mutation();
 
+CREATE TRIGGER ingest_listing_versions_register_run
+AFTER INSERT ON job_search.ingest_listing_versions
+FOR EACH ROW EXECUTE FUNCTION job_search.register_created_ingest_listing_version();
+
+CREATE TRIGGER ingest_run_listing_versions_guard_insert
+BEFORE INSERT ON job_search.ingest_run_listing_versions
+FOR EACH ROW EXECUTE FUNCTION job_search.guard_ingest_run_listing_version_insert();
+
+CREATE TRIGGER ingest_run_listing_versions_reject_mutation
+BEFORE UPDATE OR DELETE ON job_search.ingest_run_listing_versions
+FOR EACH ROW EXECUTE FUNCTION job_search.reject_ingest_child_mutation();
+
 CREATE TRIGGER ingest_observation_versions_guard_insert
 BEFORE INSERT ON job_search.ingest_observation_versions
 FOR EACH ROW EXECUTE FUNCTION job_search.guard_ingest_observation_version_insert();
@@ -1428,6 +1543,9 @@ CREATE INDEX IF NOT EXISTS ingest_listing_versions_listing_key_idx
 
 CREATE INDEX IF NOT EXISTS ingest_listing_versions_created_by_scope_idx
   ON job_search.ingest_listing_versions(created_by_scope_id);
+
+CREATE INDEX IF NOT EXISTS ingest_run_listing_versions_listing_version_idx
+  ON job_search.ingest_run_listing_versions(listing_version_id);
 
 CREATE INDEX IF NOT EXISTS ingest_observation_versions_listing_version_idx
   ON job_search.ingest_observation_versions(listing_version_id);

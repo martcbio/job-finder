@@ -6,6 +6,8 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
+  symlink,
   unlink,
   utimes,
   writeFile,
@@ -23,6 +25,7 @@ import {
   runPendingDoctor,
 } from "../dispatcher";
 import {
+  archiveAndRemoveDoctorWorktree,
   createIsolatedDoctorWorktree,
   doctorAgentEnvironment,
   resolveRepoHead,
@@ -435,9 +438,11 @@ test("dispatcher integer configuration rejects partial numbers", () => {
 test("redaction strips secret shapes and the agent environment is allowlisted", () => {
   expect(
     redactSecrets(
-      "api_key=topsecret Bearer abc.def.ghi sk-proj-abcdefghij https://user:pass@example.test",
+      "api_key=topsecret Bearer abc.def.ghi sk-proj-abcdefghij https://user:pass@example.test postgres://dbuser:dbpass@db.test FOO_SECRET=hidden DATABASE_URL=postgresql://u:p@db.test",
     ),
-  ).toBe("api_key=[REDACTED] Bearer [REDACTED] [REDACTED_TOKEN] https://[REDACTED]@example.test");
+  ).toBe(
+    "api_key=[REDACTED] Bearer [REDACTED] [REDACTED_TOKEN] https://[REDACTED]@example.test postgres://[REDACTED]@db.test FOO_SECRET=[REDACTED] DATABASE_URL=[REDACTED]",
+  );
   expect(
     doctorAgentEnvironment({
       HOME: "/home/test",
@@ -481,6 +486,115 @@ test("isolated worktree uses the incident HEAD instead of dirty user files", asy
   if (isolated._tag === "err") return;
   expect(await readFile(join(isolated.value, "tracked.txt"), "utf8")).toBe("committed\n");
   expect(await readFile(join(repo, "tracked.txt"), "utf8")).toBe("dirty user edit\n");
+  expect((await stat(isolated.value)).mode & 0o777).toBe(0o700);
+  expect((await stat(join(root, ".jobsradar-doctor-worktrees"))).mode & 0o777).toBe(0o700);
+});
+
+test("terminal worktree changes are archived before the worktree is removed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jobsradar-doctor-worktree-archive-"));
+  temporaryDirectories.push(root);
+  const repo = join(root, "repo");
+  const dispatchDirectory = join(root, "dispatch");
+  await mkdir(repo);
+  await mkdir(dispatchDirectory);
+  const git = "/opt/homebrew/bin/git";
+  await runCommand([git, "init"], repo);
+  await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
+  await runCommand([git, "config", "user.name", "Doctor Test"], repo);
+  await writeFile(join(repo, "tracked.txt"), "committed\n");
+  await runCommand([git, "add", "tracked.txt"], repo);
+  await runCommand([git, "commit", "-m", "fixture"], repo);
+  const head = await resolveRepoHead(repo, git, process.env);
+  expect(head._tag).toBe("ok");
+  if (head._tag === "err") return;
+  const isolated = await createIsolatedDoctorWorktree(
+    repo,
+    "dispatch-archive",
+    head.value,
+    git,
+    process.env,
+  );
+  expect(isolated._tag).toBe("ok");
+  if (isolated._tag === "err") return;
+  await writeFile(join(isolated.value, "tracked.txt"), "patched\n");
+  await writeFile(join(isolated.value, "new-test.txt"), "new evidence\n");
+
+  const archived = await archiveAndRemoveDoctorWorktree(
+    repo,
+    isolated.value,
+    head.value,
+    dispatchDirectory,
+    git,
+    process.env,
+  );
+
+  expect(archived._tag).toBe("ok");
+  expect(
+    await readFile(join(dispatchDirectory, "worktree-archive", "tracked.patch"), "utf8"),
+  ).toContain("+patched");
+  expect(
+    await readFile(
+      join(dispatchDirectory, "worktree-archive", "untracked", "new-test.txt"),
+      "utf8",
+    ),
+  ).toBe("new evidence\n");
+  expect(await Bun.file(isolated.value).exists()).toBe(false);
+  const retried = await archiveAndRemoveDoctorWorktree(
+    repo,
+    isolated.value,
+    head.value,
+    dispatchDirectory,
+    git,
+    process.env,
+  );
+  expect(retried._tag).toBe("ok");
+});
+
+test("worktree archive refuses symlinks instead of copying host files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jobsradar-doctor-worktree-symlink-"));
+  temporaryDirectories.push(root);
+  const repo = join(root, "repo");
+  const dispatchDirectory = join(root, "dispatch");
+  const outside = join(root, "outside-secret");
+  await mkdir(repo);
+  await mkdir(dispatchDirectory);
+  await writeFile(outside, "must-not-copy\n");
+  const git = "/opt/homebrew/bin/git";
+  await runCommand([git, "init"], repo);
+  await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
+  await runCommand([git, "config", "user.name", "Doctor Test"], repo);
+  await writeFile(join(repo, "tracked.txt"), "committed\n");
+  await runCommand([git, "add", "tracked.txt"], repo);
+  await runCommand([git, "commit", "-m", "fixture"], repo);
+  const head = await resolveRepoHead(repo, git, process.env);
+  expect(head._tag).toBe("ok");
+  if (head._tag === "err") return;
+  const isolated = await createIsolatedDoctorWorktree(
+    repo,
+    "dispatch-symlink",
+    head.value,
+    git,
+    process.env,
+  );
+  expect(isolated._tag).toBe("ok");
+  if (isolated._tag === "err") return;
+  await symlink(outside, join(isolated.value, "host-secret"));
+
+  const archived = await archiveAndRemoveDoctorWorktree(
+    repo,
+    isolated.value,
+    head.value,
+    dispatchDirectory,
+    git,
+    process.env,
+  );
+
+  expect(archived._tag).toBe("err");
+  expect(archived._tag === "err" ? archived.error.message : "").toContain(
+    "non-regular untracked file",
+  );
+  expect(await Bun.file(join(dispatchDirectory, "worktree-archive")).exists()).toBe(false);
+  expect(await stat(isolated.value).then(() => true)).toBe(true);
 });
 
 test("git worktree creation is hard-bounded", async () => {
@@ -1047,7 +1161,7 @@ await runPendingDoctor(${JSON.stringify({
   expect(await Bun.file(`${fakeAgent}.marker`).exists()).toBe(true);
   const remainingActive = await listActiveDoctorDispatchAttempts(spoolRoot);
   expect(remainingActive._tag === "ok" ? remainingActive.value : []).toHaveLength(1);
-});
+}, 10_000);
 
 test("durable supervisor enforces timeout after its dispatcher is killed", async () => {
   const root = await mkdtemp(join(tmpdir(), "jobsradar-doctor-supervisor-timeout-"));

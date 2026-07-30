@@ -38,7 +38,7 @@ process.stdout.on("error", () => undefined);
 process.stderr.on("error", () => undefined);
 
 await rm(config.controlDirectory, { recursive: true, force: true });
-await mkdir(config.controlDirectory, { recursive: true });
+await mkdir(config.controlDirectory, { recursive: true, mode: 0o700 });
 const heartbeatPath = join(config.controlDirectory, "heartbeat.json");
 const writeHeartbeat = async (): Promise<void> => {
   const temporary = `${heartbeatPath}.${process.pid}.${randomUUID()}.tmp`;

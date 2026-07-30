@@ -32,10 +32,6 @@ def _identity_digest(*identities: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-@unittest.skipIf(
-    bool(MISSING_POSTGRES_TOOLS),
-    f"requires PostgreSQL binaries: {', '.join(MISSING_POSTGRES_TOOLS)}",
-)
 class PublicationPostgresTest(unittest.TestCase):
     root: Path
     data_directory: Path
@@ -44,6 +40,11 @@ class PublicationPostgresTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        if MISSING_POSTGRES_TOOLS:
+            raise RuntimeError(
+                "PostgreSQL integration requires binaries: "
+                + ", ".join(MISSING_POSTGRES_TOOLS)
+            )
         cls.root = Path(tempfile.mkdtemp(prefix="jobsradar-cloud-pg-", dir="/tmp"))
         cls.data_directory = cls.root / "data"
         initdb = POSTGRES_TOOLS["initdb"]
@@ -452,7 +453,33 @@ class PublicationPostgresTest(unittest.TestCase):
             """,
             tuples_only=True,
         )
-        self.assertEqual(retry_state, "1:1:1:1:0")
+        self.assertEqual(retry_state, "1:1:1:0:0")
+
+        downgrade = self._sql_failure(
+            f"""
+            SET ROLE service_role;
+            SELECT careers.persist_openings_run_only(
+                {_sql_literal(json.dumps({**good_run, "health": "failed"}))}::jsonb
+            );
+            """
+        )
+        self.assertIn("different immutable content", downgrade)
+
+        candidate_board_status = {
+            **retry_run,
+            "run_id": "run-candidate-board",
+            "health": "failed",
+            "board_status": [{"org": "openai", "eligibleOpenings": 1}],
+        }
+        rejected_board_status = self._sql_failure(
+            f"""
+            SET ROLE service_role;
+            SELECT careers.persist_openings_run_only(
+                {_sql_literal(json.dumps(candidate_board_status))}::jsonb
+            );
+            """
+        )
+        self.assertIn("board_status contains non-source fields", rejected_board_status)
 
 
 if __name__ == "__main__":

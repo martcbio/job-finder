@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { projectDoctorRawFinalOutput } from "./finalProjection";
@@ -35,13 +34,14 @@ export interface DoctorDispatchReceipt {
   readonly policyStateAfter: DoctorRuntimeState;
 }
 
-/** Durable marker proving an incident is actively being repaired. */
+/** Durable lifecycle marker updated once with the owned process identity. */
 export interface DoctorDispatchAttempt {
   readonly schemaVersion: 1;
   readonly dispatchId: string;
   readonly incidentId: string;
   readonly fingerprint: string;
   readonly startedAt: string;
+  readonly repoHead?: string | null;
   readonly worktreePath: string;
   readonly command: ReadonlyArray<string>;
   readonly eventsPath: string;
@@ -129,6 +129,11 @@ const attemptSchema: z.ZodType<DoctorDispatchAttempt> = z
     incidentId: z.string().min(1),
     fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
     startedAt: z.string().datetime(),
+    repoHead: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/i)
+      .nullable()
+      .default(null),
     worktreePath: z.string().min(1),
     command: z.array(z.string()),
     eventsPath: z.string().min(1),
@@ -215,11 +220,11 @@ export function doctorSpoolPaths(root: string): DoctorSpoolPaths {
 
 async function ensureDirectories(paths: DoctorSpoolPaths): Promise<void> {
   await Promise.all([
-    mkdir(paths.incidents, { recursive: true }),
-    mkdir(paths.dispatches, { recursive: true }),
-    mkdir(paths.launcherFailures, { recursive: true }),
-    mkdir(paths.recordLocks, { recursive: true }),
-    mkdir(paths.lockOwners, { recursive: true }),
+    mkdir(paths.incidents, { recursive: true, mode: 0o700 }),
+    mkdir(paths.dispatches, { recursive: true, mode: 0o700 }),
+    mkdir(paths.launcherFailures, { recursive: true, mode: 0o700 }),
+    mkdir(paths.recordLocks, { recursive: true, mode: 0o700 }),
+    mkdir(paths.lockOwners, { recursive: true, mode: 0o700 }),
   ]);
 }
 
@@ -317,7 +322,8 @@ export async function acquireDoctorFingerprintLock(
   fingerprint: string,
 ): Promise<Result<FingerprintLockLease, DoctorSpoolError>> {
   const canonical = join(paths.recordLocks, `${fingerprint}.lock`);
-  for (let attempt = 0; attempt < 200; attempt++) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
     const token = randomUUID();
     const ownerDirectory = join(paths.recordLocks, "owners", fingerprint, token);
     const ownerPath = join(ownerDirectory, "owner.json");
@@ -692,13 +698,13 @@ export async function createDoctorDispatchArtifacts(
   const directory = join(paths.dispatches, dispatchId);
   try {
     await ensureDirectories(paths);
-    await mkdir(directory);
+    await mkdir(directory, { mode: 0o700 });
     return ok({
       dispatchId,
       directory,
       eventsPath: join(directory, "agent-events.jsonl"),
       finalOutputPath: join(directory, "final-output.md"),
-      rawFinalOutputPath: join(tmpdir(), `jobsradar-doctor-${dispatchId}-raw-final-output.md`),
+      rawFinalOutputPath: join(directory, ".raw-final-output.md"),
       stderrPath: join(directory, "agent-stderr.log"),
       attemptPath: join(directory, "attempt.json"),
       receiptPath: join(directory, "receipt.json"),

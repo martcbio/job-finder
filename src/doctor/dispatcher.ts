@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { type AgentProcessInput, type AgentProcessReceipt, runAgentProcess } from "./agentProcess";
 import {
+  archiveAndRemoveDoctorWorktree,
   createIsolatedDoctorWorktree,
   doctorAgentEnvironment,
   resolveRepoHead,
@@ -29,6 +30,7 @@ import {
 import {
   discoverDoctorProcessIdentity,
   proveRecordedDoctorProcessGroupAbsent,
+  readDoctorSupervisorChildResult,
   terminateVerifiedDoctorProcessGroup,
 } from "./supervisorControl";
 
@@ -67,6 +69,15 @@ export interface DoctorWorktree {
     gitExecutable: string,
     environment: NodeJS.ProcessEnv,
   ): Promise<Result<string, Error>>;
+  /** Preserve all changes under the dispatch spool, then remove the worktree. */
+  archiveAndRemove?(
+    repoRoot: string,
+    worktreePath: string,
+    repoHead: string,
+    dispatchDirectory: string,
+    gitExecutable: string,
+    environment: NodeJS.ProcessEnv,
+  ): Promise<Result<void, Error>>;
 }
 
 /** Terminal outcome of a run-pending dispatcher invocation. */
@@ -115,6 +126,7 @@ const localAgent: DoctorAgent = {
 
 const localWorktree: DoctorWorktree = {
   create: createIsolatedDoctorWorktree,
+  archiveAndRemove: archiveAndRemoveDoctorWorktree,
 };
 
 function dateKey(date: Date): string {
@@ -437,6 +449,23 @@ async function reconcileAbandonedAttempts(
     const recoveredRaw = await recoverDoctorRawFinalOutput(item.attempt);
     if (recoveredRaw._tag === "err")
       return err(new DoctorDispatchError("write_receipt", recoveredRaw.error));
+    const childResult = await readDoctorSupervisorChildResult(
+      item.attempt.supervisorControlDirectory,
+    );
+    if (childResult._tag === "err")
+      return err(new DoctorDispatchError("write_receipt", childResult.error));
+    if (item.attempt.repoHead && localWorktree.archiveAndRemove) {
+      const archived = await localWorktree.archiveAndRemove(
+        config.repoRoot,
+        item.attempt.worktreePath,
+        item.attempt.repoHead,
+        dirname(item.path),
+        config.gitExecutable,
+        process.env,
+      );
+      if (archived._tag === "err")
+        return err(new DoctorDispatchError("write_receipt", archived.error));
+    }
     const receipt: DoctorDispatchReceipt = {
       schemaVersion: 1,
       dispatchId: item.attempt.dispatchId,
@@ -445,8 +474,8 @@ async function reconcileAbandonedAttempts(
       startedAt: item.attempt.startedAt,
       finishedAt: now.toISOString(),
       status: "failed",
-      exitCode: null,
-      signal: null,
+      exitCode: childResult.value?.exitCode ?? null,
+      signal: childResult.value?.signal ?? null,
       error: discovered.value
         ? "Recovered and terminated an orphaned Doctor process group"
         : "Recovered an abandoned Doctor attempt with no live owned process group",
@@ -684,14 +713,9 @@ export async function runPendingDoctor(
       runsToday: state.value.runsToday + 1,
       lastStartedAt: startedAt.toISOString(),
     };
-    ownership = await assertDoctorDispatcherLease(config, lease);
-    if (ownership._tag === "err") return ownership;
-    const persistedReservation = await writeDoctorRuntimeState(config.spoolRoot, reservedState);
-    if (persistedReservation._tag === "err")
-      return err(new DoctorDispatchError("write_state", persistedReservation.error));
     const command = codexCommand(config, artifacts.value.rawFinalOutputPath, worktree.value);
     const processToken = randomUUID();
-    const supervisorControlDirectory = join("/tmp", `jobsradar-doctor-${processToken}`);
+    const supervisorControlDirectory = join(artifacts.value.directory, "supervisor-control");
     ownership = await assertDoctorDispatcherLease(config, lease);
     if (ownership._tag === "err") return ownership;
     const persistedAttempt = await writeDoctorDispatchAttempt(
@@ -703,6 +727,7 @@ export async function runPendingDoctor(
         incidentId: next.incident.incidentId,
         fingerprint: next.incident.fingerprint,
         startedAt: startedAt.toISOString(),
+        repoHead,
         worktreePath: worktree.value,
         command,
         eventsPath: artifacts.value.eventsPath,
@@ -718,6 +743,11 @@ export async function runPendingDoctor(
     );
     if (persistedAttempt._tag === "err")
       return err(new DoctorDispatchError("write_receipt", persistedAttempt.error));
+    ownership = await assertDoctorDispatcherLease(config, lease);
+    if (ownership._tag === "err") return ownership;
+    const persistedReservation = await writeDoctorRuntimeState(config.spoolRoot, reservedState);
+    if (persistedReservation._tag === "err")
+      return err(new DoctorDispatchError("write_state", persistedReservation.error));
     ownership = await assertDoctorDispatcherLease(config, lease);
     if (ownership._tag === "err") return ownership;
     const processResult = await agent.run({
@@ -744,7 +774,7 @@ export async function runPendingDoctor(
         ),
     });
     const finishedAt = clock.now();
-    const processReceipt: AgentProcessReceipt =
+    let processReceipt: AgentProcessReceipt =
       processResult._tag === "ok"
         ? processResult.value
         : {
@@ -753,6 +783,24 @@ export async function runPendingDoctor(
             signal: null,
             error: processResult.error.message,
           };
+    if (worktreePort.archiveAndRemove) {
+      const archived = await worktreePort.archiveAndRemove(
+        config.repoRoot,
+        worktree.value,
+        repoHead,
+        artifacts.value.directory,
+        config.gitExecutable,
+        process.env,
+      );
+      if (archived._tag === "err") {
+        processReceipt = {
+          status: "failed",
+          exitCode: processReceipt.exitCode,
+          signal: processReceipt.signal,
+          error: `${processReceipt.error ? `${processReceipt.error}; ` : ""}worktree archival failed: ${archived.error.message}`,
+        };
+      }
+    }
     const receipt: DoctorDispatchReceipt = {
       schemaVersion: 1,
       dispatchId: artifacts.value.dispatchId,

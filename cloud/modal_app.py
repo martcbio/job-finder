@@ -576,7 +576,7 @@ def _publish_complete_run(
     last_error_detail = ""
     for attempt in range(1, PUBLICATION_MAX_ATTEMPTS + 1):
         publication_id = str(uuid.uuid4())
-        finalize_started = False
+        retryable = True
         try:
             _post_publication_rpc(
                 client,
@@ -598,7 +598,6 @@ def _publish_complete_run(
                         "p_openings": batch,
                     },
                 )
-            finalize_started = True
             result = _post_publication_rpc(
                 client,
                 base_url,
@@ -618,31 +617,32 @@ def _publish_complete_run(
                 error.response.status_code in {408, 425, 429}
                 or error.response.status_code >= 500
             )
-            if not retryable:
-                raise RuntimeError(
-                    f"complete publication failed: HTTP {error.response.status_code}: {body}"
-                ) from error
         except (httpx.TransportError, json.JSONDecodeError, RuntimeError) as error:
             last_error = error
             last_error_detail = f"{type(error).__name__}: {error}"
 
-        if finalize_started:
-            try:
-                verified = _verify_complete_publication(
-                    client,
-                    base_url,
-                    run_id=run_id,
-                    ids_digest=parity_digest,
-                    expected=expected,
-                )
-            except (httpx.HTTPError, json.JSONDecodeError, RuntimeError) as verify_error:
-                last_error_detail = (
-                    f"{last_error_detail}; verification failed: "
-                    f"{type(verify_error).__name__}: {verify_error}"
-                )
-            else:
-                if verified is not None:
-                    return verified
+        try:
+            verified = _verify_complete_publication(
+                client,
+                base_url,
+                run_id=run_id,
+                ids_digest=parity_digest,
+                expected=expected,
+            )
+        except (httpx.HTTPError, json.JSONDecodeError, RuntimeError) as verify_error:
+            last_error_detail = (
+                f"{last_error_detail}; verification failed: "
+                f"{type(verify_error).__name__}: {verify_error}"
+            )
+        else:
+            if verified is not None:
+                return verified
+
+        if not retryable:
+            assert last_error is not None
+            raise RuntimeError(
+                f"complete publication failed without a committed receipt: {last_error_detail}"
+            ) from last_error
 
         if attempt == PUBLICATION_MAX_ATTEMPTS:
             break
@@ -698,7 +698,7 @@ def _execute_once() -> dict[str, Any]:
     started_at = datetime.now(UTC).isoformat()
     scheduled_at = started_at
     base_url, headers = _supabase_config()
-    with httpx.Client(headers=headers, timeout=30.0) as client:
+    with httpx.Client(headers=headers, timeout=120.0) as client:
         _register_task(client, base_url)
         beacon_run_id = _start_beacon(client, base_url, started_at)
         scanner_exit_status = 1
@@ -706,6 +706,8 @@ def _execute_once() -> dict[str, Any]:
         notes: dict[str, Any] = {"scanner_exit_status": scanner_exit_status}
         caught: Exception | None = None
         targets_diagnostic: str | None = None
+        run_row: dict[str, Any] | None = None
+        opening_rows: list[dict[str, Any]] = []
 
         try:
             with tempfile.TemporaryDirectory(prefix="jobsradar-") as temp_dir:
@@ -793,20 +795,33 @@ def _execute_once() -> dict[str, Any]:
             }
             if targets_diagnostic is not None:
                 notes["targets_diagnostic"] = targets_diagnostic
-            failure_status = _fallback_status(
-                scheduled_at=scheduled_at,
-                started_at=started_at,
-                completed_at=datetime.now(UTC).isoformat(),
-                exit_status=effective_exit_status,
-                diagnostic=f"shadow wrapper failed: {type(error).__name__}",
-            )
             try:
-                failure_row, _ = shape_rows(failure_status, "")
+                if run_row is None:
+                    failure_status = _fallback_status(
+                        scheduled_at=scheduled_at,
+                        started_at=started_at,
+                        completed_at=datetime.now(UTC).isoformat(),
+                        exit_status=effective_exit_status,
+                        diagnostic=f"shadow wrapper failed: {type(error).__name__}",
+                    )
+                    failure_row, _ = shape_rows(failure_status, "")
+                else:
+                    failure_row = {
+                        **run_row,
+                        "health": "failed",
+                        "diagnostics": [
+                            *run_row["diagnostics"],
+                            f"shadow wrapper failed: {type(error).__name__}",
+                        ],
+                    }
                 _persist_run_only(client, base_url, failure_row)
-            except Exception:
+            except Exception as persist_error:
                 # The original exception remains authoritative; this best-effort write
                 # cannot succeed when PostgREST itself is the failing boundary.
-                pass
+                print(
+                    "failed to persist wrapper failure receipt: "
+                    f"{type(persist_error).__name__}: {persist_error}"
+                )
         finally:
             _finish_beacon(
                 client,

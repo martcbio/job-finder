@@ -36,7 +36,7 @@ Each eligible dispatch starts exactly one explicit command:
 
 ```text
 <absolute-codex> exec --json --sandbox workspace-write -C <isolated-worktree> \
-  --output-last-message <temporary-raw-final> -
+  --output-last-message <private-dispatch-raw-final> -
 ```
 
 No model is specified, so Codex uses its current default. There is no AI stack
@@ -52,20 +52,29 @@ authorized to start Codex. If the dispatcher dies, the supervisor still enforces
 TERM then KILL; stale-lock recovery verifies the live heartbeat before signaling
 and commits a failed receipt for the abandoned attempt.
 
+At terminal completion, tracked changes are archived as
+`worktree-archive/tracked.patch` and untracked files under
+`worktree-archive/untracked/` in the private dispatch directory. A manifest and
+the whole archive publish in one atomic directory rename, so abandoned-attempt
+recovery can retry without destroying or colliding with preserved work. Only
+after the archive succeeds does Doctor remove and prune the isolated worktree.
+An archival failure leaves the worktree intact and marks the attempt failed.
+
 Every attempt preserves:
 
 - `agent-events.jsonl`: Codex JSONL event stream, including partial output
 - `final-output.md`: final agent message when produced
 - `agent-stderr.log`: process diagnostics
-- `attempt.json`: immutable active-attempt marker
+- `attempt.json`: durable active-attempt marker, updated once with the owned PID/PGID
 - `receipt.json`: immutable command, timing, exit, artifact paths, and post-run
   policy state
 
 Incident evidence, JSONL, final output, stderr, and persisted errors are
 secret-pattern redacted. Codex receives only a minimal allowlisted environment;
 provider keys, database URLs, and unrelated process variables are not inherited.
-The raw final-output file is outside the durable spool and is removed after its
-redacted projection is written or any process/output error is handled.
+The raw final-output and supervisor control files live inside the private
+dispatch directory. The raw file is removed after its redacted projection is
+written or any process/output error is handled.
 
 The terminal receipt atomically commits both completion and the post-run policy
 transition. `runtime-state.json` is a replaceable projection reconciled from the

@@ -1,7 +1,19 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import {
+  access,
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { redactSecrets } from "./redaction";
 import { err, ok, type Result } from "./result";
 
@@ -10,7 +22,7 @@ export class DoctorGitError extends Error {
   readonly _tag = "DoctorGitError" as const;
 
   constructor(
-    readonly operation: "resolve_head" | "create_worktree" | "resolve_codex",
+    readonly operation: "resolve_head" | "create_worktree" | "cleanup_worktree" | "resolve_codex",
     override readonly cause: unknown,
   ) {
     super(
@@ -41,12 +53,23 @@ function minimalProcessEnvironment(environment: NodeJS.ProcessEnv): NodeJS.Proce
   return output;
 }
 
+function killDetachedProcessGroup(pid: number, signal: NodeJS.Signals): Error | null {
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, signal);
+    return null;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return null;
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 async function runCapture(
   executable: string,
   args: ReadonlyArray<string>,
   cwd: string,
   environment: NodeJS.ProcessEnv,
   timeoutMs = 30_000,
+  trimOutput = true,
 ): Promise<Result<string, Error>> {
   return new Promise((resolve) => {
     let settled = false;
@@ -71,13 +94,33 @@ async function runCapture(
       timedOut = true;
       if (child.pid !== undefined) {
         const pid = child.pid;
-        try {
-          process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
-        } catch {}
+        const terminateError = killDetachedProcessGroup(pid, "SIGTERM");
+        if (terminateError) {
+          finish(
+            err(
+              new Error(
+                `${executable} exceeded ${timeoutMs}ms and SIGTERM failed: ${redactSecrets(
+                  terminateError.message,
+                )}`,
+              ),
+            ),
+          );
+          return;
+        }
         setTimeout(() => {
-          try {
-            process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
-          } catch {}
+          const killError = killDetachedProcessGroup(pid, "SIGKILL");
+          if (killError) {
+            finish(
+              err(
+                new Error(
+                  `${executable} exceeded ${timeoutMs}ms and SIGKILL failed: ${redactSecrets(
+                    killError.message,
+                  )}`,
+                ),
+              ),
+            );
+            return;
+          }
           finish(err(new Error(`${executable} exceeded ${timeoutMs}ms`)));
         }, 250).unref();
         return;
@@ -89,7 +132,8 @@ async function runCapture(
     child.once("close", (code) => {
       if (timedOut) return;
       if (code === 0) {
-        finish(ok(Buffer.concat(stdout).toString("utf8").trim()));
+        const output = Buffer.concat(stdout).toString("utf8");
+        finish(ok(trimOutput ? output.trim() : output));
         return;
       }
       finish(
@@ -185,7 +229,8 @@ export async function createIsolatedDoctorWorktree(
   const worktreesRoot = join(dirname(repoRoot), ".jobsradar-doctor-worktrees");
   const worktreePath = join(worktreesRoot, dispatchId);
   try {
-    await mkdir(worktreesRoot, { recursive: true });
+    await mkdir(worktreesRoot, { recursive: true, mode: 0o700 });
+    await chmod(worktreesRoot, 0o700);
   } catch (error) {
     return err(new DoctorGitError("create_worktree", error));
   }
@@ -196,9 +241,149 @@ export async function createIsolatedDoctorWorktree(
     environment,
     timeoutMs,
   );
-  return result._tag === "err"
-    ? err(new DoctorGitError("create_worktree", result.error))
-    : ok(worktreePath);
+  if (result._tag === "err") return err(new DoctorGitError("create_worktree", result.error));
+  try {
+    await chmod(worktreePath, 0o700);
+    return ok(worktreePath);
+  } catch (error) {
+    await runCapture(
+      gitExecutable,
+      ["worktree", "remove", "--force", worktreePath],
+      repoRoot,
+      environment,
+    );
+    await runCapture(gitExecutable, ["worktree", "prune"], repoRoot, environment);
+    return err(new DoctorGitError("create_worktree", error));
+  }
+}
+
+/** Archive every worktree change into the dispatch spool, then remove and prune it. */
+export async function archiveAndRemoveDoctorWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  repoHead: string,
+  dispatchDirectory: string,
+  gitExecutable: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<Result<void, DoctorGitError>> {
+  const archiveDirectory = join(dispatchDirectory, "worktree-archive");
+  const expectedManifest = {
+    schemaVersion: 1,
+    repoHead,
+    worktreePath: resolve(worktreePath),
+  } as const;
+  const archiveIsComplete = async (): Promise<boolean> => {
+    try {
+      const value: unknown = JSON.parse(
+        await readFile(join(archiveDirectory, "manifest.json"), "utf8"),
+      );
+      return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        "schemaVersion" in value &&
+        value.schemaVersion === expectedManifest.schemaVersion &&
+        "repoHead" in value &&
+        value.repoHead === expectedManifest.repoHead &&
+        "worktreePath" in value &&
+        value.worktreePath === expectedManifest.worktreePath
+      );
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+      throw error;
+    }
+  };
+  try {
+    if (!(await archiveIsComplete())) {
+      const stagingDirectory = `${archiveDirectory}.staging-${randomUUID()}`;
+      try {
+        await mkdir(stagingDirectory, { mode: 0o700 });
+        const tracked = await runCapture(
+          gitExecutable,
+          ["diff", "--binary", repoHead],
+          worktreePath,
+          environment,
+          30_000,
+          false,
+        );
+        if (tracked._tag === "err") throw tracked.error;
+        await writeFile(join(stagingDirectory, "tracked.patch"), tracked.value, {
+          flag: "wx",
+          mode: 0o600,
+        });
+
+        const untracked = await runCapture(
+          gitExecutable,
+          ["ls-files", "--others", "--exclude-standard", "-z"],
+          worktreePath,
+          environment,
+          30_000,
+          false,
+        );
+        if (untracked._tag === "err") throw untracked.error;
+        const worktreeRoot = resolve(worktreePath);
+        for (const relativePath of untracked.value.split("\u0000").filter(Boolean)) {
+          const source = resolve(worktreeRoot, relativePath);
+          if (!source.startsWith(`${worktreeRoot}/`)) {
+            throw new Error(`Git returned an unsafe untracked path: ${relativePath}`);
+          }
+          const metadata = await lstat(source);
+          if (!metadata.isFile()) {
+            throw new Error(`Refusing to archive a non-regular untracked file: ${relativePath}`);
+          }
+          const destination = join(stagingDirectory, "untracked", relativePath);
+          await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+          await copyFile(source, destination, constants.COPYFILE_EXCL);
+        }
+        await writeFile(
+          join(stagingDirectory, "manifest.json"),
+          `${JSON.stringify(expectedManifest)}\n`,
+          { flag: "wx", mode: 0o600 },
+        );
+        try {
+          await rename(stagingDirectory, archiveDirectory);
+        } catch (error) {
+          if (
+            !(error instanceof Error && "code" in error && error.code === "EEXIST") ||
+            !(await archiveIsComplete())
+          ) {
+            throw error;
+          }
+          await rm(stagingDirectory, { recursive: true, force: true });
+        }
+        if (!(await archiveIsComplete())) {
+          throw new Error("Published worktree archive did not verify");
+        }
+      } catch (error) {
+        await rm(stagingDirectory, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      }
+    }
+
+    const worktreeExists = await stat(worktreePath)
+      .then(() => true)
+      .catch((error) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+        throw error;
+      });
+    if (worktreeExists) {
+      const removed = await runCapture(
+        gitExecutable,
+        ["worktree", "remove", "--force", worktreePath],
+        repoRoot,
+        environment,
+      );
+      if (removed._tag === "err") {
+        return err(new DoctorGitError("cleanup_worktree", removed.error));
+      }
+    }
+    const pruned = await runCapture(gitExecutable, ["worktree", "prune"], repoRoot, environment);
+    return pruned._tag === "err"
+      ? err(new DoctorGitError("cleanup_worktree", pruned.error))
+      : ok(undefined);
+  } catch (error) {
+    return err(new DoctorGitError("cleanup_worktree", error));
+  }
 }
 
 /** Minimal environment passed to the local Codex child. */

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { appendFile, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { projectDoctorRawFinalOutput } from "./finalProjection";
 import { redactSecrets } from "./redaction";
 import { err, ok, type Result } from "./result";
@@ -58,6 +58,23 @@ function outputExists(path: string): Promise<boolean> {
     .catch(() => false);
 }
 
+async function atomicallyReplacePrivateFile(path: string, contents: string): Promise<void> {
+  const temporary = join(dirname(path), `.${randomUUID()}-${process.pid}-events.tmp`);
+  try {
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(contents);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
 function killProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void {
   if (pid === undefined) return;
   try {
@@ -68,8 +85,13 @@ function killProcessGroup(pid: number | undefined, signal: NodeJS.Signals): void
 }
 
 function terminateProcessGroup(pid: number | undefined, graceMs: number): Promise<void> {
-  killProcessGroup(pid, "SIGTERM");
   return new Promise((resolve, reject) => {
+    try {
+      killProcessGroup(pid, "SIGTERM");
+    } catch (error) {
+      reject(error);
+      return;
+    }
     setTimeout(() => {
       try {
         // The leader may already have exited while descendants still own the group.
@@ -95,10 +117,18 @@ export async function runAgentProcess(
   const stderrChunks: Buffer[] = [];
   let stdoutBytes = 0;
   let stderrBytes = 0;
+  let pendingEventText = "";
+  let eventWrite = Promise.resolve();
   const terminationGraceMs = input.terminationGraceMs ?? 5_000;
   const processToken = input.processToken ?? randomUUID();
   const supervisorControlDirectory =
-    input.supervisorControlDirectory ?? join("/tmp", `jobsradar-doctor-${processToken}`);
+    input.supervisorControlDirectory ?? join(dirname(input.eventsPath), "supervisor-control");
+
+  try {
+    await writeFile(input.eventsPath, "", { flag: "wx", mode: 0o600 });
+  } catch (error) {
+    return err(new AgentProcessError("open_artifacts", error));
+  }
 
   const outcome = await new Promise<Result<AgentProcessReceipt, AgentProcessError>>((resolve) => {
     let timedOut = false;
@@ -167,7 +197,12 @@ export async function runAgentProcess(
     const timeout = setTimeout(
       () => {
         timedOut = true;
-        void beginTermination().catch(() => undefined);
+        void beginTermination().catch((terminationError) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          resolve(err(new AgentProcessError("observe", terminationError)));
+        });
       },
       input.timeoutMs + terminationGraceMs + 1_000,
     );
@@ -192,8 +227,20 @@ export async function runAgentProcess(
     child.stdout?.on("data", (chunk: Buffer) => {
       const remaining = 10_000_000 - stdoutBytes;
       if (remaining <= 0) return;
-      stdoutChunks.push(chunk.subarray(0, remaining));
-      stdoutBytes += Math.min(chunk.length, remaining);
+      const accepted = chunk.subarray(0, remaining);
+      stdoutChunks.push(accepted);
+      stdoutBytes += accepted.length;
+      const combined = pendingEventText + accepted.toString("utf8");
+      const lastNewline = combined.lastIndexOf("\n");
+      if (lastNewline < 0) {
+        pendingEventText = combined;
+        return;
+      }
+      const completeLines = combined.slice(0, lastNewline + 1);
+      pendingEventText = combined.slice(lastNewline + 1);
+      eventWrite = eventWrite.then(() =>
+        appendFile(input.eventsPath, redactSecrets(completeLines), { encoding: "utf8" }),
+      );
     });
     child.once("close", (exitCode, signal) => {
       clearTimeout(timeout);
@@ -211,10 +258,12 @@ export async function runAgentProcess(
           const safeEvents = `${redactSecrets(rawEvents)}${
             stdoutBytes >= 10_000_000 ? '\n{"type":"doctor_output_truncated"}\n' : ""
           }`;
-          await Promise.all([
-            writeFile(input.stderrPath, safeStderr, { flag: "wx" }),
-            writeFile(input.eventsPath, safeEvents, { flag: "wx" }),
-          ]);
+          await eventWrite;
+          const streamedEvents = await readFile(input.eventsPath, "utf8");
+          if (streamedEvents !== safeEvents) {
+            await atomicallyReplacePrivateFile(input.eventsPath, safeEvents);
+          }
+          await writeFile(input.stderrPath, safeStderr, { flag: "wx", mode: 0o600 });
           if (promptWriteFailed) {
             resolve(
               err(
@@ -275,7 +324,6 @@ export async function runAgentProcess(
       writeFile(input.stderrPath, redactSecrets(outcome.error.message), { flag: "wx" }).catch(
         () => undefined,
       ),
-      writeFile(input.eventsPath, "", { flag: "wx" }).catch(() => undefined),
     ]);
     const projection = await projectDoctorRawFinalOutput(
       input.rawFinalOutputPath,

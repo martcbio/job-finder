@@ -64,8 +64,9 @@ if [[ "${TARGET}" == "fast-refresh" || "${TARGET}" == "all" ]]; then
     "com.mcb.jobsradar.fast-refresh" \
     "com.mcb.job-finder.fast-refresh"
 fi
-if [[ "${TARGET}" == "doctor" || "${TARGET}" == "all" ]]; then
+if [[ "${TARGET}" == "doctor" ]]; then
   mkdir -p "${ROOT}/logs/doctor"
+  chmod 700 "${ROOT}/logs/doctor"
   install_agent \
     "Doctor" \
     "${ROOT}/launchd/com.mcb.jobsradar.doctor.plist.template" \

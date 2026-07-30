@@ -175,7 +175,7 @@ describe("deterministic ingest ledger", () => {
     ).toMatchObject({ _tag: "err", error: { code: "INVALID_INPUT" } });
   });
 
-  test("canonicalizes exponent-boundary numbers as plain decimals", () => {
+  test("canonicalizes exponent-boundary decimals and rejects unsafe integers", () => {
     const run = unwrap(
       createIngestRun({
         producer: "numeric-boundary-fixture",
@@ -183,17 +183,16 @@ describe("deterministic ingest ledger", () => {
           {
             sourceId: "fixture",
             scopeKey: "numeric-boundaries",
-            request: { large: 1e21, small: 1e-7, negativeZero: -0 },
+            request: { small: 1e-7, negativeZero: -0 },
           },
         ],
       }),
     );
     const canonicalScopeIdentity =
-      '{"contractVersion":1,"request":{"large":1000000000000000000000,"negativeZero":0,"small":0.0000001},"scopeKey":"numeric-boundaries","sourceId":"fixture"}';
+      '{"contractVersion":1,"request":{"negativeZero":0,"small":0.0000001},"scopeKey":"numeric-boundaries","sourceId":"fixture"}';
     const expectedScopeHash = createHash("sha256").update(canonicalScopeIdentity).digest("hex");
 
     expect(run.scopes[0]?.request).toEqual({
-      large: 1e21,
       negativeZero: -0,
       small: 1e-7,
     });
@@ -212,6 +211,18 @@ describe("deterministic ingest ledger", () => {
         }),
       ).toMatchObject({ _tag: "err", error: { code: "INVALID_JSON" } });
     }
+    expect(
+      createIngestRun({
+        producer: "numeric-boundary-fixture",
+        scopes: [
+          {
+            sourceId: "fixture",
+            scopeKey: "unsafe-integer",
+            request: { nested: [Number.MAX_SAFE_INTEGER + 1] },
+          },
+        ],
+      }),
+    ).toMatchObject({ _tag: "err", error: { code: "INVALID_JSON" } });
   });
 
   test("persists a zero-result scope as a complete source row and commits it", () => {

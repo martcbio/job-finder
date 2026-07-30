@@ -21,9 +21,10 @@ The append path is:
 2. Create or reuse each scope by `(run_id, scope_hash)`.
 3. Append immutable raw observations by `(scope_id, observation_hash)`.
 4. While its producing scope is `pending` or `running`, create or reuse
-   immutable normalized versions by `version_hash`; the TypeScript constructor
-   returns both the version and a new run aggregate that records its hash.
-5. Append observation-to-version provenance edges.
+   immutable normalized versions by `version_hash`; register each reused version
+   to the current run in `ingest_run_listing_versions`.
+5. Append observation-to-version provenance edges. The database also registers
+   a cross-run reused version to the observation's run before accepting the edge.
 6. Complete every scope with its exact persisted observation count.
 7. Mark the run `ready`.
 8. Call `job_search.commit_ingest_run(...)` to insert the manifest and transition
@@ -65,7 +66,7 @@ pending -> running -> complete
 
 A run can become ready only when every declared scope row exists, every scope is
 complete, and every observation has at least one normalized-version provenance
-edge. Every listing version produced by one of the run's scopes must also be
+edge. Every listing version registered to the run must also be
 referenced by provenance from an observation in that run, so it appears in the
 manifest. Child inserts and all mutations lock the parent run; they are rejected
 once it is no longer `collecting`. Terminal rows cannot be changed or deleted.
@@ -88,7 +89,8 @@ Canonical JSON:
 - recursively sorts object keys by UTF-8 bytes;
 - preserves array order;
 - renders finite numbers as plain normalized decimals, including exponent
-  boundaries and negative zero;
+  boundaries and negative zero, and rejects unsafe integer values that JavaScript
+  may already have rounded; large identifiers must be strings;
 - admits PostgreSQL JSON numbers only when they recursively round-trip exactly
   through TypeScript's finite IEEE-754 number domain, rejecting overflow,
   underflow, and extra database-only decimal precision; the database conversion
@@ -110,8 +112,11 @@ The identities are:
   version hashes, and deduplicated provenance edges.
 
 Replaying the same data therefore resolves to the same hashes and unique keys.
-Duplicate observations, versions, and edges collapse by hash. Different raw or
-normalized content creates a new immutable version rather than updating history.
+The TypeScript aggregate collapses duplicate observations, versions, and edges.
+The eventual persistence adapter must select an exact existing row or use a
+conflict-safe insert before a scope becomes terminal; raw duplicate `INSERT`
+statements intentionally raise unique-key errors. Different raw or normalized
+content creates a new immutable version rather than updating history.
 
 ## Atomic and idempotent commit
 
@@ -125,6 +130,8 @@ privately branded ledger records through authoritative constructors; the
 database remains the final cryptographic authority at persistence. TypeScript
 commit callers supply provenance edges, not an optional version list: the run
 aggregate's registered version hashes are the authoritative completeness set.
+PostgreSQL derives the same set from `ingest_run_listing_versions`, rather than
+guessing it from version origin or provenance edges.
 
 Calling it again with the identical manifest returns the existing manifest id.
 Calling it again with different content is rejected. Replaying the exact

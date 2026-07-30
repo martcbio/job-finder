@@ -803,7 +803,9 @@ function parseJsonValue(
   if (
     value === null ||
     typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
+    (typeof value === "number" &&
+      Number.isFinite(value) &&
+      (!Number.isInteger(value) || Number.isSafeInteger(value)))
   ) {
     return ok(value);
   }
@@ -819,7 +821,14 @@ function parseJsonValue(
     return ok(value);
   }
   if (typeof value === "number") {
-    return err(makeError("INVALID_JSON", `${path} contains a non-finite number`));
+    return err(
+      makeError(
+        "INVALID_JSON",
+        Number.isFinite(value)
+          ? `${path} contains an unsafe integer; encode large identifiers as strings`
+          : `${path} contains a non-finite number`,
+      ),
+    );
   }
   if (typeof value !== "object") {
     return err(makeError("INVALID_JSON", `${path} contains unsupported ${typeof value}`));

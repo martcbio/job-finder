@@ -8,8 +8,12 @@ CREATE TABLE IF NOT EXISTS careers.openings_publication_stage (
     run_row jsonb NOT NULL CHECK (jsonb_typeof(run_row) = 'object'),
     parity_row jsonb NOT NULL CHECK (jsonb_typeof(parity_row) = 'object'),
     expected_openings integer NOT NULL CHECK (expected_openings >= 0),
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE careers.openings_publication_stage
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 CREATE TABLE IF NOT EXISTS careers.openings_publication_rows_stage (
     publication_id uuid NOT NULL
@@ -22,20 +26,31 @@ CREATE TABLE IF NOT EXISTS careers.openings_publication_rows_stage (
     PRIMARY KEY (publication_id, org, ats, external_id)
 );
 
+CREATE TABLE IF NOT EXISTS careers.openings_publication_receipts (
+    run_id text PRIMARY KEY,
+    publication_id uuid NOT NULL,
+    ids_sha256 text NOT NULL,
+    expected_openings integer NOT NULL CHECK (expected_openings >= 0),
+    completed_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS openings_publication_stage_created_at_idx
     ON careers.openings_publication_stage (created_at);
 
 ALTER TABLE careers.openings_publication_stage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE careers.openings_publication_rows_stage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE careers.openings_publication_receipts ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON TABLE
     careers.openings_publication_stage,
-    careers.openings_publication_rows_stage
+    careers.openings_publication_rows_stage,
+    careers.openings_publication_receipts
 FROM PUBLIC, anon, authenticated;
 
 GRANT ALL ON TABLE
     careers.openings_publication_stage,
-    careers.openings_publication_rows_stage
+    careers.openings_publication_rows_stage,
+    careers.openings_publication_receipts
 TO service_role;
 
 CREATE OR REPLACE FUNCTION careers.assert_openings_run_valid(
@@ -77,6 +92,25 @@ BEGIN
     IF jsonb_typeof(p_run->'board_status') <> 'array'
        OR jsonb_typeof(p_run->'diagnostics') <> 'array' THEN
         RAISE EXCEPTION 'run board_status and diagnostics must be arrays';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(p_run->'board_status') AS board(value)
+        WHERE jsonb_typeof(board.value) <> 'object'
+           OR EXISTS (
+               SELECT 1
+               FROM jsonb_object_keys(board.value) AS field(key)
+               WHERE field.key NOT IN (
+                   'org',
+                   'company',
+                   'ats',
+                   'status',
+                   'totalOpenings',
+                   'error'
+               )
+           )
+    ) THEN
+        RAISE EXCEPTION 'run board_status contains non-source fields';
     END IF;
 
     BEGIN
@@ -145,23 +179,25 @@ BEGIN
         p_run->'diagnostics',
         p_run->>'substrate'
     )
-    ON CONFLICT (run_id) DO UPDATE SET
-        run_date = EXCLUDED.run_date,
-        scheduled_at = EXCLUDED.scheduled_at,
-        started_at = EXCLUDED.started_at,
-        completed_at = EXCLUDED.completed_at,
-        health = EXCLUDED.health,
-        matched_openings_count = EXCLUDED.matched_openings_count,
-        raw_openings_count = EXCLUDED.raw_openings_count,
-        eligible_openings_count = EXCLUDED.eligible_openings_count,
-        suitable_openings_count = EXCLUDED.suitable_openings_count,
-        unsuitable_location_openings_count =
-            EXCLUDED.unsuitable_location_openings_count,
-        unsuitable_role_openings_count = EXCLUDED.unsuitable_role_openings_count,
-        undecided_openings_count = EXCLUDED.undecided_openings_count,
-        board_status = EXCLUDED.board_status,
-        diagnostics = EXCLUDED.diagnostics,
-        substrate = EXCLUDED.substrate;
+    ON CONFLICT (run_id) DO NOTHING;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM careers.openings_runs AS existing
+        WHERE existing.run_id = p_run->>'run_id'
+          AND existing.run_date = (p_run->>'run_date')::date
+          AND existing.scheduled_at = (p_run->>'scheduled_at')::timestamptz
+          AND existing.started_at = (p_run->>'started_at')::timestamptz
+          AND existing.completed_at = (p_run->>'completed_at')::timestamptz
+          AND existing.health = p_run->>'health'
+          AND existing.raw_openings_count = (p_run->>'raw_openings_count')::integer
+          AND existing.board_status = p_run->'board_status'
+          AND existing.diagnostics = p_run->'diagnostics'
+          AND existing.substrate = p_run->>'substrate'
+    ) THEN
+        RAISE EXCEPTION 'run_id already exists with different immutable content: %',
+            p_run->>'run_id';
+    END IF;
 
     RETURN jsonb_build_object(
         'run_id', p_run->>'run_id',
@@ -195,6 +231,8 @@ BEGIN
         RAISE EXCEPTION 'parity must be a JSON object';
     END IF;
 
+    PERFORM pg_advisory_xact_lock(hashtextextended(p_run->>'run_id', 0));
+
     expected_count := (p_run->>'raw_openings_count')::integer;
     IF p_parity->>'run_id' IS DISTINCT FROM p_run->>'run_id'
        OR p_parity->>'run_date' IS DISTINCT FROM p_run->>'run_date'
@@ -206,7 +244,11 @@ BEGIN
     END IF;
 
     DELETE FROM careers.openings_publication_stage
-    WHERE created_at < now() - interval '24 hours';
+    WHERE updated_at < now() - interval '24 hours';
+
+    DELETE FROM careers.openings_publication_stage
+    WHERE run_id = p_run->>'run_id'
+      AND publication_id <> p_publication_id;
 
     INSERT INTO careers.openings_publication_stage (
         publication_id,
@@ -227,7 +269,7 @@ BEGIN
         run_row = EXCLUDED.run_row,
         parity_row = EXCLUDED.parity_row,
         expected_openings = EXCLUDED.expected_openings,
-        created_at = now();
+        updated_at = now();
 
     DELETE FROM careers.openings_publication_rows_stage
     WHERE publication_id = p_publication_id;
@@ -332,6 +374,10 @@ BEGIN
         RAISE EXCEPTION 'staged opening count % exceeds expected count %',
             staged_count, expected_count;
     END IF;
+
+    UPDATE careers.openings_publication_stage
+    SET updated_at = now()
+    WHERE publication_id = p_publication_id;
 
     RETURN jsonb_build_object(
         'publication_id', p_publication_id,
@@ -444,23 +490,25 @@ BEGIN
         staged.run_row->'diagnostics',
         staged.run_row->>'substrate'
     )
-    ON CONFLICT (run_id) DO UPDATE SET
-        run_date = EXCLUDED.run_date,
-        scheduled_at = EXCLUDED.scheduled_at,
-        started_at = EXCLUDED.started_at,
-        completed_at = EXCLUDED.completed_at,
-        health = EXCLUDED.health,
-        matched_openings_count = EXCLUDED.matched_openings_count,
-        raw_openings_count = EXCLUDED.raw_openings_count,
-        eligible_openings_count = EXCLUDED.eligible_openings_count,
-        suitable_openings_count = EXCLUDED.suitable_openings_count,
-        unsuitable_location_openings_count =
-            EXCLUDED.unsuitable_location_openings_count,
-        unsuitable_role_openings_count = EXCLUDED.unsuitable_role_openings_count,
-        undecided_openings_count = EXCLUDED.undecided_openings_count,
-        board_status = EXCLUDED.board_status,
-        diagnostics = EXCLUDED.diagnostics,
-        substrate = EXCLUDED.substrate;
+    ON CONFLICT (run_id) DO NOTHING;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM careers.openings_runs AS existing
+        WHERE existing.run_id = staged.run_row->>'run_id'
+          AND existing.run_date = (staged.run_row->>'run_date')::date
+          AND existing.scheduled_at = (staged.run_row->>'scheduled_at')::timestamptz
+          AND existing.started_at = (staged.run_row->>'started_at')::timestamptz
+          AND existing.completed_at = (staged.run_row->>'completed_at')::timestamptz
+          AND existing.health = 'complete'
+          AND existing.raw_openings_count = staged.expected_openings
+          AND existing.board_status = staged.run_row->'board_status'
+          AND existing.diagnostics = staged.run_row->'diagnostics'
+          AND existing.substrate = staged.run_row->>'substrate'
+    ) THEN
+        RAISE EXCEPTION 'run_id already exists with different immutable content: %',
+            staged.run_id;
+    END IF;
 
     INSERT INTO careers.openings (
         org,
@@ -565,6 +613,38 @@ BEGIN
         ids_sha256 = EXCLUDED.ids_sha256,
         targets_sha256 = EXCLUDED.targets_sha256;
 
+    INSERT INTO careers.openings_publication_receipts (
+        run_id,
+        publication_id,
+        ids_sha256,
+        expected_openings
+    )
+    VALUES (
+        staged.run_id,
+        p_publication_id,
+        computed_ids_sha256,
+        staged_count
+    )
+    ON CONFLICT (run_id) DO UPDATE SET
+        publication_id = EXCLUDED.publication_id,
+        ids_sha256 = EXCLUDED.ids_sha256,
+        expected_openings = EXCLUDED.expected_openings,
+        completed_at = now()
+    WHERE careers.openings_publication_receipts.ids_sha256 = EXCLUDED.ids_sha256
+      AND careers.openings_publication_receipts.expected_openings =
+          EXCLUDED.expected_openings;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM careers.openings_publication_receipts AS receipt
+        WHERE receipt.run_id = staged.run_id
+          AND receipt.ids_sha256 = computed_ids_sha256
+          AND receipt.expected_openings = staged_count
+    ) THEN
+        RAISE EXCEPTION 'run_id already has a conflicting publication receipt: %',
+            staged.run_id;
+    END IF;
+
     DELETE FROM careers.openings_publication_stage
     WHERE publication_id = p_publication_id;
 
@@ -595,17 +675,21 @@ BEGIN
         RAISE EXCEPTION 'run_id and ids_sha256 are required';
     END IF;
 
-    SELECT run_row.raw_openings_count
+    SELECT receipt.expected_openings
     INTO verified_count
     FROM careers.openings_runs AS run_row
     INNER JOIN careers.parity_runs AS parity_row
         ON parity_row.run_date = run_row.run_date
        AND parity_row.substrate = run_row.substrate
        AND parity_row.run_id = run_row.run_id
+    INNER JOIN careers.openings_publication_receipts AS receipt
+        ON receipt.run_id = run_row.run_id
     WHERE run_row.run_id = p_run_id
       AND run_row.health = 'complete'
       AND parity_row.openings_count = run_row.raw_openings_count
-      AND parity_row.ids_sha256 = p_ids_sha256;
+      AND parity_row.ids_sha256 = p_ids_sha256
+      AND receipt.ids_sha256 = p_ids_sha256
+      AND receipt.expected_openings = run_row.raw_openings_count;
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('published', false);

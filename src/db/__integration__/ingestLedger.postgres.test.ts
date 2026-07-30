@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -64,9 +64,8 @@ function unwrap<T>(result: { _tag: "ok"; value: T } | { _tag: "err"; error: unkn
   return result.value;
 }
 
-test.skipIf(Object.values(postgresTools).some((tool) => tool === null))(
-  "migration 016 enforces ledger state, immutability, provenance, and atomic commit guards",
-  async () => {
+describe("required PostgreSQL integration", () => {
+  test("migration 016 enforces ledger state, immutability, provenance, and atomic commit guards", async () => {
     const root = await mkdtemp(join(tmpdir(), "jobsradar-ledger-postgres-"));
     const dataDirectory = join(root, "data");
     const initdb = postgresTools.initdb;
@@ -142,6 +141,7 @@ TO ledger_runtime;
 GRANT INSERT ON
   job_search.ingest_observations,
   job_search.ingest_listing_versions,
+  job_search.ingest_run_listing_versions,
   job_search.ingest_observation_versions
 TO ledger_runtime;
 GRANT EXECUTE ON FUNCTION job_search.commit_ingest_run(bigint, text, jsonb, text)
@@ -241,7 +241,7 @@ SELECT
   || ':'
   || job_search.json_numbers_fit_typescript('1e400'::jsonb)::text;
 `),
-      ).toBe("true:false:false:false");
+      ).toBe("false:false:false:false");
       expect(
         await queryRuntimeScalar(`
 WITH hostile AS MATERIALIZED (
@@ -1607,6 +1607,5 @@ FROM scope_plan;
       }
       await rm(root, { recursive: true, force: true });
     }
-  },
-  120_000,
-);
+  }, 120_000);
+});

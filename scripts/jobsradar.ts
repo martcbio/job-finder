@@ -233,7 +233,9 @@ async function handleTerminalClassification(classification: DoctorClassification
     console.error(
       `jobsradar doctor dispatch failed: ${dispatched.error.message}${artifact}; recover with bun run jobsradar:doctor -- run-pending`,
     );
-    process.exitCode = 1;
+    if (process.exitCode === undefined || process.exitCode === 0) {
+      process.exitCode = 1;
+    }
   }
 }
 

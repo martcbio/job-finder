@@ -1,9 +1,9 @@
 const SECRET_ASSIGNMENT =
-  /(\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|authorization)\b["']?\s*[:=]\s*)(["']?)[^\s"',;}]+/gi;
+  /(\b(?:[a-z0-9]+[_-])*(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|secret|password|authorization|database[_-]?url)\b["']?\s*[:=]\s*)(["']?)[^\s"',;}]+/gi;
 const BEARER = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const KNOWN_TOKEN = /\b(?:sk-(?:proj-)?|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{8,}\b/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
-const URL_CREDENTIALS = /(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi;
+const URL_CREDENTIALS = /((?:https?|postgres(?:ql)?):\/\/)[^/\s:@]+:[^/\s@]+@/gi;
 
 /**
  * Remove common secret-shaped material before it reaches prompts or durable artifacts.

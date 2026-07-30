@@ -515,6 +515,52 @@ class OpeningPersistenceTest(unittest.TestCase):
         self.assertEqual(finalize_attempts, 2)
         self.assertEqual(result["persisted_openings"], 1)
 
+    def test_prior_ambiguous_finalize_is_verified_after_later_begin_failure(self) -> None:
+        begin_attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal begin_attempts
+            if request.url.path.endswith("/begin_openings_publication"):
+                begin_attempts += 1
+                if begin_attempts == 2:
+                    return httpx.Response(500, text="later begin failed")
+            if request.url.path.endswith("/finalize_openings_publication"):
+                raise httpx.ReadTimeout("lost committed response", request=request)
+            if request.url.path.endswith("/verify_openings_publication"):
+                if begin_attempts == 1:
+                    return httpx.Response(200, json={"published": False})
+                return httpx.Response(
+                    200,
+                    json={
+                        "published": True,
+                        "run_id": "run-1",
+                        "health": "complete",
+                        "expected_openings": 1,
+                        "persisted_openings": 1,
+                        "parity_openings_count": 1,
+                    },
+                )
+            return httpx.Response(200, json={"ok": True})
+
+        with (
+            httpx.Client(transport=httpx.MockTransport(handler)) as client,
+            patch("modal_app.time.sleep"),
+        ):
+            result = _publish_complete_run(
+                client,
+                "https://example.test",
+                {"run_id": "run-1", "health": "complete", "raw_openings_count": 1},
+                [{"external_id": "job-1"}],
+                {
+                    "run_id": "run-1",
+                    "openings_count": 1,
+                    "ids_sha256": "fixture-digest",
+                },
+            )
+
+        self.assertEqual(begin_attempts, 2)
+        self.assertTrue(result["published"])
+
     def test_rejects_count_mismatch_before_publication(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.fail(f"unexpected request: {request.url}")

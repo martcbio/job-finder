@@ -54,7 +54,7 @@ function parseArgs(argv: string[]): CliOptions {
 export function exitCodeForRecordStatus(
   status: "complete" | "degraded" | "failed" | "locked",
 ): 0 | 1 {
-  return status === "complete" || status === "degraded" ? 0 : 1;
+  return status === "complete" ? 0 : 1;
 }
 
 function renderInspection(

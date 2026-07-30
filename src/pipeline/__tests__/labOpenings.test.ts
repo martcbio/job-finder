@@ -549,9 +549,9 @@ describe("lab openings freshness", () => {
     expect(first.completedAt).toBe(second.completedAt);
   });
 
-  test("maps all-miss and lock results to a nonzero CLI exit", () => {
+  test("maps every non-complete result to a nonzero CLI exit", () => {
     expect(exitCodeForRecordStatus("complete")).toBe(0);
-    expect(exitCodeForRecordStatus("degraded")).toBe(0);
+    expect(exitCodeForRecordStatus("degraded")).toBe(1);
     expect(exitCodeForRecordStatus("failed")).toBe(1);
     expect(exitCodeForRecordStatus("locked")).toBe(1);
   });

@@ -479,6 +479,12 @@ def _apply_targets_diagnostic(
     return updated
 
 
+def _effective_exit_status(scanner_exit_status: int, health: str) -> int:
+    if scanner_exit_status != 0:
+        return scanner_exit_status
+    return 0 if health == "complete" else 1
+
+
 def _upsert_scan_rows(
     client: httpx.Client,
     base_url: str,
@@ -492,7 +498,7 @@ def _upsert_scan_rows(
         json=run_row,
     )
     _expect_one(run_response, "careers openings run upsert")
-    if not opening_rows:
+    if run_row.get("health") != "complete" or not opening_rows:
         return
     batches = [
         opening_rows[index : index + OPENINGS_UPSERT_BATCH_SIZE]
@@ -657,10 +663,8 @@ def _execute_once() -> dict[str, Any]:
                         runtime_targets,
                     )
                     parity_status = "persisted"
-                effective_exit_status = (
-                    scanner_exit_status
-                    if scanner_exit_status != 0
-                    else 1 if run_row["health"] == "failed" else 0
+                effective_exit_status = _effective_exit_status(
+                    scanner_exit_status, run_row["health"]
                 )
                 notes = {
                     "scanner_exit_status": scanner_exit_status,
@@ -669,7 +673,9 @@ def _execute_once() -> dict[str, Any]:
                     "raw_openings_count": run_row["raw_openings_count"],
                     "eligible_openings_count": run_row["eligible_openings_count"],
                     "suitable_openings_count": run_row["suitable_openings_count"],
-                    "persisted_openings": len(opening_rows),
+                    "persisted_openings": (
+                        len(opening_rows) if run_row["health"] == "complete" else 0
+                    ),
                     "parity_status": parity_status,
                 }
                 if targets_diagnostic is not None:

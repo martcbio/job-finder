@@ -13,6 +13,7 @@ import httpx
 from modal_app import (
     PARITY_CONFLICT_COLUMNS,
     _apply_targets_diagnostic,
+    _effective_exit_status,
     _upsert_scan_rows,
     _write_runtime_targets,
     ids_sha256,
@@ -193,6 +194,32 @@ class RuntimeTargetsTest(unittest.TestCase):
 
 
 class OpeningPersistenceTest(unittest.TestCase):
+    def test_degraded_health_is_never_operational_success(self) -> None:
+        self.assertEqual(_effective_exit_status(0, "complete"), 0)
+        self.assertEqual(_effective_exit_status(0, "degraded"), 1)
+        self.assertEqual(_effective_exit_status(0, "failed"), 1)
+        self.assertEqual(_effective_exit_status(124, "complete"), 124)
+
+    def test_degraded_run_persists_health_but_not_openings(self) -> None:
+        opening_requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal opening_requests
+            if request.url.path.endswith("/openings_runs"):
+                return httpx.Response(201, json=[{"run_id": "run-degraded"}])
+            opening_requests += 1
+            return httpx.Response(201)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            _upsert_scan_rows(
+                client,
+                "https://example.test",
+                {"run_id": "run-degraded", "health": "degraded"},
+                [{"external_id": "job-1"}],
+            )
+
+        self.assertEqual(opening_requests, 0)
+
     def test_batches_openings_and_retries_transient_server_errors(self) -> None:
         opening_attempts: list[list[dict[str, object]]] = []
 
@@ -210,7 +237,12 @@ class OpeningPersistenceTest(unittest.TestCase):
             httpx.Client(transport=httpx.MockTransport(handler)) as client,
             patch("modal_app.time.sleep") as sleep,
         ):
-            _upsert_scan_rows(client, "https://example.test", {"run_id": "run-1"}, rows)
+            _upsert_scan_rows(
+                client,
+                "https://example.test",
+                {"run_id": "run-1", "health": "complete"},
+                rows,
+            )
 
         self.assertEqual([len(batch) for batch in opening_attempts], [200, 200, 200, 50])
         sleep.assert_called_once()
@@ -232,7 +264,7 @@ class OpeningPersistenceTest(unittest.TestCase):
             _upsert_scan_rows(
                 client,
                 "https://example.test",
-                {"run_id": "run-1"},
+                {"run_id": "run-1", "health": "complete"},
                 [{"external_id": "job-1"}],
             )
 

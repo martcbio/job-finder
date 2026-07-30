@@ -5,6 +5,7 @@ import {
   rankJobServeContract,
 } from "../jobserveContracts";
 import type { SourceAdapter } from "../sourceAdapterContract";
+import { registeredJobSource } from "../sourceRegistry";
 import type {
   FastRefreshCosts,
   FastRefreshJobRow,
@@ -207,7 +208,7 @@ function rankingForJob(
       softened: ranked.whySoftened,
     };
   }
-  if (row.source_id === "linear-careers" || row.source_id === "google-careers") {
+  if (registeredJobSource(row.source_id ?? "")?.kind === "direct_employer") {
     return {
       tier: null,
       score: 72,
@@ -267,28 +268,13 @@ export function sourceAdapterFor(
   url: string,
 ): SourceAdapter {
   const id = sourceId ?? sourceIdFromUrl(url);
-  if (id === "linear-careers") {
+  const registered = registeredJobSource(id);
+  if (registered) {
     return {
-      id,
-      label: sourceLabel ?? "Linear Careers",
-      kind: "direct_employer",
-      quality: "high",
-    };
-  }
-  if (id === "google-careers") {
-    return {
-      id,
-      label: sourceLabel ?? "Google Careers",
-      kind: "direct_employer",
-      quality: "high",
-    };
-  }
-  if (id === "jobserve") {
-    return {
-      id,
-      label: sourceLabel ?? "JobServe",
-      kind: "recruiter",
-      quality: "medium",
+      id: registered.id,
+      label: sourceLabel ?? registered.label,
+      kind: registered.kind,
+      quality: registered.quality,
     };
   }
   if (["greenhouse", "lever", "ashby", "workable", "smartrecruiters"].includes(id)) {

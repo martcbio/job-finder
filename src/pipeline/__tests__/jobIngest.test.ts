@@ -34,9 +34,9 @@ describe("jobsradar raw ingestion boundary", () => {
   test("defaults to every configured source, including bounded JobServe", () => {
     expect(normalizeJobIngestOptions().sourceIds).toEqual([
       "lab-ats",
+      "jobserve",
       "linear-careers",
       "google-careers",
-      "jobserve",
     ]);
   });
 

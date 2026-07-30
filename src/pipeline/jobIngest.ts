@@ -5,9 +5,7 @@ import { DEFAULT_FAST_REFRESH_OPTIONS } from "./fastRefresh/types";
 import { normalizeSourceId } from "./fastRefresh/utils";
 import { resolveLabOpeningsPaths } from "./labOpenings";
 import { runLabRawIngest } from "./labRawIngest";
-
-const ALLOWED_SOURCE_IDS = new Set(["lab-ats", "jobserve", "linear-careers", "google-careers"]);
-const DEFAULT_SOURCE_IDS = ["lab-ats", "linear-careers", "google-careers", "jobserve"];
+import { DEFAULT_JOB_INGEST_SOURCE_IDS, JOB_INGEST_SOURCE_IDS } from "./sourceRegistry";
 
 export interface JobIngestOptions
   extends Pick<
@@ -52,10 +50,10 @@ interface JobIngestDependencies {
 }
 
 export function normalizeJobIngestOptions(input: JobIngestOptionsInput = {}): JobIngestOptions {
-  const requested = input.sourceIds?.length ? input.sourceIds : DEFAULT_SOURCE_IDS;
+  const requested = input.sourceIds?.length ? input.sourceIds : DEFAULT_JOB_INGEST_SOURCE_IDS;
   const sourceIds = [...new Set(requested.map(normalizeSourceId))];
   for (const sourceId of sourceIds) {
-    if (!ALLOWED_SOURCE_IDS.has(sourceId)) throw new Error(`Unknown ingest source: ${sourceId}`);
+    if (!JOB_INGEST_SOURCE_IDS.has(sourceId)) throw new Error(`Unknown ingest source: ${sourceId}`);
   }
   const options: JobIngestOptions = {
     sourceIds,

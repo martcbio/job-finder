@@ -7,6 +7,7 @@ import {
   classifyJobText,
 } from "../jobClassification";
 import { rankJobServeContracts } from "../jobserveContracts";
+import { DIRECT_EMPLOYER_FAST_REFRESH_SOURCE_IDS } from "../sourceRegistry";
 import { buildFastRefreshSourceAdapters, ingestSourceAdapter } from "./adapters";
 import { buildLatestJobRowsSql } from "./queries";
 import {
@@ -95,7 +96,7 @@ export async function runFastRefresh(
     limit: options.limit,
   });
   const directSourceIds = options.sourceIds.filter((sourceId) =>
-    ["linear-careers", "google-careers"].includes(sourceId),
+    DIRECT_EMPLOYER_FAST_REFRESH_SOURCE_IDS.has(sourceId),
   );
   const directRows =
     runIds.length > 0 && directSourceIds.length > 0

@@ -1,4 +1,5 @@
 import type { SourceAdapter, SourceAttemptStatus, SourceOutcome } from "../sourceAdapterContract";
+import { DEFAULT_FAST_REFRESH_SOURCE_IDS } from "../sourceRegistry";
 
 export {
   type FastRefreshSourceAdapter,
@@ -198,7 +199,7 @@ const DEFAULT_JOBSERVE_QUERIES = ["AI engineer", "agentic AI", "LLM engineer"];
 
 export const DEFAULT_FAST_REFRESH_OPTIONS: FastRefreshOptions = {
   limit: 20,
-  sourceIds: ["jobserve", "linear-careers", "google-careers"],
+  sourceIds: DEFAULT_FAST_REFRESH_SOURCE_IDS,
   jobserveQueries: DEFAULT_JOBSERVE_QUERIES,
   jobserveMaxPages: 2,
   jobserveImportLimitPerQuery: 5,

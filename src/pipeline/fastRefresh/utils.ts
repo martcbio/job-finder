@@ -1,4 +1,5 @@
 import type { SourceOutcome } from "../sourceAdapterContract";
+import { normalizeRegisteredSourceId } from "../sourceRegistry";
 
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -38,9 +39,7 @@ export function formatCost(value: number | null): string {
 }
 
 export function normalizeSourceId(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/_/g, "-");
-  if (normalized === "linear") return "linear-careers";
-  return normalized;
+  return normalizeRegisteredSourceId(value);
 }
 
 export function hostname(url: string): string {

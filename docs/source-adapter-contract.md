@@ -77,9 +77,14 @@ inside `raw` without leaking into API consumers.
 
 1. Implement a small adapter that returns `SourceDiscoveryResult`.
 2. Run `assertSourceDiscoveryResultContract` in a deterministic fixture test.
-3. Add the adapter to `buildFastRefreshSourceAdapters`.
+3. Add one entry to `REGISTERED_JOB_SOURCES` in
+   `src/pipeline/sourceRegistry.ts`, referencing the adapter factory.
 4. Add or update `/api/sources` tests if it should be available for source-scoped refresh.
 5. Do not change `JobSummary`, `/api/jobs/latest`, `/api/jobs/:id/full-text`, or UI code unless the shared API contract itself is intentionally changing.
 
 The fixture test in `src/pipeline/__tests__/sourceAdapterContract.test.ts`
 demonstrates the minimum shape expected from a new source.
+
+The registry is the single source of truth for ingest allowlists, default source
+sets, adapter construction, source metadata, queue lane membership, and API
+source exposure. Do not add source-id lists elsewhere.

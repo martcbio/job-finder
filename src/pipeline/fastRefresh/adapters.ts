@@ -1,5 +1,3 @@
-import { fetchGoogleCareersJobs, fetchLinearCareersJobs } from "../directSources";
-import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "../jobserveLive";
 import { ingestNormalizedJobs } from "../normalizedJobIngest";
 import {
   describeSourceAdapter,
@@ -9,7 +7,7 @@ import {
   type SourceOutcome,
   sourceAttemptStatus,
 } from "../sourceAdapterContract";
-import { sourceAdapterFor } from "./summaries";
+import { buildRegisteredSourceAdapters } from "../sourceRegistry";
 import type { FastRefreshOptions, FastRefreshSourceSummary } from "./types";
 import { DEFAULT_FAST_REFRESH_OPTIONS as DEFAULT_OPTIONS, ZERO_COSTS as ZERO } from "./types";
 import { errorMessage, normalizeSourceId, outcomeFromError } from "./utils";
@@ -17,16 +15,8 @@ import { errorMessage, normalizeSourceId, outcomeFromError } from "./utils";
 export function buildFastRefreshSourceAdapters(
   options: Pick<FastRefreshOptions, "sourceIds" | "jobserveQueries" | "jobserveMaxPages">,
 ): FastRefreshSourceAdapter[] {
-  const sourceIds = new Set(options.sourceIds.map(normalizeSourceId));
-  return [
-    ...(sourceIds.has("jobserve")
-      ? options.jobserveQueries.map((query) =>
-          jobServeSourceAdapter(query, options.jobserveMaxPages),
-        )
-      : []),
-    ...(sourceIds.has("linear-careers") ? [linearCareersSourceAdapter()] : []),
-    ...(sourceIds.has("google-careers") ? [googleCareersSourceAdapter()] : []),
-  ];
+  const sourceIds = [...new Set(options.sourceIds.map(normalizeSourceId))];
+  return buildRegisteredSourceAdapters(sourceIds, options);
 }
 
 export function listFastRefreshSources(
@@ -114,90 +104,6 @@ export async function ingestSourceAdapter(
       blockedReason: errorMessage(err),
     });
   }
-}
-
-function jobServeSourceAdapter(query: string, maxPages: number): FastRefreshSourceAdapter {
-  return {
-    ...sourceAdapterFor("jobserve", "JobServe", ""),
-    defaultKeyword: query,
-    async discover(input) {
-      const result = await fetchLiveJobServeRoles({
-        query,
-        maxPages,
-        timeoutMs: input.timeoutMs,
-        detailLimit: input.limit,
-      });
-      const jobs = result.roles
-        .slice(0, input.limit)
-        .map((role) => jobServeRoleToNormalizedJob(role, query));
-      return {
-        source: sourceAdapterFor("jobserve", "JobServe", ""),
-        keyword: query,
-        outcome: result.blockedReason
-          ? "blocked_robots_or_waf"
-          : jobs.length > 0
-            ? "success"
-            : "zero_results",
-        discovered: result.roles.length + result.excludedRoles.length,
-        excluded: result.excludedRoles.length,
-        jobs,
-        pagesFetched: result.pagesFetched,
-        costs: ZERO,
-        errors: result.errors,
-        blockedReason: result.blockedReason,
-      };
-    },
-  };
-}
-
-function linearCareersSourceAdapter(): FastRefreshSourceAdapter {
-  return {
-    ...sourceAdapterFor("linear-careers", "Linear Careers", ""),
-    defaultKeyword: "linear-careers",
-    async discover(input) {
-      const result = await fetchLinearCareersJobs({
-        limit: input.limit,
-        timeoutMs: input.timeoutMs,
-      });
-      return {
-        source: sourceAdapterFor(result.sourceId, result.sourceLabel, ""),
-        keyword: "linear-careers",
-        outcome: result.jobs.length > 0 ? "success" : "zero_results",
-        discovered: result.discovered,
-        excluded: 0,
-        jobs: result.jobs,
-        pagesFetched: null,
-        costs: ZERO,
-        errors: [],
-        blockedReason: null,
-      };
-    },
-  };
-}
-
-function googleCareersSourceAdapter(): FastRefreshSourceAdapter {
-  return {
-    ...sourceAdapterFor("google-careers", "Google Careers", ""),
-    defaultKeyword: "google-careers",
-    async discover(input) {
-      const result = await fetchGoogleCareersJobs({
-        limit: input.limit,
-        timeoutMs: input.timeoutMs,
-      });
-      return {
-        source: sourceAdapterFor(result.sourceId, result.sourceLabel, ""),
-        keyword: "google-careers",
-        outcome: result.jobs.length > 0 ? "success" : "zero_results",
-        discovered: result.discovered,
-        excluded: Math.max(0, result.discovered - result.jobs.length),
-        jobs: result.jobs,
-        pagesFetched: result.jobs.length + 1,
-        costs: ZERO,
-        errors: [],
-        blockedReason: null,
-      };
-    },
-  };
 }
 
 function sourceSummary(input: {

@@ -1,12 +1,14 @@
+import {
+  FAST_REFRESH_SOURCE_IDS,
+  LANE_IMPORT_SOURCE_IDS,
+  normalizeRegisteredSourceId,
+} from "../sourceRegistry";
 import { JOB_SOURCE_SITES, resolveJobSourceSites } from "../sourceSites";
 
-export const FAST_REFRESH_SOURCE_IDS = new Set(["jobserve", "linear-careers", "google-careers"]);
-
-/** Normalized imports (snapshot file) rather than live search. */
-export const LANE_IMPORT_SOURCE_IDS = new Set(["jobspy"]);
+export { FAST_REFRESH_SOURCE_IDS, LANE_IMPORT_SOURCE_IDS } from "../sourceRegistry";
 
 export function normalizeQueueRefreshSourceId(value: string): string {
-  return value.trim().toLowerCase().replace(/_/g, "-");
+  return normalizeRegisteredSourceId(value);
 }
 
 let cachedIds: Set<string> | null = null;

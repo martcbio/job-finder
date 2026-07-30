@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,10 +31,18 @@ REPO_ROOT = Path("/opt/jobsradar")
 TARGETS_PATH = REPO_ROOT / "cloud" / "targets.json"
 SCAN_TIMEOUT_SECONDS = 1_650
 PARITY_CONFLICT_COLUMNS = "run_date,substrate,run_id"
-OPENINGS_UPSERT_BATCH_SIZE = 200
-OPENINGS_UPSERT_MAX_ATTEMPTS = 3
-OPENINGS_UPSERT_RETRY_SECONDS = 1.0
+PUBLICATION_BATCH_SIZE = 200
+PUBLICATION_MAX_ATTEMPTS = 3
+PUBLICATION_RETRY_SECONDS = 1.0
 TARGETS_FALLBACK_PREFIX = "careers.targets fallback:"
+BOARD_STATUS_SOURCE_FIELDS = (
+    "org",
+    "company",
+    "ats",
+    "status",
+    "totalOpenings",
+    "error",
+)
 
 
 def _ignore_repo_path(path: Path) -> bool:
@@ -93,25 +102,6 @@ def _non_negative_integer(value: dict[str, Any], key: str) -> int:
     return item
 
 
-def _decision(
-    opening: dict[str, Any],
-    key: str,
-    allowed_statuses: set[str],
-) -> tuple[str, list[str]]:
-    value = opening.get(key)
-    if not isinstance(value, dict):
-        raise ValueError(f"opening {key} must be an object")
-    status = value.get("status")
-    reason_codes = value.get("reasonCodes")
-    if status not in allowed_statuses:
-        raise ValueError(f"opening {key}.status is unsupported")
-    if not isinstance(reason_codes, list) or not all(
-        isinstance(item, str) for item in reason_codes
-    ):
-        raise ValueError(f"opening {key}.reasonCodes must be an array of strings")
-    return status, reason_codes
-
-
 def _parse_jsonl(content: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(content.splitlines(), 1):
@@ -159,6 +149,23 @@ def targets_sha256(targets: dict[str, Any]) -> str:
     return hashlib.sha256("\n".join(triples).encode("utf-8")).hexdigest()
 
 
+def _neutral_board_status(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ValueError("runs must be an array")
+    neutral: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"runs item {index} must be an object")
+        neutral.append(
+            {
+                key: item[key]
+                for key in BOARD_STATUS_SOURCE_FIELDS
+                if key in item
+            }
+        )
+    return neutral
+
+
 def shape_rows(
     status: dict[str, Any],
     jsonl_content: str,
@@ -171,21 +178,9 @@ def shape_rows(
     health = _required_string(status, "health")
     if health not in {"complete", "degraded", "failed"}:
         raise ValueError(f"unsupported scanner health: {health}")
-    matched_count = _non_negative_integer(status, "openings")
     raw_count = _non_negative_integer(status, "rawOpenings")
-    eligible_count = _non_negative_integer(status, "eligibleOpenings")
-    suitable_count = _non_negative_integer(status, "suitableOpenings")
-    unsuitable_location_count = _non_negative_integer(status, "unsuitableLocationOpenings")
-    unsuitable_role_count = _non_negative_integer(status, "unsuitableRoleOpenings")
-    undecided_count = _non_negative_integer(status, "undecidedOpenings")
-    if matched_count != suitable_count:
-        raise ValueError("openings must equal suitableOpenings")
-    if suitable_count + unsuitable_location_count + unsuitable_role_count + undecided_count != raw_count:
-        raise ValueError("opening decision counts must account for rawOpenings")
-    board_status = status.get("runs")
+    board_status = _neutral_board_status(status.get("runs"))
     diagnostics = status.get("diagnostics")
-    if not isinstance(board_status, list):
-        raise ValueError("runs must be an array")
     if not isinstance(diagnostics, list) or not all(isinstance(item, str) for item in diagnostics):
         raise ValueError("diagnostics must be an array of strings")
 
@@ -196,13 +191,7 @@ def shape_rows(
         "started_at": _required_string(status, "startedAt"),
         "completed_at": completed_at,
         "health": health,
-        "matched_openings_count": matched_count,
         "raw_openings_count": raw_count,
-        "eligible_openings_count": eligible_count,
-        "suitable_openings_count": suitable_count,
-        "unsuitable_location_openings_count": unsuitable_location_count,
-        "unsuitable_role_openings_count": unsuitable_role_count,
-        "undecided_openings_count": undecided_count,
         "board_status": board_status,
         "diagnostics": diagnostics,
         "substrate": substrate,
@@ -215,20 +204,6 @@ def shape_rows(
             raise ValueError("opening locations must be an array of strings")
         title = _optional_string(opening, "title")
         posted_at = _optional_string(opening, "postedAt")
-        location_eligibility, location_reason_codes = _decision(
-            opening, "locationEligibility", {"eligible", "ineligible", "undecided"}
-        )
-        role_relevance, role_reason_codes = _decision(
-            opening, "roleRelevance", {"relevant", "irrelevant", "undecided"}
-        )
-        disposition = _required_string(opening, "disposition")
-        if disposition not in {
-            "suitable",
-            "unsuitable_location",
-            "unsuitable_role",
-            "undecided",
-        }:
-            raise ValueError("opening disposition is unsupported")
         opening_rows.append(
             {
                 "org": _required_string(opening, "org"),
@@ -240,11 +215,6 @@ def shape_rows(
                 "locations": locations,
                 "url": _required_string(opening, "url"),
                 "posted_at": posted_at,
-                "location_eligibility": location_eligibility,
-                "location_reason_codes": location_reason_codes,
-                "role_relevance": role_relevance,
-                "role_reason_codes": role_reason_codes,
-                "disposition": disposition,
                 "raw": opening.get("raw"),
                 "first_seen_run_id": run_id,
                 "first_seen_at": completed_at,
@@ -291,13 +261,7 @@ def _fallback_status(
         "startedAt": started_at,
         "completedAt": completed_at,
         "health": "failed",
-        "openings": 0,
         "rawOpenings": 0,
-        "eligibleOpenings": 0,
-        "suitableOpenings": 0,
-        "unsuitableLocationOpenings": 0,
-        "unsuitableRoleOpenings": 0,
-        "undecidedOpenings": 0,
         "runs": [],
         "diagnostics": [diagnostic, f"scanner exit status: {exit_status}"],
     }
@@ -404,18 +368,6 @@ def _finish_beacon(
     _expect_one(response, "control-plane run finish")
 
 
-def _career_headers(*, representation: bool) -> dict[str, str]:
-    return {
-        "Accept-Profile": "careers",
-        "Content-Profile": "careers",
-        "Prefer": (
-            "resolution=merge-duplicates,return=representation"
-            if representation
-            else "resolution=merge-duplicates,return=minimal"
-        ),
-    }
-
-
 def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path) -> str | None:
     try:
         baked_targets = json.loads(TARGETS_PATH.read_text(encoding="utf-8"))
@@ -485,86 +437,226 @@ def _effective_exit_status(scanner_exit_status: int, health: str) -> int:
     return 0 if health == "complete" else 1
 
 
-def _upsert_scan_rows(
+def _rpc_result(response: httpx.Response, operation: str) -> dict[str, Any]:
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, dict):
+        return data
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        return data[0]
+    raise RuntimeError(f"{operation} did not return one result object")
+
+
+def _post_publication_rpc(
+    client: httpx.Client,
+    base_url: str,
+    function_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    response = client.post(
+        f"{base_url}/rest/v1/rpc/{function_name}",
+        headers={
+            "Accept-Profile": "careers",
+            "Content-Profile": "careers",
+        },
+        json=payload,
+    )
+    return _rpc_result(response, f"careers {function_name}")
+
+
+def _parity_row(
+    status: dict[str, Any],
+    jsonl_content: str,
+    targets: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "run_date": _required_string(status, "date"),
+        "substrate": SUBSTRATE,
+        "run_id": _required_string(status, "runId"),
+        "openings_count": len(_parse_jsonl(jsonl_content)),
+        "ids_sha256": ids_sha256(jsonl_content),
+        "targets_sha256": targets_sha256(targets),
+    }
+
+
+def _persist_run_only(
+    client: httpx.Client,
+    base_url: str,
+    run_row: dict[str, Any],
+) -> dict[str, Any]:
+    if run_row.get("health") not in {"degraded", "failed"}:
+        raise ValueError("run-only publication requires degraded or failed health")
+    result = _post_publication_rpc(
+        client,
+        base_url,
+        "persist_openings_run_only",
+        {"p_run": run_row},
+    )
+    if result.get("run_id") != run_row.get("run_id"):
+        raise RuntimeError("run-only publication returned the wrong run_id")
+    if result.get("health") != run_row.get("health"):
+        raise RuntimeError("run-only publication returned the wrong health")
+    if result.get("persisted_openings") != 0 or result.get("parity_openings_count") is not None:
+        raise RuntimeError("run-only publication unexpectedly reported openings or parity")
+    return result
+
+
+def _validate_complete_receipt(
+    result: dict[str, Any],
+    *,
+    run_id: Any,
+    expected: int,
+) -> dict[str, Any]:
+    if result.get("run_id") != run_id:
+        raise RuntimeError("complete publication returned the wrong run_id")
+    if result.get("health") != "complete":
+        raise RuntimeError("complete publication did not return complete health")
+    for key in ("expected_openings", "persisted_openings", "parity_openings_count"):
+        if result.get(key) != expected:
+            raise RuntimeError(
+                f"complete publication returned invalid {key}: {result.get(key)!r}"
+            )
+    return result
+
+
+def _verify_complete_publication(
+    client: httpx.Client,
+    base_url: str,
+    *,
+    run_id: str,
+    ids_digest: str,
+    expected: int,
+) -> dict[str, Any] | None:
+    result = _post_publication_rpc(
+        client,
+        base_url,
+        "verify_openings_publication",
+        {
+            "p_run_id": run_id,
+            "p_ids_sha256": ids_digest,
+        },
+    )
+    if result.get("published") is not True:
+        return None
+    return _validate_complete_receipt(result, run_id=run_id, expected=expected)
+
+
+def _publish_complete_run(
     client: httpx.Client,
     base_url: str,
     run_row: dict[str, Any],
     opening_rows: list[dict[str, Any]],
-) -> None:
-    run_response = client.post(
-        f"{base_url}/rest/v1/openings_runs",
-        params={"on_conflict": "run_id"},
-        headers=_career_headers(representation=True),
-        json=run_row,
-    )
-    _expect_one(run_response, "careers openings run upsert")
-    if run_row.get("health") != "complete" or not opening_rows:
-        return
+    parity_row: dict[str, Any],
+) -> dict[str, Any]:
+    if run_row.get("health") != "complete":
+        raise ValueError("complete publication requires complete health")
+    expected = run_row.get("raw_openings_count")
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        raise ValueError("complete publication requires a non-negative raw opening count")
+    if len(opening_rows) != expected:
+        raise ValueError(
+            f"complete publication expected {expected} openings but received {len(opening_rows)}"
+        )
+    if parity_row.get("openings_count") != expected:
+        raise ValueError("parity opening count must equal the complete run raw opening count")
+    if parity_row.get("run_id") != run_row.get("run_id"):
+        raise ValueError("parity run_id must equal the complete run_id")
+    parity_digest = parity_row.get("ids_sha256")
+    if not isinstance(parity_digest, str) or not parity_digest:
+        raise ValueError("parity ids_sha256 must be a non-empty string")
+    run_id = run_row.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("complete publication requires a non-empty run_id")
+
     batches = [
-        opening_rows[index : index + OPENINGS_UPSERT_BATCH_SIZE]
-        for index in range(0, len(opening_rows), OPENINGS_UPSERT_BATCH_SIZE)
+        opening_rows[index : index + PUBLICATION_BATCH_SIZE]
+        for index in range(0, len(opening_rows), PUBLICATION_BATCH_SIZE)
     ]
-    for batch_index, batch in enumerate(batches, 1):
-        for attempt in range(1, OPENINGS_UPSERT_MAX_ATTEMPTS + 1):
-            try:
-                response = client.post(
-                    f"{base_url}/rest/v1/openings",
-                    params={"on_conflict": "org,ats,external_id"},
-                    headers=_career_headers(representation=False),
-                    json=batch,
-                )
-            except httpx.TransportError as error:
-                if attempt == OPENINGS_UPSERT_MAX_ATTEMPTS:
-                    raise RuntimeError(
-                        f"opening batch {batch_index}/{len(batches)} failed after "
-                        f"{attempt} attempts: {type(error).__name__}: {error}"
-                    ) from error
-                print(
-                    f"opening batch {batch_index}/{len(batches)} transport failure; "
-                    f"retrying attempt {attempt + 1}/{OPENINGS_UPSERT_MAX_ATTEMPTS}"
-                )
-                time.sleep(OPENINGS_UPSERT_RETRY_SECONDS * attempt)
-                continue
-
-            if response.is_success:
-                break
-
-            response_body = response.text.strip().replace("\n", " ")[:1_000]
-            retryable = response.status_code == 429 or response.status_code >= 500
-            if not retryable or attempt == OPENINGS_UPSERT_MAX_ATTEMPTS:
-                raise RuntimeError(
-                    f"opening batch {batch_index}/{len(batches)} failed after "
-                    f"{attempt} attempts: HTTP {response.status_code}: {response_body}"
-                )
-            print(
-                f"opening batch {batch_index}/{len(batches)} returned HTTP "
-                f"{response.status_code}; retrying attempt "
-                f"{attempt + 1}/{OPENINGS_UPSERT_MAX_ATTEMPTS}: {response_body}"
+    last_error: Exception | None = None
+    last_error_detail = ""
+    for attempt in range(1, PUBLICATION_MAX_ATTEMPTS + 1):
+        publication_id = str(uuid.uuid4())
+        finalize_started = False
+        try:
+            _post_publication_rpc(
+                client,
+                base_url,
+                "begin_openings_publication",
+                {
+                    "p_publication_id": publication_id,
+                    "p_run": run_row,
+                    "p_parity": parity_row,
+                },
             )
-            time.sleep(OPENINGS_UPSERT_RETRY_SECONDS * attempt)
+            for batch in batches:
+                _post_publication_rpc(
+                    client,
+                    base_url,
+                    "stage_openings_publication",
+                    {
+                        "p_publication_id": publication_id,
+                        "p_openings": batch,
+                    },
+                )
+            finalize_started = True
+            result = _post_publication_rpc(
+                client,
+                base_url,
+                "finalize_openings_publication",
+                {"p_publication_id": publication_id},
+            )
+            return _validate_complete_receipt(
+                result,
+                run_id=run_id,
+                expected=expected,
+            )
+        except httpx.HTTPStatusError as error:
+            last_error = error
+            body = error.response.text.strip().replace("\n", " ")[:1_000]
+            last_error_detail = f"HTTP {error.response.status_code}: {body}"
+            retryable = (
+                error.response.status_code in {408, 425, 429}
+                or error.response.status_code >= 500
+            )
+            if not retryable:
+                raise RuntimeError(
+                    f"complete publication failed: HTTP {error.response.status_code}: {body}"
+                ) from error
+        except (httpx.TransportError, json.JSONDecodeError, RuntimeError) as error:
+            last_error = error
+            last_error_detail = f"{type(error).__name__}: {error}"
 
+        if finalize_started:
+            try:
+                verified = _verify_complete_publication(
+                    client,
+                    base_url,
+                    run_id=run_id,
+                    ids_digest=parity_digest,
+                    expected=expected,
+                )
+            except (httpx.HTTPError, json.JSONDecodeError, RuntimeError) as verify_error:
+                last_error_detail = (
+                    f"{last_error_detail}; verification failed: "
+                    f"{type(verify_error).__name__}: {verify_error}"
+                )
+            else:
+                if verified is not None:
+                    return verified
 
-def _upsert_parity_run(
-    client: httpx.Client,
-    base_url: str,
-    status: dict[str, Any],
-    jsonl_content: str,
-    targets: dict[str, Any],
-) -> None:
-    response = client.post(
-        f"{base_url}/rest/v1/parity_runs",
-        params={"on_conflict": PARITY_CONFLICT_COLUMNS},
-        headers=_career_headers(representation=True),
-        json={
-            "run_date": _required_string(status, "date"),
-            "substrate": SUBSTRATE,
-            "run_id": _required_string(status, "runId"),
-            "openings_count": len(_parse_jsonl(jsonl_content)),
-            "ids_sha256": ids_sha256(jsonl_content),
-            "targets_sha256": targets_sha256(targets),
-        },
-    )
-    _expect_one(response, "careers parity run upsert")
+        if attempt == PUBLICATION_MAX_ATTEMPTS:
+            break
+        print(
+            f"complete publication attempt {attempt}/{PUBLICATION_MAX_ATTEMPTS} failed; "
+            "retrying the whole staged publication"
+        )
+        time.sleep(PUBLICATION_RETRY_SECONDS * attempt)
+
+    assert last_error is not None
+    raise RuntimeError(
+        f"complete publication failed after {PUBLICATION_MAX_ATTEMPTS} whole attempts: "
+        f"{last_error_detail}"
+    ) from last_error
 
 
 def _run_scanner(
@@ -647,7 +739,15 @@ def _execute_once() -> dict[str, Any]:
 
                 run_row, opening_rows = shape_rows(status, jsonl_content)
                 run_row = _apply_targets_diagnostic(run_row, targets_diagnostic)
-                _upsert_scan_rows(client, base_url, run_row, opening_rows)
+                if scanner_exit_status != 0 and run_row["health"] == "complete":
+                    run_row = {
+                        **run_row,
+                        "health": "failed",
+                        "diagnostics": [
+                            *run_row["diagnostics"],
+                            f"scanner exited nonzero: {scanner_exit_status}",
+                        ],
+                    }
                 parity_status = "skipped_degraded"
                 if run_row["health"] == "complete" and scanner_exit_status == 0:
                     runtime_targets = json.loads(
@@ -655,24 +755,28 @@ def _execute_once() -> dict[str, Any]:
                     )
                     if not isinstance(runtime_targets, dict):
                         raise ValueError("runtime targets must contain an object")
-                    _upsert_parity_run(
-                        client,
-                        base_url,
+                    parity_row = _parity_row(
                         status,
                         jsonl_content,
                         runtime_targets,
                     )
-                    parity_status = "persisted"
+                    _publish_complete_run(
+                        client,
+                        base_url,
+                        run_row,
+                        opening_rows,
+                        parity_row,
+                    )
+                    parity_status = "published_atomically"
+                else:
+                    _persist_run_only(client, base_url, run_row)
                 effective_exit_status = _effective_exit_status(
                     scanner_exit_status, run_row["health"]
                 )
                 notes = {
                     "scanner_exit_status": scanner_exit_status,
                     "health": run_row["health"],
-                    "matched_openings_count": run_row["matched_openings_count"],
                     "raw_openings_count": run_row["raw_openings_count"],
-                    "eligible_openings_count": run_row["eligible_openings_count"],
-                    "suitable_openings_count": run_row["suitable_openings_count"],
                     "persisted_openings": (
                         len(opening_rows) if run_row["health"] == "complete" else 0
                     ),
@@ -698,7 +802,7 @@ def _execute_once() -> dict[str, Any]:
             )
             try:
                 failure_row, _ = shape_rows(failure_status, "")
-                _upsert_scan_rows(client, base_url, failure_row, [])
+                _persist_run_only(client, base_url, failure_row)
             except Exception:
                 # The original exception remains authoritative; this best-effort write
                 # cannot succeed when PostgREST itself is the failing boundary.
@@ -719,10 +823,7 @@ def _execute_once() -> dict[str, Any]:
         summary = {
             "run_id": run_row["run_id"],
             "health": run_row["health"],
-            "matched_openings_count": run_row["matched_openings_count"],
             "raw_openings_count": run_row["raw_openings_count"],
-            "eligible_openings_count": run_row["eligible_openings_count"],
-            "suitable_openings_count": run_row["suitable_openings_count"],
             "persisted_openings": len(opening_rows),
             "scanner_exit_status": scanner_exit_status,
         }

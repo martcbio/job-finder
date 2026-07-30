@@ -14,9 +14,37 @@ Run these from the repository root, in order:
 cd /Users/mcb/Claudelocal/careers/jobsradar
 supabase db query --linked -f cloud/schema.sql
 supabase db query --linked -f cloud/schema_additions.sql
+supabase db query --linked -f cloud/schema_publication.sql
 ```
 
 In the linked Supabase project's **Settings → API → Exposed schemas**, add `careers` if it is not already present. Do not add an anonymous policy. No Storage bucket is used.
+
+`schema_publication.sql` must be applied last because its finalizer writes all
+three tables created by the first two files. Its RPCs are executable only by
+`service_role`; do not expose them to `anon` or `authenticated`.
+
+Complete runs are published atomically. Modal creates an isolated publication
+ID, stages openings through service-role RPC calls capped at 200 rows (so a
+realistic full ATS corpus is not one oversized HTTP/PostgREST payload), then
+finalizes the run row, every opening, and parity row in one database
+transaction. Readers see all three or none. A transient failure retries the
+whole publication with a fresh ID; target upserts make a lost-response retry
+idempotent. After an ambiguous finalize timeout or malformed response, Modal
+checks the committed run and parity digest before retrying, so a successful
+commit is not reported as a failure. Degraded and failed runs use the run-only
+RPC and never publish openings or parity.
+
+Modal publication is Radar-neutral. It ignores the scanner's candidate-specific
+eligibility, relevance, reason-code, disposition, and derived-count fields.
+Per-board status retains only source acquisition fields (`org`, `company`, `ats`,
+`status`, `totalOpenings`, and `error`), and the staging RPC rebuilds every
+opening from a strict source-field whitelist. The final transaction recomputes
+the identity digest from staged `org:ats:external_id` values using the byte-order
+and LF contract above and rejects a caller-supplied mismatch.
+Legacy database columns remain only for compatibility: each opening is stored
+as `undecided` with empty reason arrays, candidate judgment counts are zero, and
+`undecided_openings_count` equals the preserved raw opening count. Candidate
+judgment belongs in JobsDigest, not capture.
 
 ```sh
 modal deploy cloud/modal_app.py
@@ -26,12 +54,12 @@ modal run cloud/modal_app.py::run_once
 Gate 0 passes only when `run_once` exits zero and prints a final JSON summary shaped like:
 
 ```json
-{"eligible_openings_count":50,"health":"complete","matched_openings_count":12,"persisted_openings":723,"raw_openings_count":723,"run_id":"...","scanner_exit_status":0,"suitable_openings_count":12}
+{"health":"complete","persisted_openings":723,"raw_openings_count":723,"run_id":"...","scanner_exit_status":0}
 ```
 
 `health` may honestly be `degraded`, but `failed`, a nonzero scanner exit, an artifact error, a PostgREST error, or a missing final summary fails the gate. This run is the datacenter-egress check for Ashby, Greenhouse, and Lever before trusting the cron.
 
-After parity passes, `opps update` downloads the latest complete Modal candidate
+After parity passes, `opps update` downloads the latest complete Modal source
 set through the local API, validates its count and full ATS bodies, and writes an
 atomic local projection. It visibly falls back to the Mac scanner on any
 failure; it never moves authenticated or session-bound acquisition to Modal.
@@ -41,12 +69,12 @@ failure; it never moves authenticated or session-bound acquisition to Modal.
 Use a signed-in user's access token, not the service-role key:
 
 ```sh
-curl --fail-with-body "$SUPABASE_URL/rest/v1/openings_runs?select=run_id,completed_at,health,raw_openings_count,eligible_openings_count,suitable_openings_count,substrate&order=completed_at.desc&limit=5" \
+curl --fail-with-body "$SUPABASE_URL/rest/v1/openings_runs?select=run_id,completed_at,health,raw_openings_count,undecided_openings_count,substrate&order=completed_at.desc&limit=5" \
   -H "apikey: $SUPABASE_ANON_KEY" \
   -H "Authorization: Bearer $SUPABASE_USER_JWT" \
   -H "Accept-Profile: careers"
 
-curl --fail-with-body "$SUPABASE_URL/rest/v1/openings?select=org,ats,external_id,title,location_eligibility,role_relevance,disposition,first_seen_at,last_seen_at&order=last_seen_at.desc&limit=20" \
+curl --fail-with-body "$SUPABASE_URL/rest/v1/openings?select=org,ats,external_id,title,company,location,url,first_seen_at,last_seen_at&order=last_seen_at.desc&limit=20" \
   -H "apikey: $SUPABASE_ANON_KEY" \
   -H "Authorization: Bearer $SUPABASE_USER_JWT" \
   -H "Accept-Profile: careers"

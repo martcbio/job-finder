@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { listOrgJobs as listAshbyOrgJobs } from "../services/ats/ashby";
@@ -285,8 +285,10 @@ export async function runLabRawIngest(input: LabRawIngestInput): Promise<LabRawI
   try {
     await rename(stagingDir, generationDir);
   } catch (error) {
-    await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to publish lab raw evidence; staged evidence preserved at ${stagingDir}: ${message}`,
+    );
   }
   return result;
 }

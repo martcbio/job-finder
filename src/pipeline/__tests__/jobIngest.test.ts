@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AtsOrgAcquisition } from "../../services/ats/types";
@@ -64,6 +64,41 @@ describe("jobsradar raw ingestion boundary", () => {
     expect(result.sources.map((source) => source.id)).toEqual(["lab-ats", "linear-careers"]);
     expect("classified" in result).toBe(false);
     expect("latest" in result).toBe(false);
+  });
+
+  test("continues other sources when lab setup fails", async () => {
+    const calls: string[] = [];
+    const result = await runJobIngest(
+      { sourceIds: ["lab-ats", "linear-careers"] },
+      {
+        ensureReady: async () => {
+          calls.push("ready");
+        },
+        runLab: async () => {
+          calls.push("lab");
+          throw new Error("targets.json is invalid");
+        },
+        runSources: async () => {
+          calls.push("sources");
+          return [completeReceipt("linear-careers")];
+        },
+      },
+    );
+
+    expect(calls).toEqual(["ready", "lab", "sources"]);
+    expect(result.status).toBe("degraded");
+    expect(result.sources).toHaveLength(2);
+    expect(result.sources[0]).toMatchObject({
+      id: "lab-ats",
+      label: "Lab ATS",
+      status: "failed",
+      runId: null,
+      discovered: 0,
+      imported: 0,
+      evidencePath: null,
+      errors: ["targets.json is invalid"],
+    });
+    expect(result.sources[1]?.id).toBe("linear-careers");
   });
 
   test("writes independent lab raw evidence without screening fields", async () => {
@@ -133,6 +168,69 @@ describe("jobsradar raw ingestion boundary", () => {
     expect(rows[0]).not.toHaveProperty("disposition");
     expect(rows[0]).not.toHaveProperty("locationEligibility");
     expect(rows[0]).not.toHaveProperty("roleRelevance");
+  });
+
+  test("preserves staged evidence when final publication collides", async () => {
+    const marketDir = await mkdtemp(join(tmpdir(), "lab-raw-collision-test-"));
+    temporaryDirectories.push(marketDir);
+    await writeFile(
+      join(marketDir, "targets.json"),
+      '{"anthropic":{"ats":"greenhouse","company":"Anthropic"}}\n',
+    );
+    const evidenceRunId = "raw-run-collision";
+    const existingGeneration = join(marketDir, "lab-raw-ingest", "runs", evidenceRunId);
+    const stagingDir = join(marketDir, "lab-raw-ingest", ".staging", evidenceRunId);
+    await mkdir(existingGeneration, { recursive: true });
+    await writeFile(join(existingGeneration, "sentinel"), "existing generation\n");
+    const acquisition: AtsOrgAcquisition = {
+      status: "success",
+      endpoint: "https://example.test/anthropic",
+      attempts: 1,
+      durationMs: 4,
+      jobs: [
+        {
+          source: "greenhouse",
+          org: "anthropic",
+          id: "job-collision",
+          title: "AI Infrastructure Engineer",
+          location: "London, UK",
+          locations: ["London, UK"],
+          url: "https://example.test/anthropic/job-collision",
+          postedAt: "2026-07-30T08:00:00.000Z",
+          raw: { id: "job-collision", content: "Build reliable AI infrastructure." },
+        },
+      ],
+    };
+
+    await expect(
+      runLabRawIngest({
+        marketDir,
+        makeRunId: () => evidenceRunId,
+        listers: {
+          ashby: async () => acquisition,
+          greenhouse: async () => acquisition,
+          lever: async () => acquisition,
+        },
+        persist: async (input) => ({
+          runId: 7,
+          queryId: 8,
+          jobsSeen: input.jobs.length,
+          jobsPersisted: input.jobs.length,
+          pagesPersisted: input.jobs.length,
+          errors: [],
+        }),
+      }),
+    ).rejects.toThrow(`staged evidence preserved at ${stagingDir}`);
+
+    expect(await readFile(join(stagingDir, "openings.jsonl"), "utf8")).toContain(
+      '"id":"job-collision"',
+    );
+    expect(await readFile(join(stagingDir, "receipt.json"), "utf8")).toContain(
+      '"evidenceRunId": "raw-run-collision"',
+    );
+    expect(await readFile(join(existingGeneration, "sentinel"), "utf8")).toBe(
+      "existing generation\n",
+    );
   });
 });
 

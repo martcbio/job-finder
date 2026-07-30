@@ -91,6 +91,25 @@ function overallHealth(sources: JobIngestSourceReceipt[]): JobIngestResult["stat
   return sources.every((source) => source.status === "complete") ? "complete" : "degraded";
 }
 
+function failedSourceReceipt(
+  id: string,
+  label: string,
+  error: unknown,
+  startedAt: number,
+): JobIngestSourceReceipt {
+  return {
+    id,
+    label,
+    status: "failed",
+    runId: null,
+    discovered: 0,
+    imported: 0,
+    evidencePath: null,
+    errors: [error instanceof Error ? error.message : String(error)],
+    elapsedMs: Date.now() - startedAt,
+  };
+}
+
 const defaultDependencies: JobIngestDependencies = {
   async ensureReady() {
     const plan = await planMigrations();
@@ -151,7 +170,14 @@ export async function runJobIngest(
   const startedAt = new Date(started).toISOString();
   await deps.ensureReady();
   const sources: JobIngestSourceReceipt[] = [];
-  if (options.sourceIds.includes("lab-ats")) sources.push(await deps.runLab(options));
+  if (options.sourceIds.includes("lab-ats")) {
+    const sourceStartedAt = Date.now();
+    try {
+      sources.push(await deps.runLab(options));
+    } catch (error) {
+      sources.push(failedSourceReceipt("lab-ats", "Lab ATS", error, sourceStartedAt));
+    }
+  }
   const nonLabSourceIds = options.sourceIds.filter((sourceId) => sourceId !== "lab-ats");
   if (nonLabSourceIds.length > 0) {
     sources.push(...(await deps.runSources({ ...options, sourceIds: nonLabSourceIds })));

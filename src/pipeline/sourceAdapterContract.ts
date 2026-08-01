@@ -22,6 +22,7 @@ export type SourceOutcome =
   | "parse_error"
   | "timeout"
   | "http_error"
+  | "partial"
   | "not_implemented";
 
 export const SOURCE_OUTCOMES: SourceOutcome[] = [
@@ -36,6 +37,7 @@ export const SOURCE_OUTCOMES: SourceOutcome[] = [
   "parse_error",
   "timeout",
   "http_error",
+  "partial",
   "not_implemented",
 ];
 
@@ -59,6 +61,11 @@ export const SOURCE_ATTEMPT_STATUSES: SourceAttemptStatus[] = [
   "rate_limited",
   "auth_required",
 ];
+
+const RATE_LIMIT_ERROR =
+  /\b(?:HTTP|status(?: code)?|response)\s*429\b|\b429\s+too many requests\b|\b(?:rate[ -]?limit(?:ed|ing)?|too many requests)\b/i;
+const AUTHENTICATION_ERROR =
+  /\b(?:401|403)\b|\b(?:auth(?:entication|orization)?(?: required| failed)?|unauthori[sz]ed|forbidden)\b/i;
 
 export interface SourceCostUsage {
   jinaSearchTokens: number | null;
@@ -159,10 +166,13 @@ export function sourceAttemptStatus(
   errors: readonly string[] = [],
 ): SourceAttemptStatus {
   const errorText = errors.join("\n");
-  if (/rate|429/i.test(errorText)) return "rate_limited";
-  if (/401|403|auth/i.test(errorText) || outcome === "blocked_auth") return "auth_required";
+  if (imported === 0 && RATE_LIMIT_ERROR.test(errorText)) return "rate_limited";
+  if (imported === 0 && (AUTHENTICATION_ERROR.test(errorText) || outcome === "blocked_auth")) {
+    return "auth_required";
+  }
   if (outcome === "success") return imported > 0 || errors.length === 0 ? "success" : "partial";
   if (outcome === "zero_results") return "zero_results";
+  if (outcome === "partial") return "partial";
   if (outcome === "timeout") return "timeout";
   if (outcome === "parse_error") return "parser_error";
   if (

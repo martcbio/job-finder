@@ -65,7 +65,7 @@ function unwrap<T>(result: { _tag: "ok"; value: T } | { _tag: "err"; error: unkn
 }
 
 describe("required PostgreSQL integration", () => {
-  test("migration 016 enforces ledger state, immutability, provenance, and atomic commit guards", async () => {
+  test("fresh migrations enforce ledger state, immutability, provenance, and atomic commit guards", async () => {
     const root = await mkdtemp(join(tmpdir(), "jobsradar-ledger-postgres-"));
     const dataDirectory = join(root, "data");
     const initdb = postgresTools.initdb;
@@ -124,6 +124,12 @@ ALTER DEFAULT PRIVILEGES GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, serv
       const migrations = await loadMigrations();
       expect(
         migrations.some((migration) => migration.filename === "016_add_ingest_ledger.sql"),
+      ).toBe(true);
+      expect(
+        migrations.some(
+          (migration) =>
+            migration.filename === "017_guard_ingest_source_scope_before_run_state.sql",
+        ),
       ).toBe(true);
       const migrationSql = migrations.map(buildMigrationTransaction).join("\n");
       await requireSuccess(psqlCommand, migrationSql);
@@ -843,10 +849,20 @@ WHERE manifest_hash = ${sqlLiteral(committed.manifest.manifestHash)};
         `
 INSERT INTO job_search.ingest_source_scopes
   (run_id, scope_hash, source_id, scope_key, request_payload)
-SELECT id, ${sqlLiteral("f".repeat(64))}, 'ashby', 'late-scope', '{}'::jsonb
+SELECT
+  id,
+  job_search.canonical_json_sha256(jsonb_build_object(
+    'contractVersion', contract_version,
+    'sourceId', 'ashby',
+    'scopeKey', 'late-scope',
+    'request', '{}'::jsonb
+  )),
+  'ashby',
+  'late-scope',
+  '{}'::jsonb
 FROM job_search.ingest_runs WHERE run_hash = ${sqlLiteral(collecting.runHash)};
 `,
-        "is committed, not collecting",
+        "ingest source scope is not declared in the parent run plan",
       );
 
       const lifecycleRun = unwrap(

@@ -11,6 +11,16 @@ export interface PsqlResult {
   stderr: string;
 }
 
+export interface PsqlSession {
+  runPsql(sql: string, options?: PsqlOptions): Promise<PsqlResult>;
+  runPsqlJson<T>(sql: string, options?: PsqlOptions): Promise<T>;
+}
+
+export interface PsqlReservedConnection {
+  unsafe(sql: string): Promise<unknown>;
+  release(): void;
+}
+
 export class PsqlError extends Error {
   constructor(
     message: string,
@@ -39,6 +49,21 @@ export async function closePsqlClients(): Promise<void> {
   await Promise.all(open.map((client) => client.end()));
 }
 
+/**
+ * Bound a one-shot command to the process-wide client pool. Long-lived
+ * processes such as the API own their pool lifecycle separately.
+ */
+export async function withPsqlClientCleanup<T>(
+  run: () => Promise<T>,
+  closeClients: () => Promise<void> = closePsqlClients,
+): Promise<T> {
+  try {
+    return await run();
+  } finally {
+    await closeClients();
+  }
+}
+
 type Row = Record<string, unknown>;
 
 function lastStatementRows(result: unknown): Row[] {
@@ -63,35 +88,49 @@ function rowsToText(rows: Row[]): string {
 
 const TRANSACTION_CONTROL_RE = /^\s*(?:BEGIN|COMMIT|ROLLBACK)\b/im;
 
-async function execute(sql: string, options: PsqlOptions): Promise<Row[]> {
-  const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
-  const commandSql = options.setSearchPath === false ? sql : `${jobSearchPathSql()}\n${sql}`;
-  const client = clientFor(databaseUrl);
+function commandSql(sql: string, options: PsqlOptions): string {
+  return options.setSearchPath === false ? sql : `${jobSearchPathSql()}\n${sql}`;
+}
+
+function psqlError(err: unknown): PsqlError {
+  const message = err instanceof Error ? err.message : String(err);
+  return new PsqlError(message, { stdout: "", stderr: message }, 1);
+}
+
+/**
+ * A failed multi-statement transaction leaves its connection in an aborted
+ * transaction state. Roll it back before returning that connection to the pool.
+ */
+export async function executeReservedTransaction(
+  reserved: PsqlReservedConnection,
+  sql: string,
+): Promise<Row[]> {
   try {
-    // Explicit transaction scripts need a dedicated connection; the pool
-    // rejects raw BEGIN/COMMIT to protect connection state.
-    if (TRANSACTION_CONTROL_RE.test(commandSql)) {
-      const reserved = await client.reserve();
-      try {
-        return lastStatementRows(await reserved.unsafe(commandSql));
-      } finally {
-        reserved.release();
-      }
-    }
-    return lastStatementRows(await client.unsafe(commandSql));
+    return lastStatementRows(await reserved.unsafe(sql));
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new PsqlError(message, { stdout: "", stderr: message }, 1);
+    await reserved.unsafe("ROLLBACK;").catch(() => undefined);
+    throw err;
+  } finally {
+    reserved.release();
   }
 }
 
-export async function runPsql(sql: string, options: PsqlOptions = {}): Promise<PsqlResult> {
-  const rows = await execute(sql, options);
-  return { stdout: rowsToText(rows).trim(), stderr: "" };
+async function executeReserved(
+  reserved: PsqlReservedConnection,
+  sql: string,
+  rollbackOnFailure: boolean,
+): Promise<Row[]> {
+  try {
+    return lastStatementRows(await reserved.unsafe(sql));
+  } catch (err) {
+    if (rollbackOnFailure) {
+      await reserved.unsafe("ROLLBACK;").catch(() => undefined);
+    }
+    throw err;
+  }
 }
 
-export async function runPsqlJson<T>(sql: string, options: PsqlOptions = {}): Promise<T> {
-  const rows = await execute(sql, options);
+function jsonFromRows<T>(rows: Row[]): T {
   const row = rows[0];
   const value = row === undefined ? undefined : Object.values(row)[0];
   if (value === undefined || value === null) {
@@ -102,4 +141,67 @@ export async function runPsqlJson<T>(sql: string, options: PsqlOptions = {}): Pr
     return JSON.parse(value) as T;
   }
   return value as T;
+}
+
+async function execute(sql: string, options: PsqlOptions): Promise<Row[]> {
+  const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
+  const query = commandSql(sql, options);
+  const client = clientFor(databaseUrl);
+  try {
+    // Explicit transaction scripts need a dedicated connection; the pool
+    // rejects raw BEGIN/COMMIT to protect connection state.
+    if (TRANSACTION_CONTROL_RE.test(query)) {
+      const reserved = await client.reserve();
+      return await executeReservedTransaction(reserved, query);
+    }
+    return lastStatementRows(await client.unsafe(query));
+  } catch (err) {
+    throw psqlError(err);
+  }
+}
+
+export async function runPsql(sql: string, options: PsqlOptions = {}): Promise<PsqlResult> {
+  const rows = await execute(sql, options);
+  return { stdout: rowsToText(rows).trim(), stderr: "" };
+}
+
+export async function runPsqlJson<T>(sql: string, options: PsqlOptions = {}): Promise<T> {
+  const rows = await execute(sql, options);
+  return jsonFromRows<T>(rows);
+}
+
+/** Run related commands over one reserved connection without leaking it to callers. */
+export async function withPsqlSession<T>(
+  callback: (session: PsqlSession) => Promise<T>,
+  options: PsqlOptions = {},
+): Promise<T> {
+  const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
+  const reserved = await clientFor(databaseUrl).reserve();
+  const session: PsqlSession = {
+    async runPsql(sql: string, commandOptions: PsqlOptions = {}) {
+      const query = commandSql(sql, { ...options, ...commandOptions, databaseUrl });
+      try {
+        const rows = await executeReserved(reserved, query, TRANSACTION_CONTROL_RE.test(query));
+        return { stdout: rowsToText(rows).trim(), stderr: "" };
+      } catch (err) {
+        throw psqlError(err);
+      }
+    },
+    async runPsqlJson<U>(sql: string, commandOptions: PsqlOptions = {}) {
+      const query = commandSql(sql, { ...options, ...commandOptions, databaseUrl });
+      try {
+        return jsonFromRows<U>(
+          await executeReserved(reserved, query, TRANSACTION_CONTROL_RE.test(query)),
+        );
+      } catch (err) {
+        throw psqlError(err);
+      }
+    },
+  };
+
+  try {
+    return await callback(session);
+  } finally {
+    reserved.release();
+  }
 }

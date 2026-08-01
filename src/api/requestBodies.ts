@@ -1,4 +1,4 @@
-import type { FastRefreshOptions } from "../pipeline/fastRefresh";
+import { type FastRefreshOptions, normalizeFastRefreshOptions } from "../pipeline/fastRefresh";
 import type { SavedSweepInput } from "../pipeline/savedSweeps";
 import {
   asOptionalString,
@@ -36,8 +36,8 @@ export function savedSweepInputFromBody(body: Record<string, unknown>): SavedSwe
 export function fastRefreshOptionsFromBody(
   body: Record<string, unknown>,
 ): Partial<FastRefreshOptions> {
-  return {
-    limit: positiveIntValue(body.limit, "limit", 20, 250),
+  return normalizeFastRefreshOptions({
+    ...(body.limit === undefined ? {} : { limit: positiveIntValue(body.limit, "limit", 20, 250) }),
     ...(body.sourceIds === undefined
       ? {}
       : {
@@ -48,15 +48,24 @@ export function fastRefreshOptionsFromBody(
       : {
           jobserveQueries: nonEmptyStringArray(body.jobserveQueries, "jobserveQueries", []),
         }),
-    jobserveMaxPages: positiveIntValue(body.jobserveMaxPages, "jobserveMaxPages", 3, 25),
-    jobserveImportLimitPerQuery: positiveIntValue(
-      body.jobserveImportLimitPerQuery,
-      "jobserveImportLimitPerQuery",
-      8,
-      100,
-    ),
-    directLimit: positiveIntValue(body.directLimit, "directLimit", 6, 100),
-    timeoutMs: positiveIntValue(body.timeoutMs, "timeoutMs", 20000, 300000),
-    classifyLimit: positiveIntValue(body.classifyLimit, "classifyLimit", 250, 5000),
-  };
+    ...(body.jobserveMaxPages === undefined
+      ? {}
+      : { jobserveMaxPages: positiveIntValue(body.jobserveMaxPages, "jobserveMaxPages", 2, 2) }),
+    ...(body.jobserveImportLimitPerQuery === undefined
+      ? {}
+      : {
+          jobserveImportLimitPerQuery: positiveIntValue(
+            body.jobserveImportLimitPerQuery,
+            "jobserveImportLimitPerQuery",
+            5,
+            5,
+          ),
+        }),
+    ...(body.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: positiveIntValue(body.timeoutMs, "timeoutMs", 20000, 300000) }),
+    ...(body.classifyLimit === undefined
+      ? {}
+      : { classifyLimit: positiveIntValue(body.classifyLimit, "classifyLimit", 250, 5000) }),
+  });
 }

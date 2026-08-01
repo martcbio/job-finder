@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { AtsOrgAcquisition, AtsOrgJob } from "../../services/ats/types";
 import { exitCodeForRecordStatus } from "../labBoards";
 import { createLabOpeningsModule, resolveLabOpeningsPaths } from "../labOpenings";
@@ -79,20 +79,49 @@ function clock(start = "2026-07-12T08:15:00.000Z"): () => Date {
 }
 
 describe("lab openings freshness", () => {
-  test("resolves cloud paths from env without changing local defaults", () => {
-    expect(resolveLabOpeningsPaths({})).toEqual({
-      marketDir: "/Users/mcb/Claudelocal/careers/market",
-      projectDir: join(import.meta.dir, "..", "..", ".."),
-    });
+  test("discovers the nearest market marker for both checkout layouts and preserves overrides", async () => {
+    const fixtureDir = await temporaryMarket();
+    const careersDir = join(fixtureDir, "careers");
+    const nestedProjectDir = join(careersDir, "resume2", "projects", "jobsradar");
+    const directProjectDir = join(careersDir, "jobsradar");
+    const marketDir = join(careersDir, "market");
+    const missingProjectDir = join(fixtureDir, "elsewhere", "jobsradar");
+    await Promise.all([
+      mkdir(nestedProjectDir, { recursive: true }),
+      mkdir(directProjectDir, { recursive: true }),
+      mkdir(marketDir, { recursive: true }),
+      mkdir(missingProjectDir, { recursive: true }),
+    ]);
+    await writeTargets(marketDir, {});
+
+    for (const projectDir of [nestedProjectDir, directProjectDir]) {
+      expect(resolveLabOpeningsPaths({ CAREERS_PROJECT_DIR: projectDir })).toEqual({
+        marketDir,
+        projectDir,
+      });
+    }
     expect(
-      resolveLabOpeningsPaths({
-        CAREERS_MARKET_DIR: "/scratch/market",
-        CAREERS_PROJECT_DIR: "/opt/job-finder",
-      }),
+      resolveLabOpeningsPaths({ CAREERS_PROJECT_DIR: nestedProjectDir, CAREERS_MARKET_DIR: "" }),
+    ).toEqual({ marketDir, projectDir: nestedProjectDir });
+    expect(
+      resolveLabOpeningsPaths({ CAREERS_PROJECT_DIR: "", CAREERS_MARKET_DIR: "/scratch/market" }),
     ).toEqual({
       marketDir: "/scratch/market",
-      projectDir: "/opt/job-finder",
+      projectDir: resolve(import.meta.dir, "..", "..", ".."),
     });
+    expect(() =>
+      resolveLabOpeningsPaths({ CAREERS_PROJECT_DIR: missingProjectDir, CAREERS_MARKET_DIR: "" }),
+    ).toThrow("Cannot find market/targets.json");
+
+    const targetsPath = join(marketDir, "targets.json");
+    await chmod(targetsPath, 0o000);
+    try {
+      expect(() => resolveLabOpeningsPaths({ CAREERS_PROJECT_DIR: nestedProjectDir })).toThrow(
+        "Cannot find market/targets.json",
+      );
+    } finally {
+      await chmod(targetsPath, 0o600);
+    }
   });
 
   test("fails when the target configuration is missing", async () => {

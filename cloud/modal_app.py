@@ -131,20 +131,17 @@ def ids_sha256(jsonl_content: str) -> str:
 
 
 def targets_sha256(targets: dict[str, Any]) -> str:
-    """Hash sorted org:ats:company triples without a trailing LF."""
-    triples = [
-        ":".join(
-            (
-                org,
-                _required_string(target, "ats"),
-                _required_string(target, "company"),
-            )
-        )
-        for org, target in targets.items()
-        if isinstance(target, dict)
-    ]
-    if len(triples) != len(targets):
-        raise ValueError("target entries must be objects")
+    """Hash sorted org:ats:company triples; a null ATS is represented by an empty field."""
+    triples: list[str] = []
+    for org, target in targets.items():
+        if not isinstance(org, str) or not org:
+            raise ValueError("target org must be a non-empty string")
+        if not isinstance(target, dict):
+            raise ValueError("target entries must be objects")
+        ats = _optional_string(target, "ats")
+        if ats == "":
+            raise ValueError("ats must be a non-empty string or null")
+        triples.append(":".join((org, ats or "", _required_string(target, "company"))))
     triples.sort(key=lambda item: item.encode("utf-8"))
     return hashlib.sha256("\n".join(triples).encode("utf-8")).hexdigest()
 
@@ -382,14 +379,17 @@ def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path
         rows = response.json()
         if not isinstance(rows, list) or not rows:
             raise ValueError("careers.targets returned no active rows")
-        targets: dict[str, dict[str, str | None]] = {}
+        targets: dict[str, dict[str, str]] = {}
+        parity_targets: dict[str, dict[str, str | None]] = {}
         filled_ats: list[str] = []
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("careers.targets returned a non-object row")
             org = _required_string(row, "org")
-            ats = _optional_string(row, "ats")
+            source_ats = _optional_string(row, "ats")
             company = _required_string(row, "company")
+            parity_targets[org] = {"ats": source_ats, "company": company}
+            ats = source_ats
             if ats is None:
                 baked_target = baked_targets.get(org)
                 baked_ats = (
@@ -408,6 +408,10 @@ def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path
             f"{json.dumps(targets, indent=2, sort_keys=True)}\n",
             encoding="utf-8",
         )
+        (market_dir / "targets.parity.json").write_text(
+            f"{json.dumps(parity_targets, indent=2, sort_keys=True)}\n",
+            encoding="utf-8",
+        )
         return (
             "careers.targets filled ATS from baked config: " + ", ".join(filled_ats)
             if filled_ats
@@ -415,6 +419,7 @@ def _write_runtime_targets(client: httpx.Client, base_url: str, market_dir: Path
         )
     except Exception as error:
         shutil.copyfile(TARGETS_PATH, market_dir / "targets.json")
+        shutil.copyfile(TARGETS_PATH, market_dir / "targets.parity.json")
         return f"{TARGETS_FALLBACK_PREFIX} {type(error).__name__}: {error}"
 
 
@@ -752,15 +757,15 @@ def _execute_once() -> dict[str, Any]:
                     }
                 parity_status = "skipped_degraded"
                 if run_row["health"] == "complete" and scanner_exit_status == 0:
-                    runtime_targets = json.loads(
-                        (market_dir / "targets.json").read_text(encoding="utf-8")
+                    parity_targets = json.loads(
+                        (market_dir / "targets.parity.json").read_text(encoding="utf-8")
                     )
-                    if not isinstance(runtime_targets, dict):
-                        raise ValueError("runtime targets must contain an object")
+                    if not isinstance(parity_targets, dict):
+                        raise ValueError("parity targets must contain an object")
                     parity_row = _parity_row(
                         status,
                         jsonl_content,
-                        runtime_targets,
+                        parity_targets,
                     )
                     _publish_complete_run(
                         client,

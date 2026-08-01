@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   type PipelinePlanOptions,
   type PipelineStep,
@@ -320,7 +320,7 @@ async function run(): Promise<void> {
   console.error(`Pipeline run ${runRow.id} completed.`);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

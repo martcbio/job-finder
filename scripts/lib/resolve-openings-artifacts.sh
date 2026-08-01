@@ -33,7 +33,17 @@ resolve_openings_artifacts() {
   OPENINGS_JSONL_PATH="${jsonl_path}"
   OPENINGS_RUN_ID="${run_id}"
   OPENINGS_TARGETS_SHA256="$(
-    jq -er 'to_entries[] | [.key, .value.ats, .value.company] | if all(.[]; type == "string" and length > 0) then join(":") else error("target entries require org, ats, and company") end' \
+    jq -er '
+      to_entries[]
+      | if
+          (.key | type == "string" and length > 0)
+          and (.value | type == "object")
+          and ((.value.ats == null) or (.value.ats | type == "string" and length > 0))
+          and (.value.company | type == "string" and length > 0)
+        then [.key, (.value.ats // ""), .value.company] | join(":")
+        else error("target entries require org, ats (string or null), and company")
+        end
+    ' \
       "${targets_path}" |
       LC_ALL=C sort |
       awk 'BEGIN { first=1 } { if (!first) printf "\n"; printf "%s", $0; first=0 }' |

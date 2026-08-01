@@ -1,4 +1,4 @@
-# jobfinder
+# Jobsradar
 
 Local, Postgres-backed job-search pipeline for source fanout across ATS and career surfaces.
 
@@ -49,26 +49,38 @@ reference/integration code, but new UI work should not depend on them.
 
 ## Refresh jobs (day-to-day)
 
-Refresh every configured source—including the fresh Modal ATS snapshot, Linear,
-Google Careers, bookmark signals, and bounded JobServe contracts—then email the
-selection:
+Run the deterministic default raw ingest: direct Lab ATS, mandatory bounded
+JobServe contracts, Linear Careers, and Google Careers.
 
 ```bash
 opps update
 ```
 
 JobServe runs locally with pacing, tight request limits, and immediate abort on
-a fair-usage restriction page. It is part of every normal update; no source
-toggle is required.
+a fair-usage restriction page. Every default pull attempts JobServe; it is not a
+per-source opt-in. A JobServe block, timeout, parser error, or zero-result run is
+recorded as source evidence rather than silently omitted from the selection.
 
-Read or email the stored selection without refreshing:
+Refresh bookmark hiring/funding signals separately:
+
+```bash
+opps signals
+```
+
+Read the stored selection without refreshing:
 
 ```bash
 opps json --limit 30
+```
+
+Email the stored selection without refreshing:
+
+```bash
 opps list
 ```
 
-Lower-level source-isolation commands remain available for diagnostics:
+Lower-level source-isolation commands remain available for diagnostics. They
+isolate a source; they do not enable JobServe for the default pull:
 
 ```bash
 bun run jobs:opportunities -- --refresh-cloud-labs
@@ -84,6 +96,20 @@ operating contract is in
 
 **Fast refresh** = cheap native sources, bounded limits. **Pipeline run**
 (below) = full saved-sweep fanout with explicit confirm.
+
+### Raw-ingest boundary
+
+`bun run jobsradar -- ingest` is deterministic about its boundary, not about the
+live listings it receives: it fetches, preserves source evidence, normalizes, and
+persists. It does not rank, classify, deduplicate, compose a report, email, or
+call a tokenized search/Reader/model provider. Its output is a per-source receipt
+(`complete`, `degraded`, or `failed`) with errors; a JobServe failure remains
+visible and makes the overall ingest degraded when another source succeeds.
+
+Raw ingest emits no token accounting. Token fields belong to later search or
+Reader work: `0` means the measured provider was not used, while `unknown` means
+the provider did not report usage. HTTP pages and bytes are acquisition evidence,
+not token usage.
 
 ## Common Commands
 
@@ -166,7 +192,7 @@ Use `bun run pipeline:run -- --dry-run ...` to inspect commands before executing
 
 ## Ingestion Cost Control
 
-Discovery prefers source-specific adapters and direct/public endpoints. Search-provider APIs are optional accelerators; when no search key is configured, the default provider records an explicit keyless zero-result state rather than failing the run.
+Discovery prefers source-specific adapters and direct/public endpoints. Search-provider APIs are optional accelerators; when no search key is configured, the default provider records an explicit keyless zero-result state rather than failing the run. This does not make JobServe optional: the default pull always attempts its bounded direct adapter.
 
 Full-page ingestion uses this order:
 

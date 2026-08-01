@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   buildJobServeRowsSql,
   filterRecentJobServeContracts,
@@ -63,7 +63,10 @@ Options:
   --strict-only       Return only tier-1 matches.
   --format            markdown or json. Defaults to markdown.
 
-Requires DATABASE_URL and JobServe rows imported with jobs:import-normalized or pipeline:run --lane jobserve.`);
+Reads only persisted JobServe rows; it never fetches JobServe or changes the
+default source composition. First run the standard default pull (opps update or
+bun run jobsradar -- ingest), which already includes bounded JobServe. Requires
+DATABASE_URL and stored JobServe rows.`);
 }
 
 function renderMarkdown(rows: ScreenedJobServeContract[]): string {
@@ -135,7 +138,7 @@ async function run(): Promise<void> {
   console.log(renderMarkdown(selected).trimEnd());
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

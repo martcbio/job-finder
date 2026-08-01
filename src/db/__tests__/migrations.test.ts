@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import type { AppliedMigration } from "../migrations";
 import {
+  applyPendingMigrations,
+  assertAppliedMigrationsKnown,
   buildMigrationTransaction,
   checksumSql,
   loadMigrations,
   type Migration,
+  migrationAdvisoryLockSql,
+  migrationAdvisoryUnlockSql,
   parseMigrationVersion,
 } from "../migrations";
+import type { PsqlSession } from "../psql";
 
 describe("parseMigrationVersion", () => {
   test("extracts the numeric prefix", () => {
@@ -46,6 +52,142 @@ describe("buildMigrationTransaction", () => {
   });
 });
 
+const testMigration: Migration = {
+  version: "001",
+  filename: "001_test.sql",
+  checksum: "test-checksum",
+  sql: "CREATE TABLE job_search.test_migration (id bigint);",
+};
+
+function appliedMigration(migration: Migration): AppliedMigration {
+  return { ...migration, appliedAt: "2026-08-01T00:00:00.000Z" };
+}
+
+function migrationSession(applied: AppliedMigration[], sqlCalls: string[]): PsqlSession {
+  return {
+    async runPsql(sql: string) {
+      sqlCalls.push(sql);
+      if (sql.includes("INSERT INTO job_search.schema_migrations")) {
+        applied.push(appliedMigration(testMigration));
+      }
+      return { stdout: "", stderr: "" };
+    },
+    async runPsqlJson<T>(sql: string) {
+      return (sql.includes("to_regclass") ? true : applied) as T;
+    },
+  };
+}
+
+describe("migration safety", () => {
+  test("fails closed when the database contains a migration unknown to this checkout", async () => {
+    const applied = [
+      {
+        version: "999",
+        filename: "999_future_schema.sql",
+        checksum: "future-checksum",
+        appliedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ];
+    const sqlCalls: string[] = [];
+    const session = migrationSession(applied, sqlCalls);
+
+    await expect(
+      applyPendingMigrations({
+        loadMigrations: async () => [testMigration],
+        withSession: async (callback) => callback(session),
+      }),
+    ).rejects.toThrow("unknown to this checkout");
+
+    expect(sqlCalls).toEqual([migrationAdvisoryLockSql(), migrationAdvisoryUnlockSql()]);
+  });
+
+  test("serializes concurrent migration attempts and applies a migration once", async () => {
+    const applied: AppliedMigration[] = [];
+    const sqlCalls: string[] = [];
+    let locked = false;
+    const waiters: Array<() => void> = [];
+
+    async function acquireLock(): Promise<void> {
+      while (locked) {
+        await new Promise<void>((resolve) => waiters.push(resolve));
+      }
+      locked = true;
+    }
+
+    function releaseLock(): void {
+      locked = false;
+      waiters.shift()?.();
+    }
+
+    function concurrentSession(): PsqlSession {
+      const session = migrationSession(applied, sqlCalls);
+      return {
+        ...session,
+        async runPsql(sql, options) {
+          if (sql === migrationAdvisoryLockSql()) await acquireLock();
+          try {
+            return await session.runPsql(sql, options);
+          } finally {
+            if (sql === migrationAdvisoryUnlockSql()) releaseLock();
+          }
+        },
+      };
+    }
+
+    const options = {
+      loadMigrations: async () => [testMigration],
+      withSession: async <T>(callback: (session: PsqlSession) => Promise<T>) =>
+        callback(concurrentSession()),
+    };
+
+    await Promise.all([applyPendingMigrations(options), applyPendingMigrations(options)]);
+
+    expect(applied).toEqual([appliedMigration(testMigration)]);
+    expect(
+      sqlCalls.filter((sql) => sql.includes("INSERT INTO job_search.schema_migrations")),
+    ).toHaveLength(1);
+    expect(sqlCalls.filter((sql) => sql === migrationAdvisoryLockSql())).toHaveLength(2);
+    expect(sqlCalls.filter((sql) => sql === migrationAdvisoryUnlockSql())).toHaveLength(2);
+  });
+
+  test("recognizes only applied migrations known to the checkout", () => {
+    expect(() =>
+      assertAppliedMigrationsKnown(
+        [
+          {
+            version: "900",
+            filename: "900_unknown.sql",
+            checksum: "unknown",
+            appliedAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+        [testMigration],
+      ),
+    ).toThrow("newer schema");
+  });
+
+  test("does not mask a migration failure when advisory unlock also fails", async () => {
+    const primaryFailure = new Error("migration failed");
+    const session: PsqlSession = {
+      async runPsql(sql: string) {
+        if (sql.includes("INSERT INTO job_search.schema_migrations")) throw primaryFailure;
+        if (sql === migrationAdvisoryUnlockSql()) throw new Error("unlock failed");
+        return { stdout: "", stderr: "" };
+      },
+      async runPsqlJson<T>(sql: string) {
+        return (sql.includes("to_regclass") ? true : []) as T;
+      },
+    };
+
+    await expect(
+      applyPendingMigrations({
+        loadMigrations: async () => [testMigration],
+        withSession: async (callback) => callback(session),
+      }),
+    ).rejects.toBe(primaryFailure);
+  });
+});
+
 describe("ingest ledger migration", () => {
   test("loads the inert ledger schema with durable state and atomic commit guards", async () => {
     const migrations = await loadMigrations();
@@ -54,6 +196,9 @@ describe("ingest ledger migration", () => {
     );
 
     expect(migration).toBeDefined();
+    expect(migration?.checksum).toBe(
+      "3f11eda5c24df528297517ef82edb72ac63ec935b4cd0ce8fd906b7d6a248a84",
+    );
     expect(migration?.sql).toContain("CREATE TABLE IF NOT EXISTS job_search.ingest_runs");
     expect(migration?.sql).toContain("job_search.ingest_source_scopes");
     expect(migration?.sql).toContain("job_search.ingest_observations");
@@ -152,5 +297,14 @@ describe("ingest ledger migration", () => {
     expect(migration?.sql).toContain("ON CONFLICT (run_id) DO NOTHING");
     expect(migration?.sql).not.toContain("job_search.jobs");
     expect(migration?.sql).not.toContain("job_search.search_runs");
+
+    const scopeGuardMigration = migrations.find(
+      (candidate) => candidate.filename === "017_guard_ingest_source_scope_before_run_state.sql",
+    );
+    expect(scopeGuardMigration).toBeDefined();
+    const scopeGuard = scopeGuardMigration?.sql ?? "";
+    expect(
+      scopeGuard.indexOf("ingest source scope is not declared in the parent run plan"),
+    ).toBeLessThan(scopeGuard.indexOf("ingest run % is %, not collecting"));
   });
 });

@@ -208,6 +208,17 @@ class IdsSha256Test(unittest.TestCase):
 
         self.assertEqual(targets_sha256(forward), targets_sha256(reverse))
 
+    def test_target_hash_canonically_represents_a_null_ats(self) -> None:
+        targets = {
+            "cursor": {"ats": None, "company": "Cursor / Anysphere"},
+            "anthropic": {"ats": "greenhouse", "company": "Anthropic"},
+        }
+
+        self.assertEqual(
+            targets_sha256(targets),
+            "c344ef949e7b5268a4dc322af671b8097d13eb4079df4f972c356c0f67ac2b77",
+        )
+
 
 class ParityPersistenceTest(unittest.TestCase):
     def test_keeps_every_scanner_run(self) -> None:
@@ -240,9 +251,17 @@ class RuntimeTargetsTest(unittest.TestCase):
                 diagnostic = _write_runtime_targets(client, "https://example.test", root)
 
             written = __import__("json").loads((root / "targets.json").read_text())
+            parity_targets = __import__("json").loads(
+                (root / "targets.parity.json").read_text()
+            )
 
         self.assertEqual(written["cursor"]["ats"], "ashby")
         self.assertEqual(written["anthropic"]["ats"], "greenhouse")
+        self.assertIsNone(parity_targets["cursor"]["ats"])
+        self.assertEqual(
+            targets_sha256(parity_targets),
+            "c344ef949e7b5268a4dc322af671b8097d13eb4079df4f972c356c0f67ac2b77",
+        )
         self.assertEqual(diagnostic, "careers.targets filled ATS from baked config: cursor=ashby")
 
     def test_target_fallback_degrades_an_otherwise_complete_run(self) -> None:

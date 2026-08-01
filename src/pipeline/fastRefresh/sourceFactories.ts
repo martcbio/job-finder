@@ -1,5 +1,6 @@
 import { fetchGoogleCareersJobs, fetchLinearCareersJobs } from "../directSources";
 import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "../jobserveLive";
+import type { SourceOutcome } from "../sourceAdapterContract";
 import type { RegisteredJobSource, SourceAdapterFactory } from "../sourceRegistry";
 import type { FastRefreshCosts } from "./types";
 
@@ -10,30 +11,43 @@ const ZERO_COSTS: FastRefreshCosts = {
   billableSearchApiCalls: 0,
 };
 
-export const buildJobServeAdapters: SourceAdapterFactory = (source, options) =>
-  options.jobserveQueries.map((query) => ({
+export const buildJobServeAdapters: SourceAdapterFactory = (source, options) => {
+  let runWideBlockedReason: string | null = null;
+  return options.jobserveQueries.map((query) => ({
     ...adapterMetadata(source),
     defaultKeyword: query,
     async discover(input) {
+      if (runWideBlockedReason) {
+        return {
+          source: adapterMetadata(source),
+          keyword: query,
+          outcome: "blocked_robots_or_waf",
+          discovered: 0,
+          excluded: 0,
+          jobs: [],
+          pagesFetched: 0,
+          costs: ZERO_COSTS,
+          errors: [
+            `JobServe query skipped because an earlier JobServe query was usage-restricted: ${runWideBlockedReason}`,
+          ],
+          blockedReason: runWideBlockedReason,
+        };
+      }
+
       const result = await fetchLiveJobServeRoles({
         query,
         maxPages: options.jobserveMaxPages,
         timeoutMs: input.timeoutMs,
         detailLimit: input.limit,
       });
-      const jobs = result.roles
-        .slice(0, input.limit)
-        .map((role) => jobServeRoleToNormalizedJob(role, query));
+      if (result.blockedReason) runWideBlockedReason = result.blockedReason;
+      const jobs = result.roles.map((role) => jobServeRoleToNormalizedJob(role, query));
       return {
         source: adapterMetadata(source),
         keyword: query,
-        outcome: result.blockedReason
-          ? "blocked_robots_or_waf"
-          : jobs.length > 0
-            ? "success"
-            : "zero_results",
-        discovered: result.roles.length + result.excludedRoles.length,
-        excluded: result.excludedRoles.length,
+        outcome: discoveryOutcome(jobs.length, result.errors, result.blockedReason),
+        discovered: result.roles.length,
+        excluded: 0,
         jobs,
         pagesFetched: result.pagesFetched,
         costs: ZERO_COSTS,
@@ -42,6 +56,7 @@ export const buildJobServeAdapters: SourceAdapterFactory = (source, options) =>
       };
     },
   }));
+};
 
 export const buildLinearCareersAdapters: SourceAdapterFactory = (source) => [
   {
@@ -49,19 +64,18 @@ export const buildLinearCareersAdapters: SourceAdapterFactory = (source) => [
     defaultKeyword: source.id,
     async discover(input) {
       const result = await fetchLinearCareersJobs({
-        limit: input.limit,
         timeoutMs: input.timeoutMs,
       });
       return {
         source: adapterMetadata(source),
         keyword: source.id,
-        outcome: result.jobs.length > 0 ? "success" : "zero_results",
+        outcome: discoveryOutcome(result.jobs.length, result.errors, null),
         discovered: result.discovered,
-        excluded: 0,
+        excluded: Math.max(0, result.discovered - result.jobs.length),
         jobs: result.jobs,
-        pagesFetched: null,
+        pagesFetched: result.pagesFetched,
         costs: ZERO_COSTS,
-        errors: [],
+        errors: result.errors,
         blockedReason: null,
       };
     },
@@ -74,19 +88,18 @@ export const buildGoogleCareersAdapters: SourceAdapterFactory = (source) => [
     defaultKeyword: source.id,
     async discover(input) {
       const result = await fetchGoogleCareersJobs({
-        limit: input.limit,
         timeoutMs: input.timeoutMs,
       });
       return {
         source: adapterMetadata(source),
         keyword: source.id,
-        outcome: result.jobs.length > 0 ? "success" : "zero_results",
+        outcome: discoveryOutcome(result.jobs.length, result.errors, null, result.truncated),
         discovered: result.discovered,
         excluded: Math.max(0, result.discovered - result.jobs.length),
         jobs: result.jobs,
-        pagesFetched: result.jobs.length + 1,
+        pagesFetched: result.pagesFetched,
         costs: ZERO_COSTS,
-        errors: [],
+        errors: result.errors,
         blockedReason: null,
       };
     },
@@ -100,4 +113,16 @@ function adapterMetadata(source: RegisteredJobSource) {
     kind: source.kind,
     quality: source.quality,
   };
+}
+
+export function discoveryOutcome(
+  jobCount: number,
+  errors: readonly string[],
+  blockedReason: string | null,
+  truncated = false,
+): SourceOutcome {
+  if (blockedReason) return "blocked_robots_or_waf";
+  if (truncated) return "partial";
+  if (errors.length > 0) return "http_error";
+  return jobCount > 0 ? "success" : "zero_results";
 }

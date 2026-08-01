@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JOB_SEARCH_SCHEMA, quoteSqlLiteral } from "./config";
-import { runPsql, runPsqlJson } from "./psql";
+import { type PsqlResult, type PsqlSession, runPsql, runPsqlJson, withPsqlSession } from "./psql";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../../db/migrations", import.meta.url));
 const MIGRATION_FILENAME_RE = /^(\d{3})_[a-z0-9_]+\.sql$/;
@@ -26,6 +26,19 @@ export interface MigrationPlan {
   applied: Migration[];
   pending: Migration[];
 }
+
+export interface MigrationExecutor {
+  runPsql(sql: string, options?: { setSearchPath?: boolean }): Promise<PsqlResult>;
+  runPsqlJson<T>(sql: string, options?: { setSearchPath?: boolean }): Promise<T>;
+}
+
+export interface ApplyMigrationsOptions {
+  loadMigrations?: () => Promise<Migration[]>;
+  withSession?: <T>(callback: (session: PsqlSession) => Promise<T>) => Promise<T>;
+}
+
+const systemMigrationExecutor: MigrationExecutor = { runPsql, runPsqlJson };
+const MIGRATION_ADVISORY_LOCK = "job_search.schema_migrations";
 
 export function parseMigrationVersion(filename: string): string {
   const match = MIGRATION_FILENAME_RE.exec(filename);
@@ -65,14 +78,16 @@ export async function loadMigrations(migrationsDir = MIGRATIONS_DIR): Promise<Mi
   return migrations;
 }
 
-export async function getAppliedMigrations(): Promise<AppliedMigration[]> {
-  const exists = await runPsqlJson<boolean>(
+export async function getAppliedMigrations(
+  executor: MigrationExecutor = systemMigrationExecutor,
+): Promise<AppliedMigration[]> {
+  const exists = await executor.runPsqlJson<boolean>(
     `SELECT to_json(to_regclass(${quoteSqlLiteral(`${JOB_SEARCH_SCHEMA}.schema_migrations`)}) IS NOT NULL);`,
     { setSearchPath: false },
   );
   if (!exists) return [];
 
-  return runPsqlJson<AppliedMigration[]>(
+  return executor.runPsqlJson<AppliedMigration[]>(
     `SELECT COALESCE(
        json_agg(
          json_build_object(
@@ -90,9 +105,29 @@ export async function getAppliedMigrations(): Promise<AppliedMigration[]> {
   );
 }
 
-export async function planMigrations(migrations?: Migration[]): Promise<MigrationPlan> {
+export function assertAppliedMigrationsKnown(
+  appliedRows: AppliedMigration[],
+  localMigrations: Migration[],
+): void {
+  const localByVersion = new Map(
+    localMigrations.map((migration) => [migration.version, migration]),
+  );
+  for (const applied of appliedRows) {
+    if (!localByVersion.has(applied.version)) {
+      throw new Error(
+        `Database contains migration ${applied.version} (${applied.filename}) unknown to this checkout; refusing to migrate a newer schema`,
+      );
+    }
+  }
+}
+
+export async function planMigrations(
+  migrations?: Migration[],
+  executor: MigrationExecutor = systemMigrationExecutor,
+): Promise<MigrationPlan> {
   const localMigrations = migrations ?? (await loadMigrations());
-  const appliedRows = await getAppliedMigrations();
+  const appliedRows = await getAppliedMigrations(executor);
+  assertAppliedMigrationsKnown(appliedRows, localMigrations);
   const appliedByVersion = new Map(appliedRows.map((row) => [row.version, row]));
   const applied: Migration[] = [];
   const pending: Migration[] = [];
@@ -128,15 +163,53 @@ VALUES (${quoteSqlLiteral(migration.version)}, ${quoteSqlLiteral(migration.filen
 COMMIT;`;
 }
 
-export async function applyPendingMigrations(): Promise<MigrationPlan> {
-  const migrations = await loadMigrations();
-  const plan = await planMigrations(migrations);
+export function migrationAdvisoryLockSql(): string {
+  return `SELECT pg_advisory_lock(hashtext(${quoteSqlLiteral(MIGRATION_ADVISORY_LOCK)}));`;
+}
 
-  for (const migration of plan.pending) {
-    await runPsql(buildMigrationTransaction(migration), { setSearchPath: false });
-  }
+export function migrationAdvisoryUnlockSql(): string {
+  return `SELECT pg_advisory_unlock(hashtext(${quoteSqlLiteral(MIGRATION_ADVISORY_LOCK)}));`;
+}
 
-  return plan;
+export async function applyPendingMigrations(
+  options: ApplyMigrationsOptions = {},
+): Promise<MigrationPlan> {
+  const load = options.loadMigrations ?? loadMigrations;
+  const withSession = options.withSession ?? withPsqlSession;
+
+  return withSession(async (session) => {
+    let lockHeld = false;
+    let primaryFailure: unknown;
+    let didFail = false;
+    let result: MigrationPlan | undefined;
+    try {
+      await session.runPsql(migrationAdvisoryLockSql(), { setSearchPath: false });
+      lockHeld = true;
+
+      const migrations = await load();
+      const plan = await planMigrations(migrations, session);
+      for (const migration of plan.pending) {
+        await session.runPsql(buildMigrationTransaction(migration), { setSearchPath: false });
+      }
+
+      result = plan;
+    } catch (err) {
+      didFail = true;
+      primaryFailure = err;
+    }
+
+    if (lockHeld) {
+      try {
+        await session.runPsql(migrationAdvisoryUnlockSql(), { setSearchPath: false });
+      } catch (unlockError) {
+        if (!didFail) throw unlockError;
+      }
+    }
+
+    if (didFail) throw primaryFailure;
+    if (!result) throw new Error("Migration application completed without a plan");
+    return result;
+  });
 }
 
 export function migrationDisplayName(migration: Pick<Migration, "filename" | "checksum">): string {

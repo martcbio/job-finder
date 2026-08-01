@@ -9,6 +9,7 @@ brian-source-proof*.json
 brian-source-proof-summary.md
 artifacts/latest-opportunities.json
 artifacts/opportunities/
+artifacts/reviews/*.tar.gz
 supabase/.temp/
 
 # code coverage

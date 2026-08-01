@@ -67,7 +67,6 @@ function ingestResult(errors: string[]): JobIngestResult {
       jobserveQueries: [],
       jobserveMaxPages: 1,
       jobserveImportLimitPerQuery: 1,
-      directLimit: 1,
       timeoutMs: 1_000,
     },
     sources: [

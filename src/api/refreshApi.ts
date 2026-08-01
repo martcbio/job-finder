@@ -7,6 +7,7 @@ import {
   LANE_IMPORT_SOURCE_IDS,
 } from "../pipeline/queueRefresh/registry";
 import type { SourceAdapterDescriptor } from "../pipeline/sourceAdapterContract";
+import { DEFAULT_FAST_REFRESH_SOURCE_IDS } from "../pipeline/sourceRegistry";
 import { JOB_SOURCE_SITES } from "../pipeline/sourceSites";
 import { ApiError } from "./errors";
 
@@ -23,17 +24,7 @@ export function listQueueRefreshSources(): SourceAdapterDescriptor[] {
   const fast = uniqueFastRefreshSources();
   const seen = new Set(fast.map((source) => source.id));
   const defaultKeyword = SEARCH_KEYWORDS[0] ?? "Agentic";
-  const defaultIncluded = new Set([
-    "jobserve",
-    "linear-careers",
-    "jobspy",
-    "greenhouse",
-    "lever",
-    "ashby",
-    "workable",
-    "smartrecruiters",
-    "rippling",
-  ]);
+  const defaultIncluded = new Set<string>(DEFAULT_FAST_REFRESH_SOURCE_IDS);
 
   const siteDescriptors: SourceAdapterDescriptor[] = [];
   for (const site of JOB_SOURCE_SITES) {

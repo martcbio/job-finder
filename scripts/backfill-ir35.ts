@@ -1,4 +1,4 @@
-import { runPsql, runPsqlJson } from "../src/db/psql";
+import { runPsql, runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   type Ir35BackfillRow,
   buildIr35LabelPageBatchSql,
@@ -99,7 +99,7 @@ async function run(): Promise<void> {
   for (const sample of samples) console.log(`${sample.pageId}: job ${sample.jobId} — ${sample.title}`);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

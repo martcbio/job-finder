@@ -1,4 +1,4 @@
-import { runPsql, runPsqlJson } from "../src/db/psql";
+import { runPsql, runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   type PageIngestJobRow,
   buildInsertPageIngestAttemptSql,
@@ -273,7 +273,7 @@ async function captureHttpExtract(row: PageIngestJobRow, options: IngestPagesOpt
   }
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

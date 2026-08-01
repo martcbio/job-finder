@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildApplyJobExpirySql, buildExpireCandidatesSql, expiryCutoff } from "../jobExpiry";
+import {
+  buildApplyJobExpirySql,
+  buildExpireCandidatesSql,
+  buildMarkJobsStaleByCanonicalUrlsSql,
+  expiryCutoff,
+} from "../jobExpiry";
 
 describe("expiryCutoff", () => {
   test("subtracts the configured whole-day window", () => {
@@ -30,5 +35,21 @@ describe("job expiry SQL", () => {
     expect(sql).toContain("SET review_state = 'stale'");
     expect(sql).toContain("INSERT INTO job_search.review_events");
     expect(sql).toContain("ARRAY['source_expired']::text[]");
+    expect(sql).toContain("ORDER BY id\n  FOR UPDATE");
+  });
+
+  test("marks only deterministically dead URLs stale and preserves review history", () => {
+    const sql = buildMarkJobsStaleByCanonicalUrlsSql(
+      ["https://www.jobserve.com/gb/en/job/CA307D6B2A810A9F15"],
+      "page says the role is no longer available",
+    );
+    expect(sql).toContain(
+      "canonical_url = ANY(ARRAY['https://www.jobserve.com/gb/en/job/CA307D6B2A810A9F15']::text[])",
+    );
+    expect(sql).toContain("SET review_state = 'stale'");
+    expect(sql).toContain("ARRAY['source_url_dead']::text[]");
+    expect(sql).toContain("INSERT INTO job_search.review_events");
+    expect(sql).toContain("ORDER BY id\n  FOR UPDATE");
+    expect(sql).not.toContain("DELETE FROM");
   });
 });

@@ -1,4 +1,4 @@
-# Job Finder Local API
+# Jobsradar Local API
 
 This API is the frontend-facing boundary for the local Postgres job-search pipeline.
 It is intended for local UI prototyping and agent-assisted frontend work. The API
@@ -107,7 +107,8 @@ Returns enum-like values a UI should use for controls:
 `GET /api/sources`
 
 Returns refresh-capable sources, source lanes, and the normalized source-attempt
-status vocabulary a UI should use:
+status vocabulary a UI should use. JobServe has `defaultIncluded: true`; the
+routine refresh must not present it as a per-source opt-in:
 
 - `success`
 - `zero_results`
@@ -307,54 +308,6 @@ Body for a saved sweep plan:
 }
 ```
 
-### Fast refresh
-
-`POST /api/refresh/fast`
-
-Runs the cheap-first native fast-refresh path and returns elapsed time, options,
-per-source status, candidate/import/full-text/classification counts, latest job
-summaries, and cost/token totals. It uses the same `runFastRefresh` module as the
-CLI (`bun run jobs:fast-refresh`).
-
-Each source attempt includes `classification.classified` so UI and agent
-consumers can display classification coverage without joining against the
-top-level run summary.
-
-Body fields are optional and bounded:
-
-```json
-{
-  "limit": 20,
-  "sourceIds": ["jobserve", "linear-careers"],
-  "jobserveQueries": ["agentic", "langchain"],
-  "jobserveMaxPages": 1,
-  "jobserveImportLimitPerQuery": 8,
-  "directLimit": 6,
-  "timeoutMs": 20000,
-  "classifyLimit": 250
-}
-```
-
-`POST /api/refresh/source/:source`
-
-Runs the same fast-refresh path constrained to one source. Current source aliases:
-
-- `jobserve`
-- `linear` / `linear-careers`
-
-Example:
-
-```bash
-curl -X POST 'http://127.0.0.1:3737/api/refresh/source/linear' \
-  -H 'content-type: application/json' \
-  -d '{"limit": 5, "directLimit": 5, "timeoutMs": 20000}'
-```
-
-`GET /api/runs/latest`
-
-Returns the newest persisted refresh/search run evidence using the same shape as
-`GET /api/runs/:id`.
-
 Body for an inline plan:
 
 ```json
@@ -381,6 +334,70 @@ sources, even when no paid API key is configured. To execute from the API, send:
 
 Without the confirmation string the API returns `409 confirmation_required` and
 includes the plan in the error details.
+
+### Fast refresh
+
+`POST /api/refresh/fast`
+
+Runs the cheap-first queue-refresh path and returns elapsed time, effective
+options, per-source status, candidate/import/full-text/classification counts,
+latest job summaries, and cost/token totals. With `sourceIds` omitted, the API's
+default composition includes a bounded JobServe contract attempt. JobServe is
+therefore mandatory in the routine default pull, not a per-source opt-in.
+
+`sourceIds` is a diagnostic override that replaces the default composition; do
+not expose it as a normal source picker. Use `POST /api/refresh/source/:source`
+only to isolate a source while diagnosing it.
+
+Each source attempt includes `classification.classified` so UI and agent
+consumers can display classification coverage without joining against the
+top-level run summary. A `200` response means the refresh orchestration returned;
+it does not mean each source succeeded. Always inspect `data.sources`: a JobServe
+attempt can be `zero_results`, `partial`, `blocked`, `timeout`, `parser_error`,
+`rate_limited`, or `auth_required`, with `errors` and `blockedReason` preserved.
+
+Body fields are optional and bounded:
+
+```json
+{
+  "limit": 20,
+  "jobserveQueries": ["agentic", "langchain"],
+  "jobserveMaxPages": 1,
+  "jobserveImportLimitPerQuery": 5,
+  "timeoutMs": 20000,
+  "classifyLimit": 250
+}
+```
+
+Raw direct-source acquisition persists every card returned by each direct source.
+There is no `directLimit` or `direct-limit` request parameter.
+
+The bounded JobServe limits are at most three queries, two result pages per
+query, and five detail pages per query. Its native acquisition path makes no
+tokenized search, Reader, or model call; those cost fields are known `0` for that
+attempt. A later provider path may report `unknown` when usage is unavailable;
+unknown is not zero.
+
+`POST /api/refresh/source/:source`
+
+Runs the same refresh path constrained to one source for diagnosis. It is not a
+normal-pull configuration mechanism. Current source aliases:
+
+- `jobserve`
+- `linear` / `linear-careers`
+
+Example:
+
+```bash
+curl -X POST 'http://127.0.0.1:3737/api/refresh/source/linear' \
+  -H 'content-type: application/json' \
+  -d '{"limit": 5, "timeoutMs": 20000}'
+```
+
+`GET /api/runs/latest`
+
+Returns the newest persisted refresh/search run evidence using the same shape as
+`GET /api/runs/:id`.
 
 ### Applications
 

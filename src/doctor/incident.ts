@@ -35,11 +35,22 @@ export interface DoctorEvidence {
   readonly message: string;
 }
 
+type DoctorIncidentDraftInput = Omit<DoctorIncidentDraft, "fingerprint">;
+type NonRepairReason = Extract<DoctorClassification, { readonly _tag: "non_repair" }>["reason"];
+
 const EXTERNAL_TRANSIENT =
-  /\b(timeout|timed out|abort(?:ed)?|rate[ -]?limit|429|401|403|unauthori[sz]ed|forbidden|auth(?:entication)?(?: required| failed)?|captcha|robot|blocked|connection reset|econnreset|econnrefused|enotfound|dns|network|temporar(?:y|ily)|service unavailable|bad gateway|gateway timeout)\b/i;
+  /\b(timeout|timed out|abort(?:ed)?|rate[ -]?limit(?:ed|ing)?|429\s+too many requests|HTTP\s+(?:401|403|404|410|429|5\d{2})|unauthori[sz]ed|forbidden|auth(?:entication)?(?: required| failed)?|captcha|robot|blocked|usage restricted|fair usage|connection reset|econnreset|econnrefused|enotfound|dns|temporar(?:y|ily)|service unavailable|bad gateway|gateway timeout)\b/i;
+
+/** Explicit source-acquisition failures which are not evidence of a local defect. */
+const SOURCE_TRANSPORT_FAILURE =
+  /\b(?:fetch failed|failed to fetch|network(?: error| failure)?|transport failure)\b/i;
 
 const OPERATOR_INPUT =
-  /\b(unknown argument|requires a value|requires a positive integer|unknown ingest source|limited to \d+)\b/i;
+  /\b(unknown argument|requires a value|requires a (?:safe )?positive integer|unknown ingest source|limited to \d+)\b/i;
+
+/** The database readiness check has one exact, operator-resolvable migration diagnostic. */
+const PENDING_MIGRATION_OPERATOR_INPUT =
+  /^database has \d+ pending migration(?:s|\(s\))?\.?(?:\s+run bun run db:migrate\.?)?$/i;
 
 const INTERNAL_EVIDENCE =
   /\b(typeerror|referenceerror|syntaxerror|rangeerror|invariant|assertion|parser|parse error|invalid json|migration|schema|enoent|eacces|permission denied|database has|bug|defect|should never|unexpected)\b/i;
@@ -55,6 +66,11 @@ function messageOf(error: unknown): string {
  * @returns A persistence- and prompt-safe incident draft.
  */
 export function redactDoctorIncidentDraft(draft: DoctorIncidentDraft): DoctorIncidentDraft {
+  const { fingerprint: _fingerprint, ...input } = draft;
+  return redactAndFingerprintDoctorIncident(input);
+}
+
+function redactAndFingerprintDoctorIncident(draft: DoctorIncidentDraftInput): DoctorIncidentDraft {
   const evidence = draft.evidence.map((item) => ({
     source: redactSecrets(item.source),
     status: redactSecrets(item.status),
@@ -99,13 +115,40 @@ function fingerprint(
     .digest("hex");
 }
 
-function isExternalOnly(evidence: ReadonlyArray<DoctorEvidence>): boolean {
+function isExternalSourceFailure(message: string): boolean {
   return (
-    evidence.length > 0 &&
-    evidence.every(
-      (item) => EXTERNAL_TRANSIENT.test(item.message) && !INTERNAL_EVIDENCE.test(item.message),
-    )
+    (EXTERNAL_TRANSIENT.test(message) || SOURCE_TRANSPORT_FAILURE.test(message)) &&
+    !INTERNAL_EVIDENCE.test(message)
   );
+}
+
+function isOperatorInput(message: string): boolean {
+  return (
+    PENDING_MIGRATION_OPERATOR_INPUT.test(message) ||
+    (OPERATOR_INPUT.test(message) && !INTERNAL_EVIDENCE.test(message))
+  );
+}
+
+/**
+ * A receipt is non-repairable only when every error is a known safe outcome.
+ * External evidence wins in a mixed safe receipt because it identifies the source-side cause.
+ */
+function receiptNonRepairReason(evidence: ReadonlyArray<DoctorEvidence>): NonRepairReason | null {
+  if (evidence.length === 0) return null;
+  if (
+    !evidence.every(
+      (item) => isOperatorInput(item.message) || isExternalSourceFailure(item.message),
+    )
+  ) {
+    return null;
+  }
+  return evidence.some((item) => isExternalSourceFailure(item.message))
+    ? "external_transient"
+    : "operator_input";
+}
+
+function isExternalOnly(evidence: ReadonlyArray<DoctorEvidence>): boolean {
+  return evidence.length > 0 && evidence.every((item) => isExternalSourceFailure(item.message));
 }
 
 /**
@@ -132,26 +175,23 @@ export function classifyIngestResult(result: JobIngestResult): DoctorClassificat
     }));
   });
   const summary = `jobsradar ingest returned ${result.status}`;
-  if (isExternalOnly(evidence)) {
-    return { _tag: "non_repair", reason: "external_transient", summary };
+  const nonRepairReason = receiptNonRepairReason(evidence);
+  if (nonRepairReason !== null) {
+    return { _tag: "non_repair", reason: nonRepairReason, summary };
   }
-  return redactClassification({
-    _tag: "repair",
-    incident: {
-      schemaVersion: 1,
-      kind: "ingest_result",
-      severity: result.status,
-      summary,
-      evidence,
-      fingerprint: fingerprint("ingest_result", result.status, evidence),
-    },
+  return createRepairClassification({
+    schemaVersion: 1,
+    kind: "ingest_result",
+    severity: result.status,
+    summary,
+    evidence,
   });
 }
 
-function redactClassification(
-  classification: Extract<DoctorClassification, { readonly _tag: "repair" }>,
-): DoctorClassification {
-  return { _tag: "repair", incident: redactDoctorIncidentDraft(classification.incident) };
+function createRepairClassification(
+  incident: DoctorIncidentDraftInput,
+): Extract<DoctorClassification, { readonly _tag: "repair" }> {
+  return { _tag: "repair", incident: redactAndFingerprintDoctorIncident(incident) };
 }
 
 /**
@@ -162,22 +202,22 @@ function redactClassification(
  */
 export function classifyIngestThrow(error: unknown): DoctorClassification {
   const message = messageOf(error);
-  if (OPERATOR_INPUT.test(message)) {
+  const bareMessage = error instanceof Error ? redactSecrets(error.message) : message;
+  if (isOperatorInput(bareMessage)) {
     return { _tag: "non_repair", reason: "operator_input", summary: message };
+  }
+  if (isExternalSourceFailure(bareMessage)) {
+    return { _tag: "non_repair", reason: "external_transient", summary: message };
   }
   const evidence = [{ source: "jobsradar-cli", status: "threw", message }];
   if (isExternalOnly(evidence)) {
     return { _tag: "non_repair", reason: "external_transient", summary: message };
   }
-  return redactClassification({
-    _tag: "repair",
-    incident: {
-      schemaVersion: 1,
-      kind: "ingest_throw",
-      severity: "failed",
-      summary: "jobsradar ingest threw before returning a receipt",
-      evidence,
-      fingerprint: fingerprint("ingest_throw", "failed", evidence),
-    },
+  return createRepairClassification({
+    schemaVersion: 1,
+    kind: "ingest_throw",
+    severity: "failed",
+    summary: "jobsradar ingest threw before returning a receipt",
+    evidence,
   });
 }

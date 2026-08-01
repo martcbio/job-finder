@@ -16,7 +16,11 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>/Users/mcb</string>
+    <string>__JOBSRADAR_HOME__</string>
+    <key>NO_PROXY</key>
+    <string>127.0.0.1,localhost,::1</string>
+    <key>no_proxy</key>
+    <string>127.0.0.1,localhost,::1</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/bin:/bin</string>
     <key>JOBSRADAR_DOCTOR_CODEX_PATH</key>

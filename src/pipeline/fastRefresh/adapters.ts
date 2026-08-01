@@ -33,17 +33,14 @@ export function listFastRefreshSources(
 
 export async function ingestSourceAdapter(
   adapter: FastRefreshSourceAdapter,
-  options: Pick<FastRefreshOptions, "directLimit" | "jobserveImportLimitPerQuery" | "timeoutMs">,
+  options: Pick<FastRefreshOptions, "jobserveImportLimitPerQuery" | "timeoutMs">,
 ): Promise<FastRefreshSourceSummary> {
   const started = Date.now();
   try {
-    const limit =
-      adapter.kind === "direct_employer"
-        ? options.directLimit
-        : options.jobserveImportLimitPerQuery;
     const discovery = await adapter.discover({
       keyword: adapter.defaultKeyword,
-      limit,
+      // Direct adapters acquire every parsed card; this only bounds JobServe detail fetches.
+      limit: options.jobserveImportLimitPerQuery,
       timeoutMs: options.timeoutMs,
     });
     if (discovery.jobs.length === 0) {
@@ -75,7 +72,7 @@ export async function ingestSourceAdapter(
       source: discovery.source,
       keyword: discovery.keyword,
       runId: ingest.runId,
-      outcome: ingest.errors.length > 0 ? "http_error" : discovery.outcome,
+      outcome: outcomeAfterPersistence(discovery.outcome, ingest.errors.length),
       discovered: discovery.discovered,
       excluded: discovery.excluded,
       imported: ingest.jobsPersisted,
@@ -104,6 +101,15 @@ export async function ingestSourceAdapter(
       blockedReason: errorMessage(err),
     });
   }
+}
+
+export function outcomeAfterPersistence(
+  discoveryOutcome: SourceOutcome,
+  persistenceErrorCount: number,
+): SourceOutcome {
+  return persistenceErrorCount > 0 && discoveryOutcome === "success"
+    ? "http_error"
+    : discoveryOutcome;
 }
 
 function sourceSummary(input: {

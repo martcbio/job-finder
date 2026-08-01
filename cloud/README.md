@@ -1,6 +1,18 @@
-# Lab-openings Modal arm
+# Lab-openings Modal arm (legacy/manual)
 
-This is the cloud half of the dual-arm lab-openings scanner. Modal runs every three hours in UTC and writes only to a container scratch directory plus the estate Supabase `careers` schema; the macOS launchd arm writes the local market artifacts. Both are operational arms and publish comparable parity rows. Modal never mounts or writes `/Users/mcb/Claudelocal/careers/market`. Active targets come from `careers.targets`; `cloud/targets.json` fills missing ATS mappings and is the fallback when the remote target read fails.
+This is a legacy/manual cloud lane for the dual-arm lab-openings scanner. Modal
+runs every three hours in UTC and writes only to a container scratch directory
+plus the estate Supabase `careers` schema; the macOS launchd lane writes local
+market artifacts. They are independently operated and publish comparable parity
+rows. Modal never mounts or writes `/Users/mcb/Claudelocal/careers/market`.
+Active targets come from `careers.targets`; `cloud/targets.json` supplies missing
+ATS mappings when the remote target read fails.
+
+This lane is not part of normal `opps update`, which performs deterministic local
+raw ingestion from direct Lab ATS, mandatory bounded JobServe, Linear Careers,
+and Google Careers. Modal does not trigger a Mac scan on failure, and the Mac
+scanner does not trigger Modal. Run either lane explicitly when investigating or
+maintaining it; neither sends email or refreshes bookmark signals.
 
 ## Parity digest contract
 
@@ -59,10 +71,9 @@ Gate 0 passes only when `run_once` exits zero and prints a final JSON summary sh
 
 `health` may honestly be `degraded`, but `failed`, a nonzero scanner exit, an artifact error, a PostgREST error, or a missing final summary fails the gate. This run is the datacenter-egress check for Ashby, Greenhouse, and Lever before trusting the cron.
 
-After parity passes, `opps update` downloads the latest complete Modal source
-set through the local API, validates its count and full ATS bodies, and writes an
-atomic local projection. It visibly falls back to the Mac scanner on any
-failure; it never moves authenticated or session-bound acquisition to Modal.
+After parity passes, the published Modal source set remains a legacy/manual cloud
+artifact. It is not consumed by normal `opps update` and does not fall through to
+the Mac scanner. The Mac scanner remains an explicitly invoked, independent lane.
 
 ## Check authenticated reads
 

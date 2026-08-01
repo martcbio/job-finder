@@ -2,22 +2,46 @@
 set -euo pipefail
 
 readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly CANONICAL_ROOT="${HOME:?HOME is required}/Claudelocal/careers/jobsradar"
-readonly TARGET="${1:-all}"
+TARGET="all"
+TARGET_SET=0
+ASSUME_YES=0
 readonly BUN_EXECUTABLE="$(command -v bun)"
-readonly CODEX_EXECUTABLE="$(command -v codex)"
-readonly GIT_EXECUTABLE="$(command -v git)"
+CODEX_EXECUTABLE=""
+GIT_EXECUTABLE=""
 
-if [[ "${ROOT}" != "${CANONICAL_ROOT}" ]]; then
-  printf 'refusing: move the checkout to %s before installing services; current root is %s\n' \
-    "${CANONICAL_ROOT}" "${ROOT}" >&2
-  exit 1
+usage() {
+  printf 'usage: %s [--yes] [api|ui|fast-refresh|doctor|all]\n' "$0" >&2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --yes)
+      ASSUME_YES=1
+      ;;
+    api|ui|fast-refresh|doctor|all)
+      if [[ "$TARGET_SET" -eq 1 ]]; then
+        usage
+        exit 2
+      fi
+      TARGET="$1"
+      TARGET_SET=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [[ "${TARGET}" == "doctor" ]]; then
+  CODEX_EXECUTABLE="$(command -v codex)"
+  GIT_EXECUTABLE="$(command -v git)"
 fi
-
-case "${TARGET}" in
-  api|ui|fast-refresh|doctor|all) ;;
-  *) printf 'usage: %s [api|ui|fast-refresh|doctor|all]\n' "$0" >&2; exit 2 ;;
-esac
 
 install_agent() {
   local component="$1"
@@ -27,6 +51,7 @@ install_agent() {
   local destination="${HOME}/Library/LaunchAgents/${label}.plist"
   local retired_destination="${HOME}/Library/LaunchAgents/${retired_label}.plist"
 
+  mkdir -p "${HOME}/Library/Logs"
   "${BUN_EXECUTABLE}" "${ROOT}/scripts/render-jobsradar-launchd.ts" \
     "${template}" "${destination}" "${ROOT}" \
     "${CODEX_EXECUTABLE}" "${GIT_EXECUTABLE}" "${BUN_EXECUTABLE}"
@@ -40,8 +65,10 @@ install_agent() {
 }
 
 printf 'This replaces retired job-finder launch agents with jobsradar agents from %s.\n' "${ROOT}"
-read -r -p "Type 'install' to continue: " answer
-[[ "${answer}" == "install" ]] || { printf 'aborted\n' >&2; exit 1; }
+if [[ "$ASSUME_YES" -eq 0 ]]; then
+  read -r -p "Type 'install' to continue: " answer
+  [[ "${answer}" == "install" ]] || { printf 'aborted\n' >&2; exit 1; }
+fi
 
 if [[ "${TARGET}" == "api" || "${TARGET}" == "all" ]]; then
   install_agent \
@@ -58,6 +85,7 @@ if [[ "${TARGET}" == "ui" || "${TARGET}" == "all" ]]; then
     "com.mcb.job-finder-ui"
 fi
 if [[ "${TARGET}" == "fast-refresh" || "${TARGET}" == "all" ]]; then
+  mkdir -p "${ROOT}/logs/scheduled"
   install_agent \
     "fast refresh" \
     "${ROOT}/launchd/com.mcb.jobsradar.fast-refresh.plist.template" \

@@ -7,6 +7,7 @@ import type {
 } from "../fastRefresh/types";
 import { DEFAULT_FAST_REFRESH_OPTIONS, ZERO_COSTS } from "../fastRefresh/types";
 import { sourceAttemptStatus } from "../sourceAdapterContract";
+import { DEFAULT_FAST_REFRESH_SOURCE_IDS } from "../sourceRegistry";
 import { runJobspyLaneRefresh } from "./jobspyRefresh";
 import { partitionQueueRefreshSourceIds } from "./plan";
 import { runSourceSearchForSites, searchRunToSourceSummaries } from "./sourceSearchRun";
@@ -75,13 +76,19 @@ function skippedSourceSummary(sourceId: string, reason: string): FastRefreshSour
 }
 
 /** Coordinates bounded refresh lanes with explicit runtime environment dependencies. */
+export function resolveQueueRefreshSourceIds(
+  sourceIds: readonly string[] | undefined,
+): readonly string[] {
+  return sourceIds && sourceIds.length > 0 ? sourceIds : DEFAULT_FAST_REFRESH_SOURCE_IDS;
+}
+
 export async function runQueueRefresh(
   input: QueueRefreshOptions = {},
   deps: { env: NodeJS.ProcessEnv } = { env: process.env },
 ): Promise<FastRefreshResult> {
-  const requestedIds = input.sourceIds && input.sourceIds.length > 0 ? input.sourceIds : undefined;
+  const requestedIds = resolveQueueRefreshSourceIds(input.sourceIds);
   const { fastRefreshIds, searchSiteIds, laneImportIds, unsupportedIds } =
-    partitionQueueRefreshSourceIds(requestedIds ?? ["jobserve", "linear-careers"]);
+    partitionQueueRefreshSourceIds(requestedIds);
 
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
@@ -114,7 +121,7 @@ export async function runQueueRefresh(
     if (laneId === "jobspy") {
       laneSummaries.push(
         await runJobspyLaneRefresh({
-          limit: input.directLimit ?? 6,
+          limit: input.limit ?? DEFAULT_FAST_REFRESH_OPTIONS.limit,
           timeoutMs: input.timeoutMs ?? 20000,
           ...(input.jobspySnapshotFile === undefined
             ? {}

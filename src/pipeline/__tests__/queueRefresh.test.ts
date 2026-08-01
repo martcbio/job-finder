@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { partitionQueueRefreshSourceIds } from "../queueRefresh/plan";
 import { allQueueRefreshSourceIds } from "../queueRefresh/registry";
+import { resolveQueueRefreshSourceIds } from "../queueRefresh/run";
+import { DEFAULT_FAST_REFRESH_SOURCE_IDS } from "../sourceRegistry";
 
 describe("queue refresh planning", () => {
+  test("uses every shared fast-refresh source by default", () => {
+    expect(resolveQueueRefreshSourceIds(undefined)).toEqual(DEFAULT_FAST_REFRESH_SOURCE_IDS);
+    expect(resolveQueueRefreshSourceIds(undefined)).toContain("google-careers");
+  });
+
   test("partitions native feeds vs ATS search sites vs lane imports", () => {
     const plan = partitionQueueRefreshSourceIds([
       "jobserve",

@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import { screenJob, type JobScreeningDecision } from "../src/pipeline/jobScreening";
 
 interface FullTextJobRow {
@@ -280,7 +280,7 @@ async function run(): Promise<void> {
   console.log(`Jobs: ${rows.length}`);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

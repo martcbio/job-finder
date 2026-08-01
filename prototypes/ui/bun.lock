@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "job-finder-prototypes",
+        "name": "jobsradar-prototypes",
       "dependencies": {
         "react": "^19.1.0",
         "react-dom": "^19.1.0",

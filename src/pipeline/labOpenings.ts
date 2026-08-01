@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { accessSync, constants, statSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { logger } from "../logger";
 import { listOrgJobs as listAshbyOrgJobs } from "../services/ats/ashby";
@@ -19,8 +20,47 @@ import { classifyLabOpening, type LabOpeningDecision } from "./labOpeningDecisio
 
 const log = logger.child({ component: "pipeline/lab-openings" });
 
-const DEFAULT_MARKET_DIR = "/Users/mcb/Claudelocal/careers/market";
-const DEFAULT_PROJECT_DIR = join(import.meta.dir, "..", "..");
+function projectDirForModule(moduleDir: string): string {
+  return resolve(moduleDir, "..", "..");
+}
+
+function marketDirForProject(projectDir: string): string {
+  let ancestor = resolve(projectDir);
+  while (true) {
+    const marketDir = join(ancestor, "market");
+    if (isReadable(join(marketDir, "targets.json"))) return marketDir;
+
+    const parent = dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+
+  throw new Error(
+    `Cannot find market/targets.json from project directory ${projectDir}. Set CAREERS_MARKET_DIR explicitly.`,
+  );
+}
+
+function isReadable(path: string): boolean {
+  try {
+    accessSync(path, constants.R_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function projectDirForEnvironment(env: Readonly<Record<string, string | undefined>>): string {
+  return env.CAREERS_PROJECT_DIR || DEFAULT_PROJECT_DIR;
+}
+
+function marketDirForEnvironment(
+  env: Readonly<Record<string, string | undefined>>,
+  projectDir: string,
+): string {
+  return env.CAREERS_MARKET_DIR || marketDirForProject(projectDir);
+}
+
+const DEFAULT_PROJECT_DIR = projectDirForModule(import.meta.dir);
 const PACKAGE_VERSION = "2026.05.02.1";
 const IMPLEMENTATION_REVISION = "lab-openings-v1";
 const FRESH_FOR_MS = 30 * 60 * 60 * 1000;
@@ -172,9 +212,10 @@ export interface LabOpeningsModule {
 export function resolveLabOpeningsPaths(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): { marketDir: string; projectDir: string } {
+  const projectDir = projectDirForEnvironment(env);
   return {
-    marketDir: env.CAREERS_MARKET_DIR ?? DEFAULT_MARKET_DIR,
-    projectDir: env.CAREERS_PROJECT_DIR ?? DEFAULT_PROJECT_DIR,
+    marketDir: marketDirForEnvironment(env, projectDir),
+    projectDir,
   };
 }
 
@@ -656,9 +697,8 @@ async function publishLegacyAttempt(input: {
 }
 
 export function createLabOpeningsModule(options: LabOpeningsModuleOptions = {}): LabOpeningsModule {
-  const paths = resolveLabOpeningsPaths();
-  const marketDir = options.marketDir ?? paths.marketDir;
-  const projectDir = options.projectDir ?? paths.projectDir;
+  const projectDir = options.projectDir ?? projectDirForEnvironment(process.env);
+  const marketDir = options.marketDir ?? marketDirForEnvironment(process.env, projectDir);
   const now = options.now ?? (() => new Date());
   const makeRunId = options.makeRunId ?? defaultRunId;
   const listers =

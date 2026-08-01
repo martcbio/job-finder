@@ -4,8 +4,12 @@
 <dict>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>DATABASE_URL</key>
-		<string>postgres://mcb@localhost:5432/jobs</string>
+		<key>HOME</key>
+		<string>__JOBSRADAR_HOME__</string>
+		<key>NO_PROXY</key>
+		<string>127.0.0.1,localhost,::1</string>
+		<key>no_proxy</key>
+		<string>127.0.0.1,localhost,::1</string>
 		<key>PATH</key>
 		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 	</dict>
@@ -17,14 +21,17 @@
 	<array>
 		<string>/bin/bash</string>
 		<string>-c</string>
-		<string>set -a; source "$HOME/.config/estate-control-plane.env"; set +a; exec /opt/homebrew/bin/bun run api</string>
+		<string>set -eu; if [[ -r "$HOME/.config/estate-control-plane.env" ]]; then set -a; source "$HOME/.config/estate-control-plane.env"; set +a; fi; . "$2/scripts/lib/jobsradar-runtime.sh"; jobsradar_configure_database_url; jobsradar_configure_loopback_no_proxy; exec "$1" run api</string>
+		<string>jobsradar-api</string>
+		<string>__BUN_EXECUTABLE__</string>
+		<string>__JOBSRADAR_ROOT__</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/Users/mcb/Library/Logs/jobsradar-api.err.log</string>
+	<string>__JOBSRADAR_HOME__/Library/Logs/jobsradar-api.err.log</string>
 	<key>StandardOutPath</key>
-	<string>/Users/mcb/Library/Logs/jobsradar-api.out.log</string>
+	<string>__JOBSRADAR_HOME__/Library/Logs/jobsradar-api.out.log</string>
 	<key>WorkingDirectory</key>
 	<string>__JOBSRADAR_ROOT__</string>
 </dict>

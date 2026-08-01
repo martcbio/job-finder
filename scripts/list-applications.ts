@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   type ApplicationListRow,
   type ApplicationStatus,
@@ -105,7 +105,7 @@ async function run(): Promise<void> {
   await writeOrPrint(renderApplicationsMarkdown(rows), options.output);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

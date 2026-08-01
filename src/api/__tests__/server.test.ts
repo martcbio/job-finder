@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_FAST_REFRESH_OPTIONS } from "../../pipeline/fastRefresh";
 import { type ApiQuery, createJobFinderApiHandler, type FastRefreshRunner } from "../server";
 
 function request(path: string, init: RequestInit = {}): Request {
@@ -138,7 +139,6 @@ describe("job-finder API", () => {
             jobserveQueries: ["agentic"],
             jobserveMaxPages: 1,
             jobserveImportLimitPerQuery: 2,
-            directLimit: 1,
             timeoutMs: 5000,
             classifyLimit: 10,
           },
@@ -191,7 +191,6 @@ describe("job-finder API", () => {
           jobserveQueries: ["agentic"],
           jobserveMaxPages: 1,
           jobserveImportLimitPerQuery: 2,
-          directLimit: 1,
           timeoutMs: 5000,
           classifyLimit: 10,
         }),
@@ -205,10 +204,10 @@ describe("job-finder API", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       limit: 3,
+      sourceIds: DEFAULT_FAST_REFRESH_OPTIONS.sourceIds,
       jobserveQueries: ["agentic"],
       jobserveMaxPages: 1,
       jobserveImportLimitPerQuery: 2,
-      directLimit: 1,
       timeoutMs: 5000,
       classifyLimit: 10,
     });
@@ -262,7 +261,6 @@ describe("job-finder API", () => {
             jobserveQueries: ["agentic"],
             jobserveMaxPages: 1,
             jobserveImportLimitPerQuery: 1,
-            directLimit: 2,
             timeoutMs: 5000,
             classifyLimit: 10,
           },
@@ -310,7 +308,7 @@ describe("job-finder API", () => {
       request("/api/refresh/source/linear", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ limit: 2, directLimit: 2, jobserveMaxPages: 1, timeoutMs: 5000 }),
+        body: JSON.stringify({ limit: 2, jobserveMaxPages: 1, timeoutMs: 5000 }),
       }),
     );
 
@@ -319,7 +317,6 @@ describe("job-finder API", () => {
     expect(calls[0]).toMatchObject({
       sourceIds: ["linear-careers"],
       limit: 2,
-      directLimit: 2,
     });
   });
 

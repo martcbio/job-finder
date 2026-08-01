@@ -19,7 +19,7 @@ scheduled_run_notes() {
 should_publish_parity() {
   local scanner_status="${1:?scanner status is required}"
   local publication_status="${2:?publication status is required}"
-  local published_run_id="${3:?published run id is required}"
+  local published_run_id="${3?published run id argument is required}"
   local run_id="${4:?run id is required}"
 
   ((scanner_status == 0)) &&

@@ -3,6 +3,7 @@ import {
   assertSourceDiscoveryResultContract,
   describeSourceAdapter,
   type FastRefreshSourceAdapter,
+  sourceAttemptStatus,
 } from "../sourceAdapterContract";
 
 const fixtureAdapter: FastRefreshSourceAdapter = {
@@ -227,5 +228,16 @@ describe("source adapter contract", () => {
         ],
       }),
     ).toThrow("result.outcome zero_results cannot include normalized jobs");
+  });
+
+  test("does not let an error snippet override partially imported jobs", () => {
+    expect(sourceAttemptStatus("http_error", 1, ["HTTP 401 from a later page"])).toBe("partial");
+    expect(sourceAttemptStatus("http_error", 1, ["HTTP 429 rate limited"])).toBe("partial");
+    expect(sourceAttemptStatus("http_error", 0, ["HTTP 401"])).toBe("auth_required");
+    expect(sourceAttemptStatus("http_error", 0, ["HTTP 429 rate limited"])).toBe("rate_limited");
+    expect(sourceAttemptStatus("http_error", 0, ["Job URL includes /roles/429/engineer"])).toBe(
+      "partial",
+    );
+    expect(sourceAttemptStatus("http_error", 0, ["salary rate was unavailable"])).toBe("partial");
   });
 });

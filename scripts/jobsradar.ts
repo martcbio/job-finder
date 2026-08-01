@@ -41,10 +41,11 @@ const doctorSpoolRoot =
 function usage(): string {
   return [
     "Usage:",
-    "  jobsradar ingest [--source <id>] [--json]",
+    "  jobsradar ingest [--source <id>] [--jobserve-query <query>] [--jobserve-max-pages <n>]",
+    "                   [--jobserve-detail-limit <n>] [--timeout-ms <n>] [--json]",
     "",
     "Raw acquisition only: fetch, preserve evidence, normalize, and persist.",
-    "Default sources include bounded JobServe plus lab ATS, Linear, and Google Careers.",
+    "Default sources include required JobServe plus lab ATS, Linear, and Google Careers.",
     "JobServe runs locally with pacing and immediate fair-use aborts.",
   ].join("\n");
 }
@@ -114,15 +115,6 @@ function parseArgs(argv: string[]): Result<CliOptions, JobsradarCliError> {
       const parsed = positiveInteger(value.value, argument);
       if (parsed._tag === "err") return parsed;
       ingest.jobserveImportLimitPerQuery = parsed.value;
-      index++;
-      continue;
-    }
-    if (argument === "--direct-limit") {
-      const value = requiredValue(argv, index, argument);
-      if (value._tag === "err") return value;
-      const parsed = positiveInteger(value.value, argument);
-      if (parsed._tag === "err") return parsed;
-      ingest.directLimit = parsed.value;
       index++;
       continue;
     }

@@ -1,22 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [[ -h "${SCRIPT_SOURCE}" ]]; do
+  SCRIPT_DIR="$(cd -P "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
+  SCRIPT_SOURCE="$(readlink "${SCRIPT_SOURCE}")"
+  if [[ "${SCRIPT_SOURCE}" != /* ]]; then
+    SCRIPT_SOURCE="${SCRIPT_DIR}/${SCRIPT_SOURCE}"
+  fi
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
 REPO="${OPPS_REPO:-$(dirname "${SCRIPT_DIR}")}"
-export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  opps update                 Refresh all configured sources and email the selection
+  opps update [ingest options] Run the deterministic Jobsradar raw ingest
   opps signals                Refresh bookmark hiring/funding company intelligence
   opps list [options]         Print and email the current mixed-source opportunity list
   opps json [options]         Emit the current report as JSON
-  opps doctor                 Check the database, API, Modal scanner, and browser UI
+  opps doctor                 Check the database, API, and browser UI
   opps open                   Open the Latest 50 browser view
 
-Every update includes bounded, paced JobServe contracts. It aborts on fair-use restriction.
-Selections are always emailed through Resend. JSON exports are not.
+Default ingestion includes bounded, paced JobServe contracts. It aborts on fair-use restriction.
+`opps update` does not rank, report, email, or fall back to a different scanner.
 EOF
 }
 
@@ -24,6 +31,10 @@ if [[ ! -d "${REPO}" ]]; then
   printf 'opps: repository not found: %s\n' "${REPO}" >&2
   exit 1
 fi
+
+source "${REPO}/scripts/lib/jobsradar-runtime.sh"
+jobsradar_configure_database_url
+jobsradar_configure_loopback_no_proxy
 
 command="${1:---help}"
 if [[ $# -gt 0 ]]; then
@@ -33,8 +44,7 @@ cd "${REPO}"
 
 case "${command}" in
   update)
-    refresh_args=(--refresh-cloud-labs --refresh-direct --refresh-signals --refresh-jobserve --strict-source-health --quiet --email)
-    exec bun scripts/list-latest-opportunities.ts "${refresh_args[@]}" "$@"
+    exec bun scripts/jobsradar.ts ingest "$@"
     ;;
   list)
     exec bun scripts/list-latest-opportunities.ts --email "$@"
@@ -57,25 +67,6 @@ case "${command}" in
       printf 'api       ok\n'
     else
       printf 'api       unavailable\n' >&2
-      failed=1
-    fi
-    if cloud_ops="$(curl --fail --silent --show-error "http://127.0.0.1:3737/api/cloud/ops")" &&
-      modal_success="$(
-        printf '%s' "${cloud_ops}" |
-          jq -er '
-            .data.doctor.rows[]
-            | select(
-                .task == "jobsradar"
-                and .substrate == "modal"
-                and .stale == false
-                and .unhealthy == false
-              )
-            | .latest_success_at
-          '
-      )"; then
-      printf 'modal     ok %s\n' "${modal_success}"
-    else
-      printf 'modal     unavailable, stale, or unhealthy\n' >&2
       failed=1
     fi
     if curl --fail --silent --show-error "http://127.0.0.1:32002/" >/dev/null; then

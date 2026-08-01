@@ -4,10 +4,26 @@ import {
   renderFastRefreshMarkdown,
   runFastRefresh,
 } from "../src/pipeline/fastRefresh";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { closePsqlClients } from "../src/db/psql";
 
 interface CliOptions extends FastRefreshOptions {
   json: boolean;
 }
+
+const KNOWN_FLAGS = new Set([
+  "--source",
+  "--source-id",
+  "--jobserve-query",
+  "-q",
+  "--jobserve-max-pages",
+  "--jobserve-import-limit-per-query",
+  "--timeout-ms",
+  "--classify-limit",
+  "--limit",
+  "--json",
+]);
 
 function splitList(value: string): string[] {
   return value
@@ -46,6 +62,11 @@ function readNumberFlag(args: string[], name: string, fallback: number): number 
 }
 
 function parseOptions(args: string[]): CliOptions {
+  for (const argument of args) {
+    if (argument.startsWith("-") && !KNOWN_FLAGS.has(argument)) {
+      throw new Error(`Unknown argument: ${argument}`);
+    }
+  }
   const queries = readRepeatedFlag(args, ["--jobserve-query", "-q"]);
   const sources = readRepeatedFlag(args, ["--source", "--source-id"]);
   return {
@@ -62,7 +83,6 @@ function parseOptions(args: string[]): CliOptions {
       "--jobserve-import-limit-per-query",
       DEFAULT_FAST_REFRESH_OPTIONS.jobserveImportLimitPerQuery,
     ),
-    directLimit: readNumberFlag(args, "--direct-limit", DEFAULT_FAST_REFRESH_OPTIONS.directLimit),
     timeoutMs: readNumberFlag(args, "--timeout-ms", DEFAULT_FAST_REFRESH_OPTIONS.timeoutMs),
     classifyLimit: readNumberFlag(
       args,
@@ -76,15 +96,14 @@ function parseOptions(args: string[]): CliOptions {
 function printUsage(): void {
   console.log(`Usage:
   bun run jobs:fast-refresh -- --limit 20
-  bun run jobserve:refresh-contracts -- -q agentic -q langchain --jobserve-max-pages 3
+  bun run jobserve:refresh-contracts -- -q "AI engineer" -q "agentic AI" -q "LLM engineer" --jobserve-max-pages 2
 
 Options:
-  --source                Source id to run. Repeatable. Defaults to JobServe, Linear, and Google.
-  -q, --jobserve-query    JobServe query. Repeatable. Defaults to agentic/langchain/FDE/inference.
-  --jobserve-max-pages    JobServe classic pages per query. Defaults to 3.
+  --source, --source-id   Source id to run. Repeatable. Defaults to JobServe, Linear, and Google.
+  -q, --jobserve-query    JobServe query. Repeatable. Defaults to AI engineer, agentic AI, LLM engineer.
+  --jobserve-max-pages    JobServe classic pages per query. Defaults to 2.
   --jobserve-import-limit-per-query
-                           JobServe rows to persist per query after discovery. Defaults to 8.
-  --direct-limit          Roles to ingest per direct careers source. Defaults to 6.
+                           JobServe detail pages to persist per query. Defaults to 5.
   --timeout-ms            Per-request timeout. Defaults to 20000.
   --classify-limit        Max jobs to classify per run. Defaults to 250.
   --limit                 Latest ranked jobs to print. Defaults to 20.
@@ -93,29 +112,46 @@ Options:
 Requires DATABASE_URL. Uses the shared fast-refresh pipeline module behind the CLI and API.`);
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  if (args.includes("--help") || args.includes("-h")) {
-    printUsage();
-    return;
-  }
+export interface FastRefreshCliDependencies {
+  runFastRefresh: typeof runFastRefresh;
+  closePsqlClients: typeof closePsqlClients;
+}
 
-  const { json, ...options } = parseOptions(args);
-  const result = await runFastRefresh(options);
-  if (json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(renderFastRefreshMarkdown(result).trimEnd());
-  }
+const defaultDependencies: FastRefreshCliDependencies = { runFastRefresh, closePsqlClients };
 
-  const errors = result.sources.flatMap((source) => source.errors);
-  const runIds = result.sources.flatMap((source) => (source.runId === null ? [] : [source.runId]));
-  if (runIds.length === 0 || errors.length > 0) {
-    process.exitCode = 1;
+export async function executeFastRefreshCli(
+  args: string[],
+  dependencies: FastRefreshCliDependencies = defaultDependencies,
+): Promise<number> {
+  try {
+    if (args.includes("--help") || args.includes("-h")) {
+      printUsage();
+      return 0;
+    }
+
+    const { json, ...options } = parseOptions(args);
+    const result = await dependencies.runFastRefresh(options);
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(renderFastRefreshMarkdown(result).trimEnd());
+    }
+
+    const errors = result.sources.flatMap((source) => source.errors);
+    const runIds = result.sources.flatMap((source) => (source.runId === null ? [] : [source.runId]));
+    return runIds.length === 0 || errors.length > 0 ? 1 : 0;
+  } finally {
+    await dependencies.closePsqlClients();
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.stack : err);
-  process.exitCode = 1;
-});
+async function main(): Promise<void> {
+  process.exitCode = await executeFastRefreshCli(process.argv.slice(2));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.stack : err);
+    process.exitCode = 1;
+  });
+}

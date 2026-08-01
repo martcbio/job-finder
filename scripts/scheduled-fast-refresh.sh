@@ -1,13 +1,23 @@
-#!/bin/zsh
+#!/bin/bash
 # Scheduled fast-refresh wrapper, run by launchd (com.mcb.jobsradar.fast-refresh).
-# Sources the login profile so JINA_API_KEY / OPENROUTER_API_KEY are available.
+# Reads the explicit control-plane environment; it does not require login-shell dotfiles.
 set -euo pipefail
 
-PROJECT_DIR="${0:A:h:h}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_DIR/logs/scheduled"
 KEEP_RUNS=60
 
-export DATABASE_URL="${DATABASE_URL:-postgres://mcb@localhost:5432/jobs}"
+CONTROL_PLANE_ENV="${HOME}/.config/estate-control-plane.env"
+if [[ -r "$CONTROL_PLANE_ENV" ]]; then
+  set -a
+  source "$CONTROL_PLANE_ENV"
+  set +a
+fi
+
+source "$PROJECT_DIR/scripts/lib/jobsradar-runtime.sh"
+jobsradar_configure_database_url
+jobsradar_configure_loopback_no_proxy
 
 mkdir -p "$LOG_DIR"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"

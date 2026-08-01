@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -18,12 +18,12 @@ test("opps exposes the short safe workflow", async () => {
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
   expect(stdout).toContain("opps update");
-  expect(stdout).toContain("all configured sources");
-  expect(stdout).toContain("JobServe contracts");
-  expect(stdout).toContain("Selections are always emailed through Resend");
+  expect(stdout).toContain("deterministic Jobsradar raw ingest");
+  expect(stdout).toContain("Default ingestion includes bounded, paced JobServe contracts");
+  expect(stdout).toContain("does not rank, report, email, or fall back to a different scanner");
 });
 
-test("opps update refreshes every configured source without a JobServe flag", async () => {
+test("opps update invokes the default deterministic Jobsradar ingest without a hidden fallback", async () => {
   const fakeBin = await mkdtemp(join(tmpdir(), "opps-test-"));
   const argsPath = join(fakeBin, "args");
   const fakeBun = join(fakeBin, "bun");
@@ -42,12 +42,43 @@ test("opps update refreshes every configured source without a JobServe flag", as
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
-    expect(args).toContain("--refresh-cloud-labs");
-    expect(args).toContain("--refresh-direct");
-    expect(args).toContain("--refresh-signals");
-    expect(args).toContain("--refresh-jobserve");
-    expect(args).toContain("--strict-source-health");
-    expect(args).toContain("--email");
+    expect(args.trim().split("\n")).toEqual(["scripts/jobsradar.ts", "ingest"]);
+    expect(args).not.toContain("list-latest-opportunities.ts");
+    expect(args).not.toContain("--refresh-cloud-labs");
+    expect(args).not.toContain("--source");
+  } finally {
+    await rm(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("opps resolves its repository from a symlinked executable", async () => {
+  const fakeBin = await mkdtemp(join(tmpdir(), "opps-symlink-test-"));
+  const argsPath = join(fakeBin, "args");
+  const workingDirectoryPath = join(fakeBin, "working-directory");
+  const fakeBun = join(fakeBin, "bun");
+  const linkedOpps = join(fakeBin, "opps");
+  await writeFile(
+    fakeBun,
+    `#!/bin/sh\npwd > "${workingDirectoryPath}"\nprintf '%s\\n' "$@" > "${argsPath}"\n`,
+  );
+  await Promise.all([
+    chmod(fakeBun, 0o755),
+    symlink(join(process.cwd(), "scripts", "opps"), linkedOpps),
+  ]);
+
+  try {
+    const child = Bun.spawn(["bash", linkedOpps, "update"], {
+      cwd: process.cwd(),
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+    expect(await readFile(workingDirectoryPath, "utf8")).toBe(`${process.cwd()}\n`);
+    expect(await readFile(argsPath, "utf8")).toBe("scripts/jobsradar.ts\ningest\n");
   } finally {
     await rm(fakeBin, { recursive: true, force: true });
   }
@@ -77,29 +108,27 @@ test("opps list always sends the displayed selection through Resend", async () =
   }
 });
 
-test("opps doctor verifies the healthy Modal careers dependency", async () => {
+test("opps doctor bypasses proxies for local checks and does not require Modal", async () => {
   const fakeBin = await mkdtemp(join(tmpdir(), "opps-doctor-test-"));
   const fakePg = join(fakeBin, "pg_isready");
   const fakeCurl = join(fakeBin, "curl");
+  const proxyPath = join(fakeBin, "proxy");
   await writeFile(fakePg, "#!/bin/sh\nexit 0\n");
   await writeFile(
     fakeCurl,
-    `#!/bin/sh
-for arg in "$@"; do url="$arg"; done
-case "$url" in
-  */api/cloud/ops)
-    printf '%s\\n' '{"ok":true,"data":{"doctor":{"status":"available","rows":[{"task":"jobsradar","substrate":"modal","stale":false,"unhealthy":false,"latest_success_at":"2026-07-25T06:41:17Z"}]}}}'
-    ;;
-  *) printf '%s\\n' '{}';;
-esac
-`,
+    `#!/bin/sh\nprintf '%s\\n%s\\n' "$NO_PROXY" "$no_proxy" > "${proxyPath}"\nprintf '%s\\n' '{}'\n`,
   );
   await Promise.all([chmod(fakePg, 0o755), chmod(fakeCurl, 0o755)]);
 
   try {
     const child = Bun.spawn(["bash", "scripts/opps", "doctor"], {
       cwd: process.cwd(),
-      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` },
+      env: {
+        ...process.env,
+        NO_PROXY: "existing.example,localhost",
+        no_proxy: "legacy.example,127.0.0.1,::1",
+        PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+      },
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -111,7 +140,13 @@ esac
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
-    expect(stdout).toContain("modal     ok 2026-07-25T06:41:17Z");
+    expect(stdout).toContain("database  ok");
+    expect(stdout).toContain("api       ok");
+    expect(stdout).toContain("ui        http://127.0.0.1:32002/");
+    expect(stdout).not.toContain("modal");
+    expect(await readFile(proxyPath, "utf8")).toBe(
+      "existing.example,localhost,127.0.0.1,::1\nlegacy.example,127.0.0.1,::1,localhost\n",
+    );
   } finally {
     await rm(fakeBin, { recursive: true, force: true });
   }

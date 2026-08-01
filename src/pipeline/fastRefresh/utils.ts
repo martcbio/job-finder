@@ -68,6 +68,7 @@ export function outcomeFromError(err: unknown): SourceOutcome {
   const message = errorMessage(err);
   if (/timeout|aborted/i.test(message)) return "timeout";
   if (/captcha/i.test(message)) return "blocked_captcha";
+  if (/usage restricted/i.test(message)) return "blocked_robots_or_waf";
   if (/401|403|auth/i.test(message)) return "blocked_auth";
   if (/parse|could not find|could not parse/i.test(message)) return "parse_error";
   return "http_error";

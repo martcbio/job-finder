@@ -10,11 +10,7 @@ import { DEFAULT_JOB_INGEST_SOURCE_IDS, JOB_INGEST_SOURCE_IDS } from "./sourceRe
 export interface JobIngestOptions
   extends Pick<
     FastRefreshOptions,
-    | "jobserveQueries"
-    | "jobserveMaxPages"
-    | "jobserveImportLimitPerQuery"
-    | "directLimit"
-    | "timeoutMs"
+    "jobserveQueries" | "jobserveMaxPages" | "jobserveImportLimitPerQuery" | "timeoutMs"
   > {
   sourceIds: string[];
   marketDir: string;
@@ -62,24 +58,28 @@ export function normalizeJobIngestOptions(input: JobIngestOptionsInput = {}): Jo
     jobserveMaxPages: input.jobserveMaxPages ?? DEFAULT_FAST_REFRESH_OPTIONS.jobserveMaxPages,
     jobserveImportLimitPerQuery:
       input.jobserveImportLimitPerQuery ?? DEFAULT_FAST_REFRESH_OPTIONS.jobserveImportLimitPerQuery,
-    directLimit: input.directLimit ?? DEFAULT_FAST_REFRESH_OPTIONS.directLimit,
     timeoutMs: input.timeoutMs ?? DEFAULT_FAST_REFRESH_OPTIONS.timeoutMs,
   };
-  if (options.jobserveQueries.length > 3) {
-    throw new Error("JobServe ingest is limited to 3 queries");
-  }
-  if (options.jobserveMaxPages > 2) {
-    throw new Error("JobServe ingest is limited to 2 pages per query");
-  }
-  if (options.jobserveImportLimitPerQuery > 5) {
-    throw new Error("JobServe ingest is limited to 5 detail pages per query");
+  if (sourceIds.includes("jobserve")) {
+    if (options.jobserveQueries.length > 3) {
+      throw new Error("JobServe ingest is limited to 3 queries");
+    }
+    if (options.jobserveMaxPages > 2) {
+      throw new Error("JobServe ingest is limited to 2 pages per query");
+    }
+    if (options.jobserveImportLimitPerQuery > 5) {
+      throw new Error("JobServe ingest is limited to 5 detail pages per query");
+    }
   }
   return options;
 }
 
-function sourceHealth(source: FastRefreshSourceSummary): JobIngestSourceReceipt["status"] {
+export function sourceHealth(source: FastRefreshSourceSummary): JobIngestSourceReceipt["status"] {
   if (source.status === "success" || source.status === "zero_results") return "complete";
   if (source.status === "partial") return "degraded";
+  if (source.imported > 0 && (source.status === "blocked" || source.status === "timeout")) {
+    return "degraded";
+  }
   return "failed";
 }
 

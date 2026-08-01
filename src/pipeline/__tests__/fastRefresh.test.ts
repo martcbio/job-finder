@@ -11,6 +11,8 @@ import {
   SOURCE_ATTEMPT_STATUSES,
   sourceAttemptStatus,
 } from "../fastRefresh";
+import { outcomeAfterPersistence } from "../fastRefresh/adapters";
+import { discoveryOutcome } from "../fastRefresh/sourceFactories";
 
 function baseRow(overrides: Partial<FastRefreshJobRow> = {}): FastRefreshJobRow {
   return {
@@ -116,6 +118,149 @@ describe("fast refresh contract helpers", () => {
     expect(adapters[0]?.discover).toBeFunction();
   });
 
+  test("keeps JobServe usage restriction run-wide while allowing direct sources to continue", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    const fetcher = Object.assign(
+      async (input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.includes("jobserve.com")) {
+          return new Response(
+            "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+          );
+        }
+        if (url === "https://linear.app/careers") {
+          return new Response(
+            '<a href="/careers/00000000-0000-4000-8000-000000000001">Senior Engineer Europe Learn more →</a>',
+          );
+        }
+        if (url === "https://linear.app/careers/00000000-0000-4000-8000-000000000001") {
+          return new Response("<main><h1>Senior Engineer</h1><p>Build systems.</p></main>");
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      },
+      { preconnect: fetch.preconnect },
+    ) as typeof fetch;
+    globalThis.fetch = fetcher;
+
+    try {
+      const adapters = buildFastRefreshSourceAdapters({
+        sourceIds: ["jobserve", "linear-careers"],
+        jobserveQueries: ["one", "two", "three"],
+        jobserveMaxPages: 1,
+      });
+      const receipts = [];
+      for (const adapter of adapters) {
+        receipts.push(
+          await adapter.discover({ keyword: adapter.defaultKeyword, limit: 1, timeoutMs: 1000 }),
+        );
+      }
+
+      expect(receipts).toHaveLength(4);
+      expect(receipts.slice(0, 3).map((receipt) => receipt.outcome)).toEqual([
+        "blocked_robots_or_waf",
+        "blocked_robots_or_waf",
+        "blocked_robots_or_waf",
+      ]);
+      expect(receipts[1]?.errors[0]).toContain("query skipped");
+      expect(receipts[3]).toMatchObject({
+        source: { id: "linear-careers" },
+        outcome: "success",
+        discovered: 1,
+        excluded: 0,
+      });
+      expect(calls.filter((url) => url.includes("jobserve.com"))).toHaveLength(1);
+      expect(calls.filter((url) => url.includes("linear.app/careers"))).toHaveLength(2);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("turns ordinary JobServe detail failures into a partial source receipt", async () => {
+    const originalFetch = globalThis.fetch;
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const classicHtml = `<form><div id="joblistingcollection">
+      <div class="jobListItem" id="ABC123">
+        <a href="/gb/en/search-jobs/ABC123" class="jobListPosition">Senior AI Engineer</a>
+        <p class="jobListSkills">Build agentic systems. <a href="/gb/en/WABC123.jsjob">more</a></p>
+      </div>
+    </div><div id="actions"></div></form>`;
+    const responses = [
+      new Response(seedHtml),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+      ),
+      new Response(classicHtml),
+      new Response("temporarily unavailable", { status: 503 }),
+    ];
+    globalThis.fetch = (async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Unexpected JobServe request");
+      return response;
+    }) as unknown as typeof fetch;
+
+    try {
+      const [adapter] = buildFastRefreshSourceAdapters({
+        sourceIds: ["jobserve"],
+        jobserveQueries: ["agentic"],
+        jobserveMaxPages: 1,
+      });
+      if (!adapter) throw new Error("Expected JobServe adapter");
+
+      const receipt = await adapter.discover({ keyword: "agentic", limit: 1, timeoutMs: 1000 });
+
+      expect(receipt).toMatchObject({ outcome: "http_error", discovered: 1, excluded: 0 });
+      expect(receipt.jobs).toHaveLength(1);
+      expect(receipt.errors[0]).toContain("JobServe detail fetch failed");
+      expect(sourceAttemptStatus(receipt.outcome, receipt.jobs.length, receipt.errors)).toBe(
+        "partial",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("acquires every Linear card and derives excluded from discovered minus jobs", async () => {
+    const originalFetch = globalThis.fetch;
+    const listingId = (index: number) =>
+      `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const listings = Array.from(
+      { length: 18 },
+      (_, index) =>
+        `<a href="/careers/${listingId(index + 1)}">Engineer ${index + 1} Europe Learn more →</a>`,
+    ).join("\n");
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://linear.app/careers") return new Response(listings);
+      return new Response("<main><h1>Engineer</h1><p>Build systems.</p></main>");
+    }) as typeof fetch;
+
+    try {
+      const [adapter] = buildFastRefreshSourceAdapters({
+        sourceIds: ["linear-careers"],
+        jobserveQueries: [],
+        jobserveMaxPages: 1,
+      });
+      if (!adapter) throw new Error("Expected Linear adapter");
+
+      const receipt = await adapter.discover({
+        keyword: "linear-careers",
+        limit: 1,
+        timeoutMs: 1000,
+      });
+
+      expect(receipt.discovered).toBe(18);
+      expect(receipt.jobs).toHaveLength(18);
+      expect(receipt.excluded).toBe(receipt.discovered - receipt.jobs.length);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("source adapter descriptors are stable enough for UI and source-scoped refresh", () => {
     const sources = listFastRefreshSources({
       sourceIds: ["jobserve", "linear-careers", "google-careers"],
@@ -173,6 +318,25 @@ describe("fast refresh contract helpers", () => {
     expect(sourceAttemptStatus("parse_error", 0)).toBe("parser_error");
     expect(sourceAttemptStatus("http_error", 0, ["HTTP 429 rate limited"])).toBe("rate_limited");
     expect(sourceAttemptStatus("blocked_auth", 0)).toBe("auth_required");
+  });
+
+  test("keeps blocked discovery primary when persistence also has errors", () => {
+    expect(outcomeAfterPersistence("blocked_robots_or_waf", 1)).toBe("blocked_robots_or_waf");
+    expect(outcomeAfterPersistence("success", 1)).toBe("http_error");
+  });
+
+  test("reports a bounded Google listing scan as structured partial discovery", () => {
+    expect(
+      discoveryOutcome(
+        5,
+        [
+          "Google Careers discovery stopped at the 5-page safety cap while the final page still contained listings.",
+        ],
+        null,
+        true,
+      ),
+    ).toBe("partial");
+    expect(sourceAttemptStatus("partial", 5)).toBe("partial");
   });
 
   test("maps DB rows to UI-facing summaries with links, classification, eligibility, and dedupe", () => {

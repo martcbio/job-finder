@@ -1,4 +1,5 @@
 import { SEARCH_DOMAINS, SEARCH_KEYWORDS } from "../src/config/search";
+import { withPsqlClientCleanup } from "../src/db/psql";
 import { resolveJobSourceSites } from "../src/pipeline/sourceSites";
 import { planMigrations } from "../src/db/migrations";
 import {
@@ -316,7 +317,7 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

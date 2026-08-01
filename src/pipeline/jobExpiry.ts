@@ -47,6 +47,7 @@ export function buildApplyJobExpirySql(cutoff: Date): string {
   FROM job_search.jobs
   WHERE review_state = ANY(${expirableStateArraySql()})
     AND last_seen_at < ${timestampSql(cutoff)}
+  ORDER BY id
   FOR UPDATE
 ),
 updated_jobs AS (
@@ -91,6 +92,70 @@ FROM (
   FROM updated_jobs
   ORDER BY last_seen_at, id
 ) expired_job;`;
+}
+
+/**
+ * Reconciles a live, deterministic URL-death verdict without deleting evidence.
+ * Only queue states that can be safely auto-staled are changed; every transition
+ * receives a durable review event.
+ */
+export function buildMarkJobsStaleByCanonicalUrlsSql(
+  urls: readonly string[],
+  reason: string,
+): string {
+  const normalizedUrls = [...new Set(urls.map((url) => url.trim()).filter(Boolean))];
+  if (normalizedUrls.length === 0) return "SELECT '[]'::json;";
+  const urlArray = `ARRAY[${normalizedUrls.map(quoteSqlLiteral).join(", ")}]::text[]`;
+  return `WITH candidates AS (
+  SELECT id, title_normalized, company_hint, review_state, last_seen_at
+  FROM job_search.jobs
+  WHERE review_state = ANY(${expirableStateArraySql()})
+    AND canonical_url = ANY(${urlArray})
+  ORDER BY id
+  FOR UPDATE
+),
+updated_jobs AS (
+  UPDATE job_search.jobs j
+  SET review_state = 'stale'
+  FROM candidates c
+  WHERE j.id = c.id
+  RETURNING
+    j.id,
+    j.title_normalized,
+    j.company_hint,
+    c.review_state AS previous_state,
+    j.review_state,
+    j.last_seen_at
+),
+inserted_events AS (
+  INSERT INTO job_search.review_events (
+    job_id,
+    from_state,
+    to_state,
+    reason_codes,
+    note,
+    actor
+  )
+  SELECT
+    id,
+    previous_state,
+    review_state,
+    ARRAY['source_url_dead']::text[],
+    ${quoteSqlLiteral(reason)},
+    'system'
+  FROM updated_jobs
+)
+SELECT COALESCE(json_agg(row_to_json(staled_job)), '[]'::json)
+FROM (
+  SELECT
+    id::text AS id,
+    title_normalized AS title,
+    company_hint,
+    review_state,
+    last_seen_at::text AS last_seen_at
+  FROM updated_jobs
+  ORDER BY last_seen_at, id
+) staled_job;`;
 }
 
 function expirableStateArraySql(): string {

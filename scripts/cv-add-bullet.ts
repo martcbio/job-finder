@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import { buildApprovedBulletInsertSql } from "../src/pipeline/cvDraft";
 
 interface AddBulletOptions {
@@ -82,7 +82,7 @@ async function run(): Promise<void> {
   console.log(`Added approved CV bullet ${row.id}: ${row.theme_key} / ${row.title}`);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

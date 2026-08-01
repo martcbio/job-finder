@@ -17,7 +17,6 @@ export interface FastRefreshOptions {
   jobserveQueries: string[];
   jobserveMaxPages: number;
   jobserveImportLimitPerQuery: number;
-  directLimit: number;
   timeoutMs: number;
   classifyLimit: number;
 }
@@ -203,7 +202,6 @@ export const DEFAULT_FAST_REFRESH_OPTIONS: FastRefreshOptions = {
   jobserveQueries: DEFAULT_JOBSERVE_QUERIES,
   jobserveMaxPages: 2,
   jobserveImportLimitPerQuery: 5,
-  directLimit: 6,
   timeoutMs: 20000,
   classifyLimit: 250,
 };

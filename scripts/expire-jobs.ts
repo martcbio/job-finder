@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   DEFAULT_EXPIRY_DAYS,
   type ExpireJobRow,
@@ -83,7 +83,7 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

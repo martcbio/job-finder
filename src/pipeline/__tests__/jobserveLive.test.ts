@@ -57,6 +57,15 @@ describe("live JobServe parsing", () => {
     });
   });
 
+  test("decodes ampersands in JobServe card text", () => {
+    const [role] = parseJobServeRolesFromClassicHtml(
+      classicHtml.replace("Forward Deployed AI Engineer", "R&amp;D Engineer"),
+      { pageUrl: "https://www.jobserve.com/gb/en/JobListing.aspx?page=1" },
+    );
+
+    expect(role?.title).toBe("R&D Engineer");
+  });
+
   test("converts JobServe detail pages into scoped markdown with lists", () => {
     const markdown = jobServeDetailMarkdownFromHtml(
       `<!doctype html>
@@ -136,7 +145,7 @@ describe("live JobServe parsing", () => {
     expect(role?.priority_notes).not.toContain("outside_ir35");
   });
 
-  test("aborts immediately when JobServe returns its fair-usage restriction page", async () => {
+  test("stops immediately when JobServe returns its fair-usage restriction page", async () => {
     let requests = 0;
     const fetcher = (async () => {
       requests++;
@@ -146,15 +155,92 @@ describe("live JobServe parsing", () => {
       );
     }) as unknown as typeof fetch;
 
-    await expect(
-      fetchLiveJobServeRoles({
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 3,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(requests).toBe(1);
+    expect(result.roles).toEqual([]);
+    expect(result.blockedReason).toContain("usage restricted");
+  });
+
+  test("returns a zero-evidence blocked receipt when JobServe restricts search setup", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const restrictedHtml =
+      "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>";
+
+    for (const responseBodies of [[restrictedHtml], [seedHtml, restrictedHtml]]) {
+      let requests = 0;
+      const fetcher = (async () => {
+        const body = responseBodies[requests++];
+        if (!body) throw new Error("Unexpected request after fair-usage restriction");
+        return new Response(body);
+      }) as unknown as typeof fetch;
+
+      const result = await fetchLiveJobServeRoles({
         query: "agentic",
         maxPages: 3,
         timeoutMs: 1000,
+        requestDelayMs: 0,
         fetcher,
-      }),
-    ).rejects.toThrow("JobServe usage restricted; aborting all further requests");
-    expect(requests).toBe(1);
+      });
+
+      expect(result.roles).toEqual([]);
+      expect(result.pagesFetched).toBe(0);
+      expect(result.blockedReason).toContain("usage restricted");
+      if (!result.blockedReason) throw new Error("Expected a JobServe block reason");
+      expect(result.errors).toEqual([result.blockedReason]);
+    }
+  });
+
+  test("retains already discovered cards when pagination reaches a fair-usage restriction", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const firstPage = `${classicHtml}<span class="nav_Next"><a href="/gb/en/JobListing.aspx?page=2">Next</a></span>`;
+    const responses = [
+      new Response(seedHtml),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+      ),
+      new Response(firstPage),
+      new Response(
+        "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+      ),
+    ];
+    let requests = 0;
+    const fetcher = (async () => {
+      const response = responses[requests++];
+      if (!response) throw new Error("Unexpected request after fair-usage restriction");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 3,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(requests).toBe(4);
+    expect(result.pagesFetched).toBe(1);
+    expect(result.roles).toHaveLength(1);
+    expect(result.roles[0]).toMatchObject({
+      job_id: "ABC123",
+      detail_status: "error",
+    });
+    expect(result.blockedReason).toContain("usage restricted");
+    if (!result.blockedReason) throw new Error("Expected a JobServe block reason");
+    expect(result.errors).toEqual([result.blockedReason]);
   });
 
   test("stops detail acquisition and reports a fair-usage block without discarding listings", async () => {
@@ -196,7 +282,42 @@ describe("live JobServe parsing", () => {
     expect(result.errors).toContain(result.blockedReason as string);
   });
 
-  test("retains security-clearance exclusions in discovery accounting", async () => {
+  test("retains ordinary detail failures and exposes them as source errors", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const responses = [
+      new Response(seedHtml),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+      ),
+      new Response(classicHtml),
+      new Response("temporarily unavailable", { status: 503 }),
+    ];
+    const fetcher = (async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Unexpected JobServe request");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 1,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(result.roles).toHaveLength(1);
+    expect(result.roles[0]).toMatchObject({ detail_status: "error" });
+    expect(result.errors).toEqual([
+      "JobServe detail fetch failed for https://www.jobserve.com/gb/en/WABC123.jsjob: HTTP 503: https://www.jobserve.com/gb/en/WABC123.jsjob",
+    ]);
+    expect(result.blockedReason).toBeNull();
+  });
+
+  test("persists security-clearance listings as raw evidence", async () => {
     const restrictedHtml = classicHtml
       .replace("ABC123", "SC123")
       .replace("Build agentic systems with customers.", "SC clearance required.");
@@ -214,7 +335,7 @@ describe("live JobServe parsing", () => {
     ];
     const fetcher = (async () => {
       const response = responses.shift();
-      if (!response) throw new Error("Unexpected detail request for excluded role");
+      if (!response) throw new Error("Unexpected JobServe request");
       return response;
     }) as unknown as typeof fetch;
 
@@ -226,8 +347,13 @@ describe("live JobServe parsing", () => {
       fetcher,
     });
 
-    expect(result.roles).toHaveLength(0);
-    expect(result.excludedRoles).toHaveLength(1);
-    expect(result.errors).toEqual(["1 security-clearance role(s) excluded"]);
+    expect(result.roles).toHaveLength(1);
+    expect(result.roles[0]).toMatchObject({
+      job_id: "SC123",
+      security_clearance_required: true,
+      detail_status: "error",
+    });
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain("JobServe detail fetch failed");
   });
 });

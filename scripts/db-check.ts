@@ -1,6 +1,6 @@
 import { JOB_SEARCH_SCHEMA, getDatabaseUrl, quoteSqlLiteral } from "../src/db/config";
 import { loadMigrations, migrationDisplayName, planMigrations } from "../src/db/migrations";
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 
 interface DbInfo {
   database: string;
@@ -49,7 +49,7 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

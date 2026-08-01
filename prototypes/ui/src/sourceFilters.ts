@@ -1,6 +1,7 @@
 import type { FastRefreshSourceInfo, ReviewQueueRow, SourceHealthRow } from "./types";
 
-const STORAGE_KEY = "job-finder.sourceFilters.v3";
+const STORAGE_KEY = "jobsradar.sourceFilters.v3";
+const LEGACY_STORAGE_KEY = "job-finder.sourceFilters.v3";
 
 /** Direct employer boards stay useful longer than high-churn recruiter feeds. */
 export const EVERGREEN_SOURCE_IDS = new Set(["linear-careers"]);
@@ -70,12 +71,15 @@ export function buildSourceCatalog(
 export function loadEnabledSourceIds(catalog: SourceCatalogEntry[]): string[] {
   if (catalog.length === 0) return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = loadSavedSelection();
     if (!raw) return catalog.map((s) => s.id);
     const parsed = JSON.parse(raw) as { enabledSourceIds?: string[] };
+    if (!Array.isArray(parsed.enabledSourceIds)) return catalog.map((s) => s.id);
     const valid = new Set(catalog.map((s) => s.id));
-    const saved = (parsed.enabledSourceIds ?? []).filter((id) => valid.has(id));
-    return saved.length > 0 ? saved : catalog.map((s) => s.id);
+    const saved = parsed.enabledSourceIds.filter((id) => valid.has(id));
+    return parsed.enabledSourceIds.length === 0 || saved.length > 0
+      ? saved
+      : catalog.map((s) => s.id);
   } catch {
     return catalog.map((s) => s.id);
   }
@@ -83,7 +87,7 @@ export function loadEnabledSourceIds(catalog: SourceCatalogEntry[]): string[] {
 
 export function hasSavedSourceSelection(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) !== null;
+    return loadSavedSelection() !== null;
   } catch {
     return false;
   }
@@ -91,6 +95,17 @@ export function hasSavedSourceSelection(): boolean {
 
 export function saveEnabledSourceIds(ids: string[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ enabledSourceIds: ids }));
+}
+
+function loadSavedSelection(): string | null {
+  const current = localStorage.getItem(STORAGE_KEY);
+  if (current !== null) return current;
+
+  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (legacy === null) return null;
+
+  localStorage.setItem(STORAGE_KEY, legacy);
+  return legacy;
 }
 
 function normalizeSourceToken(value: string): string {

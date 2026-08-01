@@ -1,13 +1,15 @@
 # Jobsradar rename cutover
 
-This PR prepares the code and service templates for the canonical checkout:
+This document records the proposed filesystem cutover to:
 
 ```text
 /Users/mcb/Claudelocal/careers/jobsradar
 ```
 
 Merging the PR does not move the active checkout, restart launchd, change Caddy,
-or redeploy Modal. Perform the stateful cutover only after the PR is merged.
+or redeploy Modal. The service renderer no longer treats this pathname as
+canonical: it renders the invoking checkout root, so a move is only necessary
+when the operator chooses to perform this cutover.
 
 ## 1. Stop writers
 
@@ -32,16 +34,17 @@ mv /Users/mcb/Claudelocal/careers/resume2/projects/job-finder-cursor-party \
 cd /Users/mcb/Claudelocal/careers/jobsradar
 ```
 
-Do not leave a compatibility symlink. The code derives its own root, and the
-launchd templates are rendered from the post-move path.
+Do not leave a compatibility symlink. The code discovers the nearest ancestor
+containing `market/targets.json` from the active checkout, and the launchd
+templates are rendered from the post-move path.
 
 ## 3. Update parent-owned configuration
 
 Replace the retired checkout path with the new root in:
 
-- `/Users/mcb/Claudelocal/careers/market/launchd/com.mcb.careers.lab-openings.plist`
-- `/Users/mcb/Claudelocal/careers/market/launchd/com.mcb.careers.jobs-db-backup.plist`
-- `/Users/mcb/Claudelocal/careers/.gitignore`
+- `<careers-root>/market/launchd/com.mcb.careers.lab-openings.plist`
+- `<careers-root>/market/launchd/com.mcb.careers.jobs-db-backup.plist`
+- `<careers-root>/.gitignore`
 - current estate documentation that identifies the live pipeline
 
 Re-copy and bootstrap the two parent launchd plists only after inspecting their

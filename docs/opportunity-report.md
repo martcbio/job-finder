@@ -21,32 +21,31 @@ opps json --limit 10
 opps doctor
 ```
 
-`opps update` syncs the latest fresh, complete Modal lab-ATS run—including full
-job bodies—then refreshes direct careers, bookmark company signals, and bounded
-JobServe contracts. If the cloud snapshot is stale, unavailable, or
-inconsistent, it reports that failure and runs the Mac lab scanner. No source
-toggle is required for the normal update.
+`opps update` performs the deterministic local raw update only: direct Lab ATS,
+mandatory bounded JobServe contracts, Linear Careers, and Google Careers. It
+does not use Modal, refresh bookmark signals, send email, or fall through from
+Modal to a Mac scan. No source toggle is required for this normal update.
 
 Without a refresh flag, this reads only the latest complete lab-opening
 generation and stored JobServe rows. It does not contact JobServe.
 
-## Fresh run
+## Legacy/manual lanes
 
 ```bash
-bun run jobs:opportunities -- --refresh-cloud-labs
-bun run jobs:opportunities -- --refresh-labs
+bun run jobs:opportunities -- --refresh-cloud-labs # legacy/manual Modal lane
+bun run jobs:opportunities -- --refresh-labs       # explicit local Lab ATS lane
 ```
 
-The first command uses Modal with a visible Mac fallback. The second forces a
-native Mac ATS scan. These lower-level diagnostic commands can isolate sources;
-the normal `opps update` always fetches all configured sources and fails
-immediately if any required refresh fails.
+These literal lower-level commands are non-default diagnostic or maintenance
+lanes. The Modal command never falls through to the Mac scanner; the local Lab
+ATS command is separately invoked. Neither changes the deterministic raw source
+composition of normal `opps update`.
 
 JobServe safety is enforced below the CLI: at most three queries, two result
 pages per query, five detail pages per query, paced requests, and immediate
 abort when the fair-usage restriction page appears.
 
-## Automation
+## Legacy/manual artifact automation
 
 ```bash
 bun run jobs:opportunities -- \
@@ -56,13 +55,16 @@ bun run jobs:opportunities -- \
   --output artifacts/opportunities/latest.json
 ```
 
-`--strict-source-health` exits with status 2 when an expected source is missing
-or its acquisition snapshot is older than the configured threshold. Freshness
-uses acquisition timestamps, not the newest job's posting date.
+This is a non-default legacy/manual Modal artifact command; it does not fall back
+to a Mac scan. `--strict-source-health` exits with status 2 when an expected
+source is missing or its acquisition snapshot is older than the configured
+threshold. Freshness uses acquisition timestamps, not the newest job's posting
+date.
 
-`opps doctor` also fails when the scheduled `jobsradar` Modal task is
-stale or unhealthy. Cloud output becomes reusable only after a complete run and
-row-count validation; parity uses the full `org:ats:id` digest.
+`opps doctor` probes only the local database, local JSON API, and local browser
+UI, failing when any is unavailable. It does not inspect or require Modal. Cloud
+parity is a separate explicit legacy/manual diagnostic; use the workflow in
+[`cloud/README.md`](../cloud/README.md) when maintaining that lane.
 
 All output paths must stay inside the repository. The CLI creates parent
 directories and fails loudly on malformed policy, missing database

@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   type CvDraftJobRow,
   buildCvDraftSourceSql,
@@ -115,7 +115,7 @@ async function run(): Promise<void> {
   console.log(draft.markdown.trimEnd());
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

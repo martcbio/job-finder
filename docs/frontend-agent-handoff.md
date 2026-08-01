@@ -5,10 +5,14 @@ repo to prototype or build a UI.
 
 ## What This System Is
 
-`job-finder` is a local job-search pipeline. It fans out across configured job
+Jobsradar is a local job-search pipeline. It fans out across configured job
 sources, persists search evidence in local Postgres, ingests job pages, classifies
 jobs, keeps conservative duplicate candidates, and leaves human review in charge
 of applications.
+
+The routine default pull always attempts bounded JobServe contracts alongside
+its other default sources. JobServe is not a UI checkbox or a per-source opt-in;
+a JobServe failure is source evidence that the UI must show.
 
 The frontend should treat the local JSON API as its backend. The API wraps the
 Postgres-backed domain modules and deliberately avoids API-key-dependent legacy
@@ -106,14 +110,24 @@ Show:
 - unknown usage calls
 
 This is how the user decides which sources are worth running more often.
+Show the latest JobServe attempt even when it did not import a job: `zero_results`
+is a valid outcome, while `blocked`, `timeout`, `parser_error`, `rate_limited`,
+and `auth_required` require the returned `errors` and `blockedReason` to remain
+visible.
 
 ### Fast refresh (day-to-day)
 
-Use `POST /api/refresh/fast` for the cheap native refresh path — same behavior as
-`bun run jobs:fast-refresh`. Prefer this over pipeline runs for routine UI refresh
-controls.
+Use `POST /api/refresh/fast` for the cheap-first refresh path. Omit `sourceIds`
+for the routine default: it includes JobServe contracts. `sourceIds` and
+`POST /api/refresh/source/:source` are diagnostic source-isolation controls, not
+a normal-source picker.
 
-Per-source refresh: `POST /api/refresh/source/:source` (`jobserve`, `linear`).
+The response stays `200` when an individual source fails, so render every entry
+in `data.sources` and surface its `status`, `errors`, and `blockedReason`. A
+successful HTTP response does not prove JobServe succeeded.
+
+Per-source diagnostic refresh: `POST /api/refresh/source/:source` (`jobserve`,
+`linear`).
 
 Run evidence: `GET /api/runs/latest` and `GET /api/runs/:id`.
 
@@ -216,6 +230,8 @@ Keep route handlers injectable/testable. New route tests should mock the
 - Prefer polling over websockets/SSE for the first UI pass.
 - Show dry-run pipeline plans before offering execution.
 - Preserve raw evidence links and snippets so the user can audit why a job exists.
+- Do not hide or collapse a failed JobServe source attempt just because the
+  surrounding refresh returned HTTP 200.
 
 ## Current Smoke Data Caveat
 

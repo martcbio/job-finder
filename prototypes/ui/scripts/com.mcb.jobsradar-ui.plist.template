@@ -6,7 +6,7 @@
   <string>com.mcb.jobsradar-ui</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/bun</string>
+    <string>__BUN_EXECUTABLE__</string>
     <string>run</string>
     <string>dev</string>
   </array>
@@ -18,12 +18,18 @@
   <true/>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>__JOBSRADAR_HOME__</string>
+    <key>NO_PROXY</key>
+    <string>127.0.0.1,localhost,::1</string>
+    <key>no_proxy</key>
+    <string>127.0.0.1,localhost,::1</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StandardOutPath</key>
-  <string>/Users/mcb/Library/Logs/jobsradar-ui.out.log</string>
+  <string>__JOBSRADAR_HOME__/Library/Logs/jobsradar-ui.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/mcb/Library/Logs/jobsradar-ui.err.log</string>
+  <string>__JOBSRADAR_HOME__/Library/Logs/jobsradar-ui.err.log</string>
 </dict>
 </plist>

@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { runPsqlJson } from "../src/db/psql";
+import { getDatabaseUrl } from "../src/db/config";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import {
   buildOpportunityReport,
   renderOpportunityHtml,
@@ -11,7 +12,14 @@ import {
   readOpportunityReportPolicy,
   type OpportunityReportPolicy,
 } from "../src/pipeline/opportunityReportData";
-import { verifyOpportunityUrls } from "../src/pipeline/opportunityUrlVerification";
+import {
+  verifyOpportunityUrls,
+  type OpportunityUrlCheck,
+} from "../src/pipeline/opportunityUrlVerification";
+import {
+  buildMarkJobsStaleByCanonicalUrlsSql,
+  type ExpireJobRow,
+} from "../src/pipeline/jobExpiry";
 
 interface CliOptions extends OpportunityReportPolicy {
   format: "markdown" | "json";
@@ -27,95 +35,156 @@ interface CliOptions extends OpportunityReportPolicy {
   email: boolean;
 }
 
-const args = process.argv.slice(2);
-if (args.includes("--help") || args.includes("-h")) {
-  printUsage();
-  process.exit(0);
+type OpportunityReport = Awaited<ReturnType<typeof loadOpportunityReport>>;
+
+export interface DeadUrlStaleGroup {
+  readonly reason: string;
+  readonly urls: readonly string[];
 }
 
-const policyPath = resolve(readStringFlag(args, "--policy") ?? "config/opportunity-report.json");
-const policy = await readOpportunityReportPolicy(policyPath);
-const options = parseOptions(args, policyPath, policy);
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("DATABASE_URL is required");
+type RefreshOptions = Pick<
+  CliOptions,
+  "refreshCloudLabs" | "refreshLabs" | "refreshDirect" | "refreshSignals" | "refreshJobServe"
+>;
 
-if (options.refreshCloudLabs) {
-  try {
-    await runCommand(["bun", "run", "labs:sync-cloud"]);
-  } catch (error) {
-    console.error(`Modal lab sync failed; falling back to the Mac scanner: ${errorMessage(error)}`);
-    await runCommand(["bun", "run", "labs:openings"]);
+const compareText = (left: string, right: string): number =>
+  left === right ? 0 : left < right ? -1 : 1;
+
+export function groupDeadUrlsForStaling(
+  deadUrls: readonly OpportunityUrlCheck[],
+): DeadUrlStaleGroup[] {
+  const urlsByReason = new Map<string, Set<string>>();
+  for (const { url: rawUrl, reason: rawReason } of deadUrls) {
+    const url = rawUrl.trim();
+    const reason = rawReason.trim();
+    if (!url) continue;
+    if (!reason) throw new Error(`Dead URL ${url} has no verification reason`);
+    const urls = urlsByReason.get(reason) ?? new Set<string>();
+    urls.add(url);
+    urlsByReason.set(reason, urls);
   }
-} else if (options.refreshLabs) {
-  await runCommand(["bun", "run", "labs:openings"]);
-}
-if (options.refreshDirect) {
-  await runCommand([
-    "bun",
-    "run",
-    "jobs:fast-refresh",
-    "--",
-    "--source",
-    "linear-careers,google-careers",
-  ]);
-}
-if (options.refreshSignals) {
-  await runCommand(["bun", "run", "company:signals"]);
-}
-if (options.refreshJobServe) {
-  await runCommand(["bun", "run", "jobs:fast-refresh", "--", "--source", "jobserve"]);
+  return [...urlsByReason]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([reason, urls]) => ({ reason, urls: [...urls].sort(compareText) }));
 }
 
-const reportNow = new Date();
-const candidateReport = await loadOpportunityReport({
-  query: (sql) => runPsqlJson(sql),
-  now: reportNow,
-  env: process.env,
-  policyPath,
-  limit: Math.min(30, options.limit + 5),
-  maxAgeDays: options.maxAgeDays,
-  pickCount: options.pickCount,
-  staleAfterHours: options.staleAfterHours,
-});
-const urlChecks = await verifyOpportunityUrls(candidateReport.rows, {
-  timeoutMs: 12_000,
-  concurrency: 6,
-});
-for (const dead of urlChecks.dead) {
-  console.error(`Removed dead job URL: ${dead.url} (${dead.reason})`);
+export function deadUrlReviewEventNote(reason: string): string {
+  return `Live URL verification found the role unavailable: ${reason}`;
 }
-for (const unverified of urlChecks.unverified) {
-  console.error(`Job URL could not be live-verified: ${unverified.url} (${unverified.reason})`);
-}
-const verifiedReport = buildOpportunityReport(urlChecks.rows, {
-  now: reportNow,
-  limit: options.limit,
-  maxAgeDays: options.maxAgeDays,
-  pickCount: options.pickCount,
-});
-const report = {
-  ...verifiedReport,
-  sourceHealth: candidateReport.sourceHealth,
-  labMissingBodyCount: candidateReport.labMissingBodyCount,
-};
-const output =
-  options.format === "json"
-    ? `${JSON.stringify(report, null, 2)}\n`
-    : renderOpportunityMarkdown(report);
-if (!options.quiet) await writeOrPrint(output, options.output);
-if (options.email) await sendSelectionEmail(report);
 
-if (options.strictSourceHealth) {
-  const unhealthySources = report.sourceHealth.filter((health) => health.status !== "current");
-  for (const health of unhealthySources) {
-    console.error(`Opportunity source unhealthy: ${health.message}`);
+export function buildRefreshCommands(
+  options: RefreshOptions,
+): string[][] {
+  const commands: string[][] = [];
+  if (options.refreshCloudLabs) {
+    commands.push(["bun", "run", "labs:sync-cloud"]);
+  } else if (options.refreshLabs) {
+    commands.push(["bun", "run", "labs:openings"]);
   }
-  if (report.labMissingBodyCount > 0) {
-    console.error(
-      `Lab ATS body coverage failed: ${report.labMissingBodyCount} current rows lack full job bodies`,
+  if (options.refreshDirect) {
+    commands.push([
+      "bun",
+      "scripts/jobsradar.ts",
+      "ingest",
+      "--source",
+      "linear-careers",
+      "--source",
+      "google-careers",
+    ]);
+  }
+  if (options.refreshSignals) commands.push(["bun", "run", "company:signals"]);
+  if (options.refreshJobServe) {
+    commands.push(["bun", "scripts/jobsradar.ts", "ingest", "--source", "jobserve"]);
+  }
+  return commands;
+}
+
+export async function runRefreshCommands(
+  options: RefreshOptions,
+  runner: (argv: string[]) => Promise<void> = runCommand,
+): Promise<void> {
+  for (const command of buildRefreshCommands(options)) await runner(command);
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  if (args.includes("--help") || args.includes("-h")) {
+    printUsage();
+    return;
+  }
+
+  const policyPath = resolve(readStringFlag(args, "--policy") ?? "config/opportunity-report.json");
+  const policy = await readOpportunityReportPolicy(policyPath);
+  const options = parseOptions(args, policyPath, policy);
+  getDatabaseUrl();
+
+  await runRefreshCommands(options);
+
+  const reportNow = new Date();
+  const candidateReport = await loadOpportunityReport({
+    query: (sql) => runPsqlJson(sql),
+    now: reportNow,
+    env: process.env,
+    policyPath,
+    limit: Math.min(30, options.limit + 5),
+    maxAgeDays: options.maxAgeDays,
+    pickCount: options.pickCount,
+    staleAfterHours: options.staleAfterHours,
+  });
+  const urlChecks = await verifyOpportunityUrls(candidateReport.rows, {
+    timeoutMs: 12_000,
+    concurrency: 6,
+  });
+  const deadUrlGroups = groupDeadUrlsForStaling(urlChecks.dead);
+  const staleRows: ExpireJobRow[] = [];
+  for (const group of deadUrlGroups) {
+    staleRows.push(
+      ...(await runPsqlJson<ExpireJobRow[]>(
+        buildMarkJobsStaleByCanonicalUrlsSql(group.urls, deadUrlReviewEventNote(group.reason)),
+      )),
     );
   }
-  if (unhealthySources.length > 0 || report.labMissingBodyCount > 0) process.exitCode = 2;
+  for (const group of deadUrlGroups) {
+    for (const url of group.urls) {
+      console.error(`Excluded unavailable job URL: ${url} (${group.reason})`);
+    }
+  }
+  for (const stale of staleRows) {
+    console.error(`Marked stale from live URL verification: ${stale.id}: ${stale.title}`);
+  }
+  for (const unverified of urlChecks.unverified) {
+    console.error(`Job URL could not be live-verified: ${unverified.url} (${unverified.reason})`);
+  }
+  const verifiedReport = buildOpportunityReport(urlChecks.rows, {
+    now: reportNow,
+    limit: options.limit,
+    maxAgeDays: options.maxAgeDays,
+    pickCount: options.pickCount,
+  });
+  const report = {
+    ...verifiedReport,
+    sourceHealth: candidateReport.sourceHealth,
+    labMissingBodyCount: candidateReport.labMissingBodyCount,
+  };
+  const output =
+    options.format === "json"
+      ? `${JSON.stringify(report, null, 2)}\n`
+      : renderOpportunityMarkdown(report);
+  if (!options.quiet) await writeOrPrint(output, options.output);
+  if (options.email) await sendSelectionEmail(report);
+
+  if (options.strictSourceHealth) {
+    const unhealthySources = report.sourceHealth.filter((health) => health.status !== "current");
+    for (const health of unhealthySources) {
+      console.error(`Opportunity source unhealthy: ${health.message}`);
+    }
+    if (report.labMissingBodyCount > 0) {
+      console.error(
+        `Lab ATS body coverage failed: ${report.labMissingBodyCount} current rows lack full job bodies`,
+      );
+    }
+    if (unhealthySources.length > 0 || report.labMissingBodyCount > 0) process.exitCode = 2;
+  }
 }
 
 function parseOptions(
@@ -212,7 +281,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function sendSelectionEmail(report: typeof candidateReport): Promise<void> {
+async function sendSelectionEmail(report: OpportunityReport): Promise<void> {
   if (report.rows.length === 0) throw new Error("Refusing to email an empty opportunity selection");
   const artifactDir = resolve("artifacts/opportunities");
   const htmlPath = resolve(artifactDir, "latest-selection.html");
@@ -269,8 +338,8 @@ function printUsage(): void {
   bun run jobs:opportunities -- --refresh --strict-source-health --email
 
 Options:
-  --refresh                  Refresh lab ATS boards and bounded JobServe, then report.
-  --refresh-cloud-labs       Sync a fresh complete Modal run; visibly fall back to the Mac scanner.
+  --refresh                  Refresh lab ATS boards, direct careers, and bounded JobServe, then report.
+  --refresh-cloud-labs       Sync a fresh complete Modal run. Failure exits non-zero.
   --refresh-labs             Refresh only native lab ATS boards.
   --refresh-direct           Refresh first-class direct sources: Linear and Google Careers.
   --refresh-signals          Refresh hiring/funding signals from the bookmark corpus.
@@ -286,5 +355,12 @@ Options:
   --output PATH              Write inside this repository instead of stdout.
   --policy PATH              Report-policy JSON. Defaults to config/opportunity-report.json.
 
-DATABASE_URL is required. JobServe is never contacted unless --refresh-jobserve or --refresh is supplied.`);
+Uses DATABASE_URL when supplied; otherwise targets local Postgres at postgres://$USER@localhost:5432/jobs. JobServe is never contacted unless --refresh-jobserve or --refresh is supplied.`);
+}
+
+if (import.meta.main) {
+  withPsqlClientCleanup(main).catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
 }

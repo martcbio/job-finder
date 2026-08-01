@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AtsOrgAcquisition } from "../../services/ats/types";
-import { type JobIngestSourceReceipt, normalizeJobIngestOptions, runJobIngest } from "../jobIngest";
+import type { FastRefreshSourceSummary } from "../fastRefresh/types";
+import {
+  type JobIngestSourceReceipt,
+  normalizeJobIngestOptions,
+  runJobIngest,
+  sourceHealth,
+} from "../jobIngest";
 import { runLabRawIngest } from "../labRawIngest";
 
 const temporaryDirectories: string[] = [];
@@ -30,14 +36,56 @@ function completeReceipt(id: string): JobIngestSourceReceipt {
   };
 }
 
+function refreshSummary(
+  status: FastRefreshSourceSummary["status"],
+  imported: number,
+): FastRefreshSourceSummary {
+  return {
+    source: { id: "fixture", label: "Fixture", kind: "direct_employer", quality: "high" },
+    keyword: "fixture",
+    runId: null,
+    outcome: status === "blocked" ? "blocked_robots_or_waf" : "timeout",
+    status,
+    discovered: imported,
+    excluded: 0,
+    imported,
+    fullText: { persisted: 0, fetchedPages: null, status: "pending" },
+    classification: { classified: 0 },
+    costs: { jinaSearchTokens: 0, jinaReaderTokens: 0, openAiTokens: 0, billableSearchApiCalls: 0 },
+    elapsedMs: 1,
+    errors: [],
+    blockedReason: null,
+  };
+}
+
 describe("jobsradar raw ingestion boundary", () => {
-  test("defaults to every configured source, including bounded JobServe", () => {
-    expect(normalizeJobIngestOptions().sourceIds).toEqual([
-      "lab-ats",
-      "jobserve",
-      "linear-careers",
-      "google-careers",
-    ]);
+  test("defaults to every configured source, including required JobServe", () => {
+    const defaults = normalizeJobIngestOptions();
+    expect(defaults.sourceIds).toEqual(["lab-ats", "jobserve", "linear-careers", "google-careers"]);
+    expect(defaults).not.toHaveProperty("directLimit");
+  });
+
+  test("validates JobServe caps only when JobServe is selected", () => {
+    expect(
+      normalizeJobIngestOptions({
+        sourceIds: ["linear-careers"],
+        jobserveQueries: ["one", "two", "three", "four"],
+        jobserveMaxPages: 3,
+        jobserveImportLimitPerQuery: 6,
+      }),
+    ).toMatchObject({ sourceIds: ["linear-careers"], jobserveMaxPages: 3 });
+    expect(() =>
+      normalizeJobIngestOptions({
+        sourceIds: ["jobserve"],
+        jobserveQueries: ["one", "two", "three", "four"],
+      }),
+    ).toThrow("JobServe ingest is limited to 3 queries");
+  });
+
+  test("marks blocked or timed-out sources with imported evidence as degraded", () => {
+    expect(sourceHealth(refreshSummary("blocked", 1))).toBe("degraded");
+    expect(sourceHealth(refreshSummary("timeout", 1))).toBe("degraded");
+    expect(sourceHealth(refreshSummary("blocked", 0))).toBe("failed");
   });
 
   test("orchestrates only raw source ingestion and returns health receipts", async () => {
@@ -234,7 +282,7 @@ describe("jobsradar raw ingestion boundary", () => {
   });
 });
 
-test("jobsradar CLI exposes raw ingest without report or email behavior", async () => {
+test("jobsradar CLI exposes every raw ingest option without report or email behavior", async () => {
   const child = Bun.spawn(["bash", "scripts/jobsradar", "--help"], {
     cwd: process.cwd(),
     stdout: "pipe",
@@ -249,9 +297,42 @@ test("jobsradar CLI exposes raw ingest without report or email behavior", async 
   expect(exitCode).toBe(0);
   expect(stderr).toBe("");
   expect(stdout).toContain("jobsradar ingest");
-  expect(stdout).toContain("Default sources include bounded JobServe");
+  for (const option of [
+    "--source <id>",
+    "--jobserve-query <query>",
+    "--jobserve-max-pages <n>",
+    "--jobserve-detail-limit <n>",
+    "--timeout-ms <n>",
+    "--json",
+  ]) {
+    expect(stdout).toContain(option);
+  }
+  expect(stdout).toContain("Default sources include required JobServe");
   expect(stdout).not.toContain("email");
   expect(stdout).not.toContain("rank");
+});
+
+test("jobsradar rejects the retired direct limit as operator input without launching Doctor", async () => {
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "jobsradar-retired-flag-test-"));
+  temporaryDirectories.push(temporaryDirectory);
+  const spoolRoot = join(temporaryDirectory, "doctor-spool");
+  const child = Bun.spawn(["bun", "scripts/jobsradar.ts", "ingest", "--direct-limit", "10"], {
+    cwd: process.cwd(),
+    env: { ...process.env, JOBSRADAR_DOCTOR_SPOOL: spoolRoot },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+
+  expect(exitCode).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr).toContain("Unknown argument: --direct-limit");
+  expect(stderr).not.toContain("jobsradar doctor dispatch failed");
+  await expect(lstat(spoolRoot)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("jobsradar wrapper supplies the standard local database without flags", async () => {

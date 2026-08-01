@@ -1,4 +1,4 @@
-import { runPsqlJson } from "../src/db/psql";
+import { runPsqlJson, withPsqlClientCleanup } from "../src/db/psql";
 import { type SavedSweepInput, type SavedSweepRow, buildUpsertSavedSweepSql } from "../src/pipeline/savedSweeps";
 import { isTimeFilter } from "../src/pipeline/searchEngines";
 
@@ -131,7 +131,7 @@ async function run(): Promise<void> {
   console.log(`Saved sweep ${row.name} (${row.enabled ? "enabled" : "disabled"})`);
 }
 
-run().catch((err) => {
+withPsqlClientCleanup(run).catch((err) => {
   console.error(err instanceof Error ? err.stack : err);
   process.exitCode = 1;
 });

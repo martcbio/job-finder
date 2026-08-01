@@ -1,3 +1,5 @@
+import { defaultLocalDatabaseUrl } from "./config";
+
 export interface LocalDatabaseConfig {
   targetUrl: string;
   maintenanceUrl: string;
@@ -55,11 +57,6 @@ export function quoteSqlIdentifier(value: string): string {
     throw new Error("SQL identifier must not be empty");
   }
   return `"${value.replaceAll('"', '""')}"`;
-}
-
-function defaultLocalDatabaseUrl(env: NodeJS.ProcessEnv): string {
-  const user = encodeURIComponent(env.USER || "mcb");
-  return `postgres://${user}@localhost:5432/jobs`;
 }
 
 function buildMaintenanceUrl(targetUrl: URL): URL {

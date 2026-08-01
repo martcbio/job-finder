@@ -1,3 +1,4 @@
+import { decodeHtmlEntities } from "./htmlEntities";
 import { htmlToReadableMarkdown } from "./httpPageExtract";
 import { classifyIr35Signals } from "./ir35Signals";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
@@ -48,7 +49,6 @@ export interface LiveJobServeResult {
   classicUrl: string;
   pagesFetched: number;
   roles: LiveJobServeRole[];
-  excludedRoles: LiveJobServeRole[];
   errors: string[];
   blockedReason: string | null;
 }
@@ -118,74 +118,86 @@ export async function fetchLiveJobServeRoles(
   const seedUrl = options.searchUrl ?? DEFAULT_SEARCH_URL;
   const ageDays = options.ageDays ?? 3;
 
-  const seed = await requestText(fetcher, jar, seedUrl, {
-    timeoutMs,
-    headers: { Accept: FORM_ACCEPT },
-  });
-  const submitted = await submitSearchForm(fetcher, jar, {
-    html: seed.text,
-    finalUrl: seed.url,
-    query: options.query,
-    ageDays,
-    timeoutMs,
-  });
+  let seed: { text: string; url: string };
+  try {
+    seed = await requestText(fetcher, jar, seedUrl, {
+      timeoutMs,
+      headers: { Accept: FORM_ACCEPT },
+    });
+  } catch (error) {
+    if (error instanceof JobServeUsageRestrictionError) {
+      return blockedJobServeResult(options, seedUrl, "", error.message);
+    }
+    throw error;
+  }
+
+  let submitted: { text: string; url: string };
+  try {
+    submitted = await submitSearchForm(fetcher, jar, {
+      html: seed.text,
+      finalUrl: seed.url,
+      query: options.query,
+      ageDays,
+      timeoutMs,
+    });
+  } catch (error) {
+    if (error instanceof JobServeUsageRestrictionError) {
+      return blockedJobServeResult(options, seed.url, "", error.message);
+    }
+    throw error;
+  }
   const classicUrl = extractClassicUrl(submitted.url, submitted.text);
-  const pages = await fetchClassicPages(fetcher, jar, {
+  const pageResult = await fetchClassicPages(fetcher, jar, {
     classicUrl,
     maxPages: options.maxPages,
     timeoutMs,
   });
 
   const roles: LiveJobServeRole[] = [];
-  const excludedRoles: LiveJobServeRole[] = [];
   const seen = new Set<string>();
-  let blockedReason: string | null = null;
+  let blockedReason = pageResult.blockedReason;
+  let detailAcquisitionBlocked = blockedReason !== null;
+  const errors = [...(blockedReason ? [blockedReason] : [])];
 
-  pageLoop: for (const page of pages) {
+  for (const page of pageResult.pages) {
     for (const block of extractRoleBlocks(page.html)) {
       const role = parseJobServeRoleBlock(block, {
         pageNumber: page.pageNumber,
-        sourceRank: roles.length + excludedRoles.length + 1,
+        sourceRank: roles.length + 1,
         pageUrl: page.url,
       });
       if (seen.has(role.job_id)) continue;
       seen.add(role.job_id);
-      if (role.security_clearance_required) {
-        excludedRoles.push(role);
-      } else {
-        if (roles.length >= (options.detailLimit ?? 5)) {
-          roles.push(role);
-          continue;
+      if (detailAcquisitionBlocked) {
+        roles.push(markJobServeDetailBlocked(role, blockedReason));
+        continue;
+      }
+      if (roles.length >= (options.detailLimit ?? 5)) {
+        roles.push(role);
+        continue;
+      }
+      try {
+        const detailedRole = await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs);
+        roles.push(detailedRole);
+        if (detailedRole.detail_status === "error") {
+          errors.push(jobServeDetailFailureMessage(detailedRole));
         }
-        try {
-          roles.push(await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs));
-        } catch (error) {
-          if (!(error instanceof JobServeUsageRestrictionError)) throw error;
-          blockedReason = error.message;
-          roles.push({
-            ...role,
-            detail_status: "error",
-            detail_error: error.message,
-          });
-          break pageLoop;
-        }
+      } catch (error) {
+        if (!(error instanceof JobServeUsageRestrictionError)) throw error;
+        blockedReason = error.message;
+        detailAcquisitionBlocked = true;
+        errors.push(error.message);
+        roles.push(markJobServeDetailBlocked(role, error.message));
       }
     }
   }
 
-  const errors = [
-    ...(blockedReason ? [blockedReason] : []),
-    ...(excludedRoles.length > 0
-      ? [`${excludedRoles.length} security-clearance role(s) excluded`]
-      : []),
-  ];
   return {
     query: options.query,
     searchUrl: submitted.url,
     classicUrl,
-    pagesFetched: pages.length,
+    pagesFetched: pageResult.pages.length,
     roles,
-    excludedRoles,
     errors,
     blockedReason,
   };
@@ -208,7 +220,10 @@ export function jobServeRoleToNormalizedJob(
     location: role.location || null,
     employmentType: role.job_type || null,
     compensation: role.rate || null,
-    raw: role,
+    raw: {
+      ...role,
+      failureReason: role.detail_status === "error" ? role.detail_error : null,
+    },
   };
 }
 
@@ -307,7 +322,10 @@ async function fetchClassicPages(
   fetcher: typeof fetch,
   jar: CookieJar,
   options: { classicUrl: string; maxPages: number; timeoutMs: number },
-): Promise<Array<{ url: string; pageNumber: number; html: string }>> {
+): Promise<{
+  pages: Array<{ url: string; pageNumber: number; html: string }>;
+  blockedReason: string | null;
+}> {
   const pages: Array<{ url: string; pageNumber: number; html: string }> = [];
   const seen = new Set<string>();
   let pageUrl = options.classicUrl;
@@ -316,10 +334,18 @@ async function fetchClassicPages(
     if (seen.has(pageUrl)) break;
     seen.add(pageUrl);
 
-    const page = await requestText(fetcher, jar, pageUrl, {
-      timeoutMs: options.timeoutMs,
-      headers: { Accept: FORM_ACCEPT },
-    });
+    let page: { text: string; url: string };
+    try {
+      page = await requestText(fetcher, jar, pageUrl, {
+        timeoutMs: options.timeoutMs,
+        headers: { Accept: FORM_ACCEPT },
+      });
+    } catch (error) {
+      if (error instanceof JobServeUsageRestrictionError) {
+        return { pages, blockedReason: error.message };
+      }
+      throw error;
+    }
     const collection = extractCollection(page.text);
     const pageNumber = Number.parseInt(pageUrl.match(PAGE_RE)?.[1] ?? "1", 10);
     pages.push({ url: page.url, pageNumber, html: collection });
@@ -329,7 +355,39 @@ async function fetchClassicPages(
     pageUrl = absoluteUrl(nextUrl, page.url);
   }
 
-  return pages;
+  return { pages, blockedReason: null };
+}
+
+function blockedJobServeResult(
+  options: LiveJobServeOptions,
+  searchUrl: string,
+  classicUrl: string,
+  blockedReason: string,
+): LiveJobServeResult {
+  return {
+    query: options.query,
+    searchUrl,
+    classicUrl,
+    pagesFetched: 0,
+    roles: [],
+    errors: [blockedReason],
+    blockedReason,
+  };
+}
+
+function markJobServeDetailBlocked(
+  role: LiveJobServeRole,
+  blockedReason: string | null,
+): LiveJobServeRole {
+  return {
+    ...role,
+    detail_status: "error",
+    detail_error: blockedReason ?? "JobServe detail acquisition was blocked.",
+  };
+}
+
+function jobServeDetailFailureMessage(role: LiveJobServeRole): string {
+  return `JobServe detail fetch failed for ${role.detail_fetch_url || role.url}: ${role.detail_error}`;
 }
 
 async function requestText(
@@ -560,7 +618,7 @@ function splitSetCookieHeader(value: string | null): string[] {
 
 function attr(tag: string, name: string): string | null {
   const match = tag.match(new RegExp(`\\b${escapeRegExp(name)}=(["'])(.*?)\\1`, "is"));
-  return match?.[2] ? decodeHtml(match[2]) : null;
+  return match?.[2] ? decodeHtmlEntities(match[2]) : null;
 }
 
 function absoluteUrl(url: string, base = BASE_URL): string {
@@ -568,25 +626,12 @@ function absoluteUrl(url: string, base = BASE_URL): string {
 }
 
 function stripHtml(value: string): string {
-  return decodeHtml(
+  return decodeHtmlEntities(
     value
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
       .trim(),
   );
-}
-
-function decodeHtml(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&pound;/gi, "£")
-    .replace(/&euro;/gi, "€")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number.parseInt(code, 10)));
 }
 
 function titleCase(value: string): string {

@@ -9,6 +9,15 @@ function verdict(row: OpportunityRow): Exclude<Filter, "all" | "picks"> {
   return "qualified";
 }
 
+function sourceMatch(row: OpportunityRow, source: string): boolean {
+  const expected = source.toLowerCase();
+  if (expected === "jobserve") return row.source === "JobServe";
+  if (expected === "lab ats") return row.source === "Lab ATS";
+  if (expected === "linear careers") return row.source === "Linear Careers";
+  if (expected === "google careers") return row.source === "Google Careers";
+  return false;
+}
+
 const verdictStyle = {
   qualified: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
   caveat: "border-amber-400/25 bg-amber-400/10 text-amber-300",
@@ -24,6 +33,7 @@ export default function OpportunitiesPrototype() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,10 +59,13 @@ export default function OpportunitiesPrototype() {
   const pickUrls = useMemo(() => new Set(report?.pickUrls ?? []), [report]);
   const rows = useMemo(() => {
     if (!report) return [];
-    if (filter === "all") return report.rows;
-    if (filter === "picks") return report.rows.filter((row) => pickUrls.has(row.url));
-    return report.rows.filter((row) => verdict(row) === filter);
-  }, [filter, pickUrls, report]);
+    const bySource = sourceFilter === null
+      ? report.rows
+      : report.rows.filter((row) => sourceMatch(row, sourceFilter));
+    if (filter === "all") return bySource;
+    if (filter === "picks") return bySource.filter((row) => pickUrls.has(row.url));
+    return bySource.filter((row) => verdict(row) === filter);
+  }, [filter, pickUrls, report, sourceFilter]);
 
   if (loading && !report) {
     return (
@@ -105,28 +118,42 @@ export default function OpportunitiesPrototype() {
       </header>
 
       <section className="grid gap-3 md:grid-cols-3">
-        {report.sourceHealth.map((source) => (
-          <article key={source.source} className="rounded-xl border border-white/8 bg-white/[0.025] p-4">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-white">{source.source}</span>
-              <span
-                className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase ${
-                  source.status === "current"
-                    ? verdictStyle.qualified
-                    : source.status === "stale"
-                      ? verdictStyle.caveat
-                      : verdictStyle.disqualified
-                }`}
-              >
-                {source.status}
-              </span>
-            </div>
-            <p className="mt-3 text-2xl font-semibold text-white">{source.rowCount}</p>
-            <p className="text-xs text-zinc-500">
-              {source.ageHours === null ? "No capture" : `captured ${source.ageHours.toFixed(1)}h ago`}
-            </p>
-          </article>
-        ))}
+        {report.sourceHealth.map((source) => {
+          const active = sourceFilter === source.source;
+          return (
+            <button
+              key={source.source}
+              type="button"
+              onClick={() => setSourceFilter(active ? null : source.source)}
+              className={`rounded-xl border p-4 text-left transition ${
+                active
+                  ? "border-amber-300/40 bg-amber-300/[0.06]"
+                  : "border-white/8 bg-white/[0.025] hover:border-white/20"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-white">{source.source}</span>
+                <span
+                  className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase ${
+                    source.status === "current"
+                      ? verdictStyle.qualified
+                      : source.status === "stale"
+                        ? verdictStyle.caveat
+                        : verdictStyle.disqualified
+                  }`}
+                >
+                  {source.status}
+                </span>
+              </div>
+              <p className="mt-3 text-2xl font-semibold text-white">{source.rowCount}</p>
+              <p className="text-xs text-zinc-500">
+                {source.ageHours === null
+                  ? "No capture"
+                  : `captured ${source.ageHours.toFixed(1)}h ago`}
+              </p>
+            </button>
+          );
+        })}
         <article className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
           <span className="font-semibold text-amber-200">ChatGPT Picks</span>
           <p className="mt-3 text-2xl font-semibold text-white">{report.pickUrls.length}</p>
@@ -152,6 +179,7 @@ export default function OpportunitiesPrototype() {
           </button>
         ))}
         <span className="ml-auto self-center font-mono text-[10px] text-zinc-600">
+          {sourceFilter ? `${sourceFilter} · ` : ""}
           {rows.length} of {report.rows.length}
         </span>
       </section>
@@ -184,16 +212,14 @@ export default function OpportunitiesPrototype() {
                 return (
                   <tr
                     key={row.url}
-                    className="border-b border-white/5 align-top last:border-0 group cursor-pointer"
-                    onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}
+                    className="border-b border-white/5 align-top last:border-0 group relative"
                   >
                     <td className="px-5 py-4">
                       <a
                         href={row.url}
                         target="_blank"
                         rel="noreferrer"
-                        onClick={(event) => event.stopPropagation()}
-                        className="font-medium text-zinc-100 underline-offset-4 group-hover:text-amber-200 group-hover:underline"
+                        className="stretched-link font-medium text-zinc-100 underline-offset-4 group-hover:text-amber-200 group-hover:underline"
                       >
                         {row.title}
                       </a>

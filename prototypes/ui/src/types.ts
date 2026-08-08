@@ -224,6 +224,8 @@ export interface OpportunityRow {
     summary: string;
   };
   bodyAvailable: boolean;
+  pickScore?: number;
+  pickReasons?: string[];
 }
 
 export interface OpportunityReport {

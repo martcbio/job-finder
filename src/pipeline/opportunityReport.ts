@@ -20,6 +20,8 @@ export interface Opportunity {
     prestige: number;
     note: string;
   };
+  pickScore?: number;
+  pickReasons?: string[];
 }
 
 export interface OpportunityReportOptions {
@@ -241,7 +243,12 @@ function selectChatGptPicks(rows: readonly Opportunity[], count: number): Opport
     seenUrls.add(row.url);
     sourceCounts.set(row.source, (sourceCounts.get(row.source) ?? 0) + 1);
     companyCounts.set(companyKey, (companyCounts.get(companyKey) ?? 0) + 1);
-    picks.push(row);
+    const breakdown = scoreBreakdown(row);
+    picks.push({
+      ...row,
+      pickScore: breakdown.total,
+      pickReasons: breakdown.reasons,
+    });
     return true;
   };
 
@@ -288,21 +295,38 @@ function isCanonicalJobUrl(value: string): boolean {
 }
 
 function score(row: Opportunity): number {
+  return scoreBreakdown(row).total;
+}
+
+function scoreBreakdown(row: Opportunity): { total: number; reasons: string[] } {
   const text = `${row.title}\n${row.location}\n${row.terms}`;
+  const reasons: string[] = [];
   let result = row.screening.status === "high_signal" ? 5 : 3;
-  if (/\b(?:agentic|applied ai)\b/i.test(text)) result += 5;
+  if (/\b(?:agentic|applied ai)\b/i.test(text)) {
+    result += 5;
+    reasons.push("agentic / applied AI signal");
+  }
   if (/\b(?:generative ai|genai|machine learning|ml engineer|ai engineer)\b/i.test(text)) {
     result += 4;
+    reasons.push("genAI / ML engineering signal");
   }
-  if (/\bai\b/i.test(row.title)) result += 3;
-  if (PICK_TITLES.test(row.title)) result += 2;
+  if (/\bai\b/i.test(row.title)) {
+    result += 3;
+    reasons.push("AI in title");
+  }
+  if (PICK_TITLES.test(row.title)) {
+    result += 2;
+    reasons.push("engineering title");
+  }
   if (row.companyPriority) {
-    result += Math.min(
+    const priority = Math.min(
       4,
       row.companyPriority.aiNative +
         row.companyPriority.workingStyle +
         row.companyPriority.prestige,
     );
+    result += priority;
+    reasons.push(`company priority ${priority}`);
   }
   if (!row.bodyAvailable) result -= 3;
   const ir35 = classifyIr35Signals({
@@ -310,25 +334,43 @@ function score(row: Opportunity): number {
     employmentType: null,
     compensation: row.terms,
   });
-  if (ir35.outside) result += 3;
-  if (/\bremote\b/i.test(text)) result += 3;
-  result += compensationScore(text);
+  if (ir35.outside) {
+    result += 3;
+    reasons.push("outside IR35");
+  }
+  if (/\bremote\b/i.test(text)) {
+    result += 3;
+    reasons.push("remote");
+  }
+  const compensation = compensationScore(text);
+  result += compensation;
+  if (compensation > 0) reasons.push(`compensation ${compensation}`);
   const signalKinds = new Set(row.companySignals?.flatMap((signal) => signal.kinds) ?? []);
-  if (signalKinds.has("funding")) result += 2;
-  if (signalKinds.has("hiring")) result += 1;
+  if (signalKinds.has("funding")) {
+    result += 2;
+    reasons.push("funding signal");
+  }
+  if (signalKinds.has("hiring")) {
+    result += 1;
+    reasons.push("hiring signal");
+  }
   if (row.screening.reasons.some((reason) => reason.code === "regular_hybrid_or_onsite")) {
     result -= 2;
+    reasons.push("regular hybrid/onsite");
   }
   if (row.screening.reasons.some((reason) => reason.code === "inside_ir35")) {
     result -= 3;
+    reasons.push("inside IR35");
   }
   if (row.screening.reasons.some((reason) => reason.code === "government_ir35_risk")) {
     result -= 3;
+    reasons.push("government IR35 risk");
   }
   if (row.screening.reasons.some((reason) => reason.code === "location_or_remote_unclear")) {
     result -= 2;
+    reasons.push("location / remote unclear");
   }
-  return result;
+  return { total: result, reasons };
 }
 
 function compensationScore(text: string): number {

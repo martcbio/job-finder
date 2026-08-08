@@ -180,23 +180,34 @@ export default function OpportunitiesPrototype() {
                 const why =
                   row.screening.reasons.map((reason) => reason.detail).join("; ") ||
                   row.screening.summary;
+                const isPick = pickUrls.has(row.url);
                 return (
-                  <tr key={row.url} className="border-b border-white/5 align-top last:border-0">
+                  <tr
+                    key={row.url}
+                    className="border-b border-white/5 align-top last:border-0 group cursor-pointer"
+                    onClick={() => window.open(row.url, "_blank", "noopener,noreferrer")}
+                  >
                     <td className="px-5 py-4">
                       <a
                         href={row.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="font-medium text-zinc-100 underline-offset-4 hover:text-amber-200 hover:underline"
+                        onClick={(event) => event.stopPropagation()}
+                        className="font-medium text-zinc-100 underline-offset-4 group-hover:text-amber-200 group-hover:underline"
                       >
                         {row.title}
                       </a>
-                      {pickUrls.has(row.url) && (
+                      {isPick && row.pickScore !== undefined && (
                         <p className="mt-1 text-[10px] font-semibold text-amber-300">
-                          ★ ChatGPT Pick
+                          ★ ChatGPT Pick · score {row.pickScore}
                         </p>
                       )}
                       <p className="mt-1 text-xs text-zinc-500">{row.company}</p>
+                      {isPick && row.pickReasons && row.pickReasons.length > 0 && (
+                        <p className="mt-1 text-[10px] leading-4 text-amber-200/70">
+                          {row.pickReasons.join(" · ")}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-4 text-xs text-zinc-400">
                       {date(row.postedAt)}

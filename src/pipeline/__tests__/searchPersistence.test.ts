@@ -73,6 +73,26 @@ describe("buildPersistSearchResultSql", () => {
     expect(sql).toContain("'ats:greenhouse:webflow:123'");
     expect(sql).toContain("existing_job AS");
   });
+
+  test("persists raw source evidence and accepts a source-native identity", () => {
+    const sql = buildPersistSearchResultSql({
+      queryId: 8,
+      rank: 2,
+      sourceLabel: "JobServe",
+      canonicalKeyOverride: "jobserve:abc123",
+      rawEvidence: { job_id: "ABC123", rate: "£800 per day" },
+      item: {
+        title: "AI Engineer",
+        description: "Contract role",
+        url: "https://www.jobserve.com/gb/en/WABC123.jsjob",
+      },
+    });
+
+    expect(sql).toContain("raw_payload");
+    expect(sql).toContain("'jobserve:abc123'");
+    expect(sql).toContain("£800 per day");
+    expect(sql).toContain("canonical_url =");
+  });
 });
 
 describe("companyHintFromUrl", () => {

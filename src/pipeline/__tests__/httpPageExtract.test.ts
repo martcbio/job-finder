@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { fetchHttpPageMarkdown, htmlToReadableMarkdown } from "../httpPageExtract";
 
-function htmlResponse(body: string, status = 200, contentType = "text/html"): Response {
-  return new Response(body, {
+function htmlResponse(
+  body: string,
+  status = 200,
+  contentType = "text/html",
+  finalUrl?: string,
+): Response {
+  const response = new Response(body, {
     status,
     headers: { "content-type": contentType },
   });
+  if (finalUrl) Object.defineProperty(response, "url", { value: finalUrl });
+  return response;
 }
 
 describe("htmlToReadableMarkdown", () => {
@@ -88,6 +95,7 @@ describe("fetchHttpPageMarkdown", () => {
     expect(result.status).toBe(200);
     expect(result.contentType).toBe("text/html");
     expect(result.byteLength).toBeGreaterThan(20);
+    expect(result.finalUrl).toBe("https://jobs.example.com/42");
     expect(result.markdown).toContain("Title: Agent Role");
     expect(result.markdown).toContain("Build useful agent systems");
   });
@@ -110,5 +118,62 @@ describe("fetchHttpPageMarkdown", () => {
         async () => htmlResponse("%PDF", 200, "application/pdf"),
       ),
     ).rejects.toThrow("Unsupported content type");
+  });
+
+  test("rejects JobServe search, expiry, and usage-restriction pages", async () => {
+    const requested = "https://www.jobserve.com/gb/en/job/ABC123";
+    const cases = [
+      htmlResponse(
+        "<h1>Search jobs</h1><p>Many current vacancies</p>",
+        200,
+        "text/html",
+        "https://www.jobserve.com/gb/en/JobSearch.aspx?q=AI",
+      ),
+      htmlResponse(
+        "<title>Job Expired</title><h2>The job you have requested is no longer available</h2>",
+      ),
+      htmlResponse(
+        "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+      ),
+    ];
+
+    for (const response of cases) {
+      await expect(
+        fetchHttpPageMarkdown(
+          requested,
+          { timeoutMs: 1000, minTextLength: 10 },
+          async () => response,
+        ),
+      ).rejects.toThrow(/JobServe (?:job is unavailable|usage restricted)/);
+    }
+  });
+
+  test("rejects JobServe withdrawal copy in a secondary heading", async () => {
+    await expect(
+      fetchHttpPageMarkdown(
+        "https://www.jobserve.com/gb/en/WABC123.jsjob",
+        { timeoutMs: 1000, minTextLength: 10 },
+        async () =>
+          htmlResponse(
+            "<title>Vacancy</title><main><h2>The job you have requested is no longer available</h2></main>",
+          ),
+      ),
+    ).rejects.toThrow("JobServe job is unavailable");
+  });
+
+  test("rejects a JobServe detail response landing on a different job id", async () => {
+    await expect(
+      fetchHttpPageMarkdown(
+        "https://www.jobserve.com/gb/en/WABC123.jsjob",
+        { timeoutMs: 1000, minTextLength: 10 },
+        async () =>
+          htmlResponse(
+            `<main><h1>Another role</h1><p>${"Still a long valid-looking job body. ".repeat(20)}</p></main>`,
+            200,
+            "text/html",
+            "https://www.jobserve.com/gb/en/WXYZ999.jsjob",
+          ),
+      ),
+    ).rejects.toThrow("unexpected URL");
   });
 });

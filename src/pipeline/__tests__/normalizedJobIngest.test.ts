@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureQualityFlags,
+  normalizedCanonicalKey,
   normalizedJobMarkdown,
+  normalizedJobPageResult,
   normalizeExternalJobPayload,
 } from "../normalizedJobIngest";
 
@@ -119,6 +121,7 @@ describe("normalized job ingest", () => {
     expect(markdown).toContain("- Outside IR35: yes");
     expect(markdown).toContain("- Inside IR35: no");
     expect(markdown).toContain("- Priority notes: contract, outside_ir35");
+    expect(normalizedCanonicalKey(job)).toBe("jobserve:abc123");
   });
 
   test("fails loudly for malformed rows", () => {
@@ -136,5 +139,42 @@ describe("normalized job ingest", () => {
     expect(flags).toContain("single_line_long_body");
     expect(flags).toContain("nav_or_cookie_boilerplate");
     expect(flags).toContain("detail_fetch_error");
+  });
+
+  test("does not persist skipped JobServe snippets as successful full text", () => {
+    const [job] = normalizeExternalJobPayload(
+      {
+        roles: [
+          {
+            title: "AI Engineer",
+            url: "https://jobserve.com/job/ABC",
+            summary_snippet: "A card snippet",
+            detail_status: "skipped",
+          },
+        ],
+      },
+      "jobserve",
+    );
+    if (!job) throw new Error("Expected normalized job");
+    expect(normalizedJobPageResult(job)).toBeNull();
+  });
+
+  test("records failed JobServe detail acquisition as an error page", () => {
+    const [job] = normalizeExternalJobPayload(
+      {
+        roles: [
+          {
+            title: "AI Engineer",
+            url: "https://jobserve.com/job/ABC",
+            summary_snippet: "A card snippet",
+            detail_status: "error",
+            detail_error: "HTTP 503",
+          },
+        ],
+      },
+      "jobserve",
+    );
+    if (!job) throw new Error("Expected normalized job");
+    expect(normalizedJobPageResult(job)).toMatchObject({ status: "error", error: "HTTP 503" });
   });
 });

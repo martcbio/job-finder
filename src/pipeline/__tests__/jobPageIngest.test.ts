@@ -44,6 +44,9 @@ describe("buildUpsertJobPageSql", () => {
     );
 
     expect(sql).toContain("ON CONFLICT (job_id, source)");
+    expect(sql).toContain("job_search.job_pages.status <> 'success'");
+    expect(sql).toContain("EXCLUDED.status = 'success'");
+    expect(sql).toContain("RETURNING id");
     expect(sql).toContain("'jina_reader'");
     expect(sql).toContain("Title: Agentic Engineer");
     expect(sql).toContain("usage_tokens");

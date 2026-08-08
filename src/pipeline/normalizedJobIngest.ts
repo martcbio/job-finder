@@ -78,10 +78,13 @@ export async function ingestNormalizedJobs(
 
   for (const [index, job] of input.jobs.entries()) {
     try {
+      const canonicalKeyOverride = normalizedCanonicalKey(job);
       await persistSearchResult({
         queryId,
         rank: index + 1,
         sourceLabel: job.sourceLabel,
+        ...(canonicalKeyOverride ? { canonicalKeyOverride } : {}),
+        rawEvidence: job.raw,
         item: {
           title: displayTitle(job),
           description: resultDescription(job),
@@ -90,26 +93,20 @@ export async function ingestNormalizedJobs(
       });
       jobsPersisted += 1;
 
-      if (job.description.trim()) {
+      const pageResult = normalizedJobPageResult(job);
+      if (pageResult) {
         const persisted = await findPersistedJob(job);
-        await runPsql(
+        const upsert = await runPsql(
           buildUpsertJobPageSql(
             {
               id: persisted.id,
               title: persisted.title,
               canonical_url: persisted.canonical_url,
             },
-            {
-              source: "http_extract",
-              status: "success",
-              markdown: normalizedJobMarkdown(job),
-              usageTokens: null,
-              decompressedBytes: Buffer.byteLength(job.description, "utf8"),
-              error: null,
-            },
+            pageResult,
           ),
         );
-        pagesPersisted += 1;
+        if (pageResult.status === "success" && upsert.stdout.trim()) pagesPersisted += 1;
       }
     } catch (err) {
       errors.push({
@@ -146,6 +143,29 @@ export async function ingestNormalizedJobs(
     jobsPersisted,
     pagesPersisted,
     errors,
+  };
+}
+
+export function normalizedJobPageResult(job: NormalizedJobInput): {
+  source: "http_extract";
+  status: "success" | "error";
+  markdown: string;
+  usageTokens: null;
+  decompressedBytes: number;
+  error: string | null;
+} | null {
+  if (!job.description.trim()) return null;
+  const raw = job.raw && typeof job.raw === "object" && !Array.isArray(job.raw) ? job.raw : null;
+  const detailStatus = raw ? (raw as Record<string, unknown>).detail_status : null;
+  if (detailStatus === "skipped") return null;
+  const detailError = raw ? textValue((raw as Record<string, unknown>).detail_error) : "";
+  return {
+    source: "http_extract",
+    status: detailStatus === "error" ? "error" : "success",
+    markdown: normalizedJobMarkdown(job),
+    usageTokens: null,
+    decompressedBytes: Buffer.byteLength(job.description, "utf8"),
+    error: detailStatus === "error" ? detailError || "Detail fetch failed" : null,
   };
 }
 
@@ -224,7 +244,8 @@ function normalizedImportTarget(input: NormalizedJobIngestInput): SearchTarget {
 
 async function findPersistedJob(job: NormalizedJobInput): Promise<JobIdRow> {
   const canonicalUrl = canonicalizeJobUrl(job.url);
-  const canonicalKey = atsIdentityFromUrl(job.url)?.canonicalKey ?? canonicalUrl;
+  const canonicalKey =
+    normalizedCanonicalKey(job) ?? atsIdentityFromUrl(job.url)?.canonicalKey ?? canonicalUrl;
   const row = await runPsqlJson<JobIdRow | null>(`SELECT COALESCE(
   (
     SELECT json_build_object(
@@ -244,6 +265,13 @@ async function findPersistedJob(job: NormalizedJobInput): Promise<JobIdRow> {
     throw new Error(`Persisted job not found for canonical URL ${canonicalUrl}`);
   }
   return row;
+}
+
+export function normalizedCanonicalKey(job: NormalizedJobInput): string | null {
+  if (job.sourceId !== "jobserve") return null;
+  if (!job.raw || typeof job.raw !== "object" || Array.isArray(job.raw)) return null;
+  const jobId = textValue((job.raw as Record<string, unknown>).job_id);
+  return jobId ? `jobserve:${jobId.toLowerCase()}` : null;
 }
 
 function extractRecords(payload: unknown): Record<string, unknown>[] {
@@ -354,7 +382,7 @@ export function captureQualityFlags(raw: unknown, description: string): string[]
     flags.push("nav_or_cookie_boilerplate");
   }
   if (
-    /\b(?:job not found|not available anymore|no longer accepting applications|page you are looking for doesn't exist)\b/i.test(
+    /\b(?:job not found|not available anymore|no longer accepting applications|job you have requested is no longer available|page you are looking for doesn't exist)\b/i.test(
       text,
     )
   ) {

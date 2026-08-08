@@ -1,5 +1,9 @@
 import { fetchGoogleCareersJobs, fetchLinearCareersJobs } from "../directSources";
-import { fetchLiveJobServeRoles, jobServeRoleToNormalizedJob } from "../jobserveLive";
+import {
+  createJobServeRequestSession,
+  fetchLiveJobServeRoles,
+  jobServeRoleToNormalizedJob,
+} from "../jobserveLive";
 import type { SourceOutcome } from "../sourceAdapterContract";
 import type { RegisteredJobSource, SourceAdapterFactory } from "../sourceRegistry";
 import type { FastRefreshCosts } from "./types";
@@ -13,6 +17,7 @@ const ZERO_COSTS: FastRefreshCosts = {
 
 export const buildJobServeAdapters: SourceAdapterFactory = (source, options) => {
   let runWideBlockedReason: string | null = null;
+  const session = createJobServeRequestSession();
   return options.jobserveQueries.map((query) => ({
     ...adapterMetadata(source),
     defaultKeyword: query,
@@ -39,6 +44,7 @@ export const buildJobServeAdapters: SourceAdapterFactory = (source, options) => 
         maxPages: options.jobserveMaxPages,
         timeoutMs: input.timeoutMs,
         detailLimit: input.limit,
+        session,
       });
       if (result.blockedReason) runWideBlockedReason = result.blockedReason;
       const jobs = result.roles.map((role) => jobServeRoleToNormalizedJob(role, query));

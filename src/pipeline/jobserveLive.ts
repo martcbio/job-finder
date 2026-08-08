@@ -1,6 +1,7 @@
 import { decodeHtmlEntities } from "./htmlEntities";
 import { htmlToReadableMarkdown } from "./httpPageExtract";
 import { classifyIr35Signals } from "./ir35Signals";
+import { isJobServeUsageRestriction, isMatchingJobServeDetailLanding } from "./jobservePageSignals";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
 
 export interface LiveJobServeOptions {
@@ -12,6 +13,13 @@ export interface LiveJobServeOptions {
   detailLimit?: number;
   requestDelayMs?: number;
   fetcher?: typeof fetch;
+  session?: JobServeRequestSession;
+}
+
+export interface JobServeRequestSession {
+  waitForRequestSlot(): Promise<void>;
+  add(headers: Headers): void;
+  header(): string | null;
 }
 
 export interface LiveJobServeRole {
@@ -74,7 +82,7 @@ class JobServeUsageRestrictionError extends Error {
   }
 }
 
-class CookieJar {
+class CookieJar implements JobServeRequestSession {
   readonly cookies = new Map<string, string>();
   private lastRequestAt = 0;
 
@@ -108,12 +116,16 @@ class CookieJar {
   }
 }
 
+export function createJobServeRequestSession(requestDelayMs = 1_500): JobServeRequestSession {
+  return new CookieJar(requestDelayMs);
+}
+
 /** Fetches a bounded JobServe search and preserves site-wide blocks as source diagnostics. */
 export async function fetchLiveJobServeRoles(
   options: LiveJobServeOptions,
 ): Promise<LiveJobServeResult> {
   const fetcher = options.fetcher ?? fetch;
-  const jar = new CookieJar(options.requestDelayMs ?? 1500);
+  const jar = options.session ?? createJobServeRequestSession(options.requestDelayMs ?? 1_500);
   const timeoutMs = options.timeoutMs;
   const seedUrl = options.searchUrl ?? DEFAULT_SEARCH_URL;
   const ageDays = options.ageDays ?? 3;
@@ -242,7 +254,7 @@ export function parseJobServeRolesFromClassicHtml(
 
 async function submitSearchForm(
   fetcher: typeof fetch,
-  jar: CookieJar,
+  jar: JobServeRequestSession,
   input: {
     html: string;
     finalUrl: string;
@@ -320,7 +332,7 @@ function buildSearchFormFields(
 
 async function fetchClassicPages(
   fetcher: typeof fetch,
-  jar: CookieJar,
+  jar: JobServeRequestSession,
   options: { classicUrl: string; maxPages: number; timeoutMs: number },
 ): Promise<{
   pages: Array<{ url: string; pageNumber: number; html: string }>;
@@ -392,7 +404,7 @@ function jobServeDetailFailureMessage(role: LiveJobServeRole): string {
 
 async function requestText(
   fetcher: typeof fetch,
-  jar: CookieJar,
+  jar: JobServeRequestSession,
   url: string,
   options: {
     method?: string;
@@ -426,11 +438,7 @@ async function requestText(
     jar.add(response.headers);
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
     const text = await response.text();
-    if (
-      /<h1[^>]*>\s*Usage Restricted\s*<\/h1>/i.test(text) ||
-      /\bdeemed to exceed our fair usage levels\b/i.test(text) ||
-      /\/UsageRestriction\.aspx\b/i.test(response.url)
-    ) {
+    if (isJobServeUsageRestriction(response.url, text)) {
       throw new JobServeUsageRestrictionError();
     }
     return { text, url: response.url || url };
@@ -530,7 +538,7 @@ function parseJobServeRoleBlock(
 
 async function fetchJobServeRoleDetail(
   fetcher: typeof fetch,
-  jar: CookieJar,
+  jar: JobServeRequestSession,
   role: LiveJobServeRole,
   timeoutMs: number,
 ): Promise<LiveJobServeRole> {
@@ -541,6 +549,13 @@ async function fetchJobServeRoleDetail(
       timeoutMs,
       headers: { Accept: FORM_ACCEPT, Referer: role.url },
     });
+    if (!isMatchingJobServeDetailLanding(role.job_id, detail.url)) {
+      return {
+        ...role,
+        detail_status: "error",
+        detail_error: `JobServe detail request landed on an unexpected URL: ${detail.url}`,
+      };
+    }
     const markdown = jobServeDetailMarkdownFromHtml(detail.text, detail.url);
     const bodyLength = readableMarkdownBody(markdown).length;
     if (bodyLength < Math.max(300, role.summary_snippet.length)) {

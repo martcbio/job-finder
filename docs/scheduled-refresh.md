@@ -26,7 +26,10 @@ launchctl bootout gui/$(id -u)/com.mcb.jobsradar.fast-refresh
 rm ~/Library/LaunchAgents/com.mcb.jobsradar.fast-refresh.plist
 ```
 
-The run itself is the default `bun scripts/fast-refresh.ts` profile: JobServe
-queries (3 pages, 8 imports per query) plus the linear-careers direct source,
-then classification of up to 250 pending jobs. Failed runs are kept as
-`*.failed.md` and exit non-zero so launchd records the failure.
+The run uses the default `bun scripts/fast-refresh.ts` profile: three JobServe
+queries (2 pages, 5 imports per query) plus the other default direct sources,
+then classification of up to 250 pending jobs. It next live-verifies the 30
+highest-ranked current opportunities. Dead URLs move safe queue states to
+`stale`; protected states receive a durable `source_url_dead` flag instead.
+JobServe checks are paced at 1.5 seconds. Failed runs are kept as `*.failed.md`
+and exit non-zero so launchd records the failure.

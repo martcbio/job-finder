@@ -49,6 +49,11 @@ describe("job expiry SQL", () => {
     expect(sql).toContain("SET review_state = 'stale'");
     expect(sql).toContain("ARRAY['source_url_dead']::text[]");
     expect(sql).toContain("INSERT INTO job_search.review_events");
+    expect(sql).toContain("review_state <> 'stale'");
+    expect(sql).toContain("review_state <> ALL");
+    expect(sql).toContain("NOT EXISTS");
+    expect(sql).toContain("existing_event.reason_codes @> ARRAY['source_url_dead']");
+    expect(sql).toContain("review_state,\n    review_state,\n    ARRAY['source_url_dead']");
     expect(sql).toContain("ORDER BY id\n  FOR UPDATE");
     expect(sql).not.toContain("DELETE FROM");
   });

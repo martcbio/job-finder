@@ -1,4 +1,11 @@
+import {
+  hasProminentWithdrawalVerdict,
+  isJobServeExpiredLanding,
+  isJobServeUrl,
+  isJobServeUsageRestriction,
+} from "./jobservePageSignals";
 import type { Opportunity } from "./opportunityReport";
+import { RequestPacer } from "./requestPacer";
 
 export interface OpportunityUrlCheck {
   url: string;
@@ -11,55 +18,19 @@ export interface OpportunityUrlVerificationResult {
   unverified: OpportunityUrlCheck[];
 }
 
-const WITHDRAWN_ROLE_PHRASE =
-  /\b(?:this job|this position|job posting|position)\s+(?:is|has been)\s+(?:no longer available|closed|filled|withdrawn)\b/i;
-const TITLE_TAG = /<title\b[^>]*>([\s\S]*?)<\/title>/i;
-const PRIMARY_HEADING_TAG = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i;
-const MAIN_CONTENT_TAG = /<(?:main|article)\b[^>]*>([\s\S]*?)<\/(?:main|article)>/i;
-const ROLE_MAIN_CONTENT_TAG = /<[^>]+\brole=(["'])main\1[^>]*>([\s\S]*?)<\/[^>]+>/i;
-const PERIPHERAL_CONTENT_TAG =
-  /<(?:header|footer|nav|aside)\b[^>]*>[\s\S]*?<\/(?:header|footer|nav|aside)>/gi;
-const SECONDARY_HEADING_TAG = /<h[2-6]\b[^>]*>[\s\S]*?<\/h[2-6]>/gi;
-const EARLY_BODY_TEXT_LIMIT = 1_000;
-
-function visibleText(value: string): string {
-  return value
-    .replace(/<(?:script|style|template)\b[^>]*>[\s\S]*?<\/(?:script|style|template)>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function hasProminentWithdrawalVerdict(body: string): boolean {
-  const title = body.match(TITLE_TAG)?.[1] ?? "";
-  if (WITHDRAWN_ROLE_PHRASE.test(visibleText(title))) return true;
-
-  const primaryContent = mainContent(body);
-  const primaryHeading = primaryContent.match(PRIMARY_HEADING_TAG)?.[1] ?? "";
-  if (WITHDRAWN_ROLE_PHRASE.test(visibleText(primaryHeading))) return true;
-
-  const earlyContent = visibleText(primaryContent.replace(SECONDARY_HEADING_TAG, " ")).slice(
-    0,
-    EARLY_BODY_TEXT_LIMIT,
-  );
-  return WITHDRAWN_ROLE_PHRASE.test(earlyContent);
-}
-
-function mainContent(body: string): string {
-  const semanticMain = body.match(MAIN_CONTENT_TAG)?.[1] ?? body.match(ROLE_MAIN_CONTENT_TAG)?.[2];
-  return (semanticMain ?? body).replace(PERIPHERAL_CONTENT_TAG, " ");
-}
-
 export async function verifyOpportunityUrls(
   rows: readonly Opportunity[],
   options: {
     timeoutMs: number;
     concurrency: number;
     fetcher?: typeof fetch;
+    jobServeDelayMs?: number;
   },
 ): Promise<OpportunityUrlVerificationResult> {
   const fetcher = options.fetcher ?? fetch;
+  const jobServePacer = new RequestPacer(options.jobServeDelayMs ?? 1_500);
   const checks = await mapWithConcurrency(rows, options.concurrency, async (row) => {
+    if (isJobServeUrl(row.url)) await jobServePacer.wait();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
     try {
@@ -80,7 +51,17 @@ export async function verifyOpportunityUrls(
         return { row, state: "unverified" as const, reason: `HTTP ${response.status}` };
       }
       const body = (await response.text()).slice(0, 2_000_000);
-      if (hasProminentWithdrawalVerdict(body)) {
+      if (isJobServeUsageRestriction(response.url, body)) {
+        return { row, state: "unverified" as const, reason: "JobServe usage restricted" };
+      }
+      if (isJobServeExpiredLanding(row.url, response.url)) {
+        return {
+          row,
+          state: "dead" as const,
+          reason: `JobServe redirected to ${response.url}`,
+        };
+      }
+      if (hasProminentWithdrawalVerdict(body, isJobServeUrl(row.url))) {
         return { row, state: "dead" as const, reason: "page says the role is no longer available" };
       }
       return { row, state: "current" as const, reason: `HTTP ${response.status}` };

@@ -30,7 +30,8 @@ if ! pg_isready -q; then
   exit 0
 fi
 
-if bun scripts/fast-refresh.ts > "$OUT" 2>&1; then
+if bun scripts/fast-refresh.ts > "$OUT" 2>&1 \
+  && bun scripts/list-latest-opportunities.ts --quiet --limit 30 >> "$OUT" 2>&1; then
   ln -sf "$OUT" "$LOG_DIR/latest.md"
   # Refresh skill signals/clusters over whatever the run brought in.
   bun scripts/skill-clusters.ts > "$LOG_DIR/skill-clusters.md" 2>>"$LOG_DIR/skill-clusters.err.log" || true

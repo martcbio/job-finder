@@ -1,8 +1,18 @@
+import {
+  hasProminentWithdrawalVerdict,
+  isJobServeExpiredLanding,
+  isJobServeUrl,
+  isJobServeUsageRestriction,
+  isMatchingJobServeDetailLanding,
+  jobServeJobIdFromUrl,
+} from "./jobservePageSignals";
+
 export interface HttpPageExtractResult {
   markdown: string;
   status: number;
   contentType: string;
   byteLength: number;
+  finalUrl: string;
 }
 
 export interface HttpPageExtractOptions {
@@ -46,9 +56,22 @@ export async function fetchHttpPageMarkdown(
     }
 
     const body = await res.text();
+    const finalUrl = res.url || url;
+    if (isJobServeUrl(url)) {
+      if (isJobServeUsageRestriction(finalUrl, body)) {
+        throw new Error("JobServe usage restricted during HTTP page extraction");
+      }
+      if (isJobServeExpiredLanding(url, finalUrl) || hasProminentWithdrawalVerdict(body, true)) {
+        throw new Error(`JobServe job is unavailable: ${finalUrl}`);
+      }
+      const jobId = jobServeJobIdFromUrl(url);
+      if (jobId && !isMatchingJobServeDetailLanding(jobId, finalUrl)) {
+        throw new Error(`JobServe detail request landed on an unexpected URL: ${finalUrl}`);
+      }
+    }
     const markdown = contentType.includes("text/plain")
       ? normalizeWhitespace(body)
-      : htmlToReadableMarkdown(body, url);
+      : htmlToReadableMarkdown(body, finalUrl);
 
     if (markdown.length < options.minTextLength) {
       throw new Error(`HTTP extraction returned only ${markdown.length} readable character(s)`);
@@ -59,6 +82,7 @@ export async function fetchHttpPageMarkdown(
       status: res.status,
       contentType,
       byteLength: new TextEncoder().encode(body).byteLength,
+      finalUrl,
     };
   } finally {
     clearTimeout(timeout);

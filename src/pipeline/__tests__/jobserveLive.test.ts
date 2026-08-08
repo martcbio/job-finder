@@ -317,6 +317,83 @@ describe("live JobServe parsing", () => {
     expect(result.blockedReason).toBeNull();
   });
 
+  test("rejects a detail request that redirects to generic JobServe search", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const searchLanding = new Response(`${"Generic search results. ".repeat(30)}`, { status: 200 });
+    Object.defineProperty(searchLanding, "url", {
+      value: "https://www.jobserve.com/gb/en/JobSearch.aspx?q=agentic",
+    });
+    const responses = [
+      new Response(seedHtml),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+      ),
+      new Response(classicHtml),
+      searchLanding,
+    ];
+    const fetcher = (async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Unexpected JobServe request");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 1,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(result.roles[0]).toMatchObject({
+      job_id: "ABC123",
+      detail_status: "error",
+      detail_error:
+        "JobServe detail request landed on an unexpected URL: https://www.jobserve.com/gb/en/JobSearch.aspx?q=agentic",
+    });
+  });
+
+  test("accepts a successful detail response that lands on the matching JobServe id", async () => {
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+      <input name="ctl00$txtKeyWords" value="">
+      <input name="selAge" value="3">
+    </form>`;
+    const detail = new Response(
+      `<main id="job"><h1>Forward Deployed AI Engineer</h1><p>${"Build production agent systems with customers. ".repeat(15)}</p></main>`,
+      { status: 200 },
+    );
+    Object.defineProperty(detail, "url", {
+      value: "https://www.jobserve.com/gb/en/WABC123.jsjob",
+    });
+    const responses = [
+      new Response(seedHtml),
+      new Response(
+        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
+      ),
+      new Response(classicHtml),
+      detail,
+    ];
+    const fetcher = (async () => {
+      const response = responses.shift();
+      if (!response) throw new Error("Unexpected JobServe request");
+      return response;
+    }) as unknown as typeof fetch;
+
+    const result = await fetchLiveJobServeRoles({
+      query: "agentic",
+      maxPages: 1,
+      timeoutMs: 1000,
+      requestDelayMs: 0,
+      fetcher,
+    });
+
+    expect(result.roles[0]).toMatchObject({ job_id: "ABC123", detail_status: "success" });
+    expect(result.roles[0]?.detail_markdown).toContain("Build production agent systems");
+  });
+
   test("persists security-clearance listings as raw evidence", async () => {
     const restrictedHtml = classicHtml
       .replace("ABC123", "SC123")

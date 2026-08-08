@@ -108,6 +108,8 @@ export function buildUpsertJobPageSql(job: PageIngestJobRow, result: PageIngestR
     usage_tokens = EXCLUDED.usage_tokens,
     decompressed_bytes = EXCLUDED.decompressed_bytes,
     error = EXCLUDED.error
+  WHERE job_search.job_pages.status <> 'success'
+     OR EXCLUDED.status = 'success'
   RETURNING job_id
 ),
 deleted_page_labels AS (
@@ -124,7 +126,8 @@ SET page_ingest_status = ${quoteSqlLiteral(result.status)},
     classification_confidence = CASE WHEN category = 'unclassified' THEN classification_confidence ELSE NULL END,
     classification_reason = CASE WHEN category = 'unclassified' THEN classification_reason ELSE NULL END,
     classified_at = CASE WHEN category = 'unclassified' THEN classified_at ELSE NULL END
-WHERE id IN (SELECT job_id FROM upserted_page);`;
+WHERE id IN (SELECT job_id FROM upserted_page)
+RETURNING id;`;
 }
 
 export function buildInsertPageIngestAttemptSql(jobId: string, attempt: PageIngestAttempt): string {

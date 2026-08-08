@@ -35,6 +35,8 @@ export interface PersistSearchResultInput {
   rank: number;
   sourceLabel: string;
   item: SearchResultItem;
+  canonicalKeyOverride?: string;
+  rawEvidence?: unknown;
 }
 
 export interface AtsIdentity {
@@ -202,7 +204,8 @@ export async function persistSearchResult(input: PersistSearchResultInput): Prom
 export function buildPersistSearchResultSql(input: PersistSearchResultInput): string {
   const canonicalUrl = canonicalizeJobUrl(input.item.url);
   const atsIdentity = atsIdentityFromUrl(input.item.url);
-  const canonicalKey = atsIdentity?.canonicalKey ?? canonicalUrl;
+  const canonicalKeyOverride = input.canonicalKeyOverride?.trim() || null;
+  const canonicalKey = canonicalKeyOverride ?? atsIdentity?.canonicalKey ?? canonicalUrl;
   const companyHint = companyHintFromUrl(input.sourceLabel, input.item.url, input.item.title);
   const normalizedTitle = normalizeTitle(input.item.title, input.sourceLabel);
 
@@ -215,6 +218,7 @@ export function buildPersistSearchResultSql(input: PersistSearchResultInput): st
          url_raw,
          url_canonical,
          company_hint,
+         raw_payload,
          ats_source,
          ats_org,
          ats_job_id
@@ -227,6 +231,7 @@ export function buildPersistSearchResultSql(input: PersistSearchResultInput): st
          ${quoteSqlLiteral(input.item.url)},
          ${quoteSqlLiteral(canonicalUrl)},
          ${nullableText(companyHint)},
+         ${input.rawEvidence === undefined ? "'{}'::jsonb" : jsonbLiteral(input.rawEvidence)},
          ${nullableText(atsIdentity?.source ?? null)},
          ${nullableText(atsIdentity?.org ?? null)},
          ${nullableText(atsIdentity?.jobId ?? null)}
@@ -237,6 +242,7 @@ export function buildPersistSearchResultSql(input: PersistSearchResultInput): st
        SELECT id
        FROM job_search.jobs
        WHERE canonical_key = ${quoteSqlLiteral(canonicalKey)}
+          OR canonical_url = ${quoteSqlLiteral(canonicalUrl)}
           OR (
             ${nullableText(atsIdentity?.source ?? null)} IS NOT NULL
             AND ats_source = ${nullableText(atsIdentity?.source ?? null)}
@@ -250,7 +256,8 @@ export function buildPersistSearchResultSql(input: PersistSearchResultInput): st
      ),
      updated_existing_job AS (
        UPDATE job_search.jobs
-       SET last_seen_at = now(),
+       SET canonical_key = ${quoteSqlLiteral(canonicalKey)},
+           last_seen_at = now(),
            title_normalized = ${quoteSqlLiteral(normalizedTitle)},
            company_hint = COALESCE(${nullableText(companyHint)}, job_search.jobs.company_hint),
            ats_source = COALESCE(job_search.jobs.ats_source, ${nullableText(atsIdentity?.source ?? null)}),

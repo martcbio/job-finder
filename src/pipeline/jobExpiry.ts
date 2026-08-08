@@ -109,7 +109,7 @@ export function buildMarkJobsStaleByCanonicalUrlsSql(
   return `WITH candidates AS (
   SELECT id, title_normalized, company_hint, review_state, last_seen_at
   FROM job_search.jobs
-  WHERE review_state = ANY(${expirableStateArraySql()})
+  WHERE review_state <> 'stale'
     AND canonical_url = ANY(${urlArray})
   ORDER BY id
   FOR UPDATE
@@ -119,6 +119,7 @@ updated_jobs AS (
   SET review_state = 'stale'
   FROM candidates c
   WHERE j.id = c.id
+    AND c.review_state = ANY(${expirableStateArraySql()})
   RETURNING
     j.id,
     j.title_normalized,
@@ -127,7 +128,7 @@ updated_jobs AS (
     j.review_state,
     j.last_seen_at
 ),
-inserted_events AS (
+inserted_transition_events AS (
   INSERT INTO job_search.review_events (
     job_id,
     from_state,
@@ -144,6 +145,34 @@ inserted_events AS (
     ${quoteSqlLiteral(reason)},
     'system'
   FROM updated_jobs
+),
+inserted_flag_events AS (
+  INSERT INTO job_search.review_events (
+    job_id,
+    from_state,
+    to_state,
+    reason_codes,
+    note,
+    actor
+  )
+  SELECT
+    id,
+    review_state,
+    review_state,
+    ARRAY['source_url_dead']::text[],
+    ${quoteSqlLiteral(reason)},
+    'system'
+  FROM candidates
+  WHERE review_state <> ALL(${expirableStateArraySql()})
+    AND NOT EXISTS (
+      SELECT 1
+      FROM job_search.review_events existing_event
+      WHERE existing_event.job_id = candidates.id
+        AND existing_event.from_state = candidates.review_state
+        AND existing_event.to_state = candidates.review_state
+        AND existing_event.reason_codes @> ARRAY['source_url_dead']::text[]
+        AND existing_event.note = ${quoteSqlLiteral(reason)}
+    )
 )
 SELECT COALESCE(json_agg(row_to_json(staled_job)), '[]'::json)
 FROM (

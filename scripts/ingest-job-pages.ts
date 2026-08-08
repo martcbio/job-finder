@@ -7,6 +7,8 @@ import {
   buildUpsertJobPageSql,
 } from "../src/pipeline/jobPageIngest";
 import { fetchHttpPageMarkdown } from "../src/pipeline/httpPageExtract";
+import { isJobServeUrl } from "../src/pipeline/jobservePageSignals";
+import { RequestPacer } from "../src/pipeline/requestPacer";
 import { fetchJinaReaderWithUsage } from "../src/pipeline/search";
 import { fetchAtsData, formatAtsBlock, hasUsableAtsBody } from "../src/services/ats";
 
@@ -99,6 +101,7 @@ async function run(): Promise<void> {
       : buildSearchRunPageIngestSql(options.runId, options.limit),
   );
   const results = [];
+  const jobServePacer = new RequestPacer(1_500);
   let totalReportedTokens = 0;
 
   for (const row of rows) {
@@ -108,9 +111,20 @@ async function run(): Promise<void> {
       continue;
     }
 
+    if (isJobServeUrl(row.canonical_url)) await jobServePacer.wait();
     const httpCaptured = await captureHttpExtract(row, options);
     if (httpCaptured) {
       results.push({ id: row.id, status: "success", source: "http_extract", tokens: null });
+      continue;
+    }
+
+    if (isJobServeUrl(row.canonical_url)) {
+      results.push({
+        id: row.id,
+        status: "error",
+        source: "http_extract",
+        error: "JobServe HTTP extraction failed; unsafe third-party fallback suppressed",
+      });
       continue;
     }
 
@@ -252,6 +266,7 @@ async function captureHttpExtract(row: PageIngestJobRow, options: IngestPagesOpt
           status: result.status,
           contentType: result.contentType,
           byteLength: result.byteLength,
+          finalUrl: result.finalUrl,
         },
         error: null,
       }),

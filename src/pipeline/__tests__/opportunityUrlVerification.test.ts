@@ -97,4 +97,67 @@ describe("opportunity URL verification", () => {
       "https://careers.example.com/jobs/heading",
     ]);
   });
+
+  test("detects JobServe expired copy and redirects while preserving usage restrictions as unverified", async () => {
+    const fetcher = Object.assign(
+      async (input: string | URL | Request) => {
+        const requested = String(input);
+        if (requested.endsWith("/redirected")) {
+          const response = new Response("<h1>Search jobs</h1>", { status: 200 });
+          Object.defineProperty(response, "url", {
+            value: "https://www.jobserve.com/gb/en/JobSearch.aspx?q=AI",
+          });
+          return response;
+        }
+        if (requested.endsWith("/restricted")) {
+          return new Response(
+            "<h1>Usage Restricted</h1><p>Your IP Address has been deemed to exceed our fair usage levels.</p>",
+            { status: 200 },
+          );
+        }
+        return new Response(
+          "<title>Job Expired</title><h2>The job you have requested is no longer available</h2>",
+          { status: 200 },
+        );
+      },
+      { preconnect: fetch.preconnect },
+    ) as typeof fetch;
+
+    const result = await verifyOpportunityUrls(
+      [
+        row("https://www.jobserve.com/gb/en/job/expired-copy"),
+        row("https://www.jobserve.com/gb/en/job/redirected"),
+        row("https://www.jobserve.com/gb/en/job/restricted"),
+      ],
+      { fetcher, timeoutMs: 1000, concurrency: 3, jobServeDelayMs: 0 },
+    );
+
+    expect(result.dead.map((item) => item.url)).toEqual([
+      "https://www.jobserve.com/gb/en/job/expired-copy",
+      "https://www.jobserve.com/gb/en/job/redirected",
+    ]);
+    expect(result.unverified).toEqual([
+      { url: "https://www.jobserve.com/gb/en/job/restricted", reason: "JobServe usage restricted" },
+    ]);
+  });
+
+  test("does not treat a generic live page mentioning a reposted expired job as withdrawn", async () => {
+    const fetcher = Object.assign(
+      async () =>
+        new Response(
+          "<main><h1>Senior Software Engineer</h1><p>This job expired and was reposted. Apply to this current opening.</p></main>",
+          { status: 200 },
+        ),
+      { preconnect: fetch.preconnect },
+    ) as typeof fetch;
+
+    const current = row("https://careers.example.com/jobs/reposted");
+    const result = await verifyOpportunityUrls([current], {
+      fetcher,
+      timeoutMs: 1000,
+      concurrency: 1,
+    });
+    expect(result.rows).toEqual([current]);
+    expect(result.dead).toEqual([]);
+  });
 });

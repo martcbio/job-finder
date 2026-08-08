@@ -179,22 +179,26 @@ describe("fast refresh contract helpers", () => {
 
   test("turns ordinary JobServe detail failures into a partial source receipt", async () => {
     const originalFetch = globalThis.fetch;
-    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx">
+    const seedHtml = `<form id="frm1" action="/gb/en/JobSearch.aspx?shid=400A6BF6B1A53C1181D0">
       <input name="ctl00$txtKeyWords" value="">
       <input name="selAge" value="3">
     </form>`;
-    const classicHtml = `<form><div id="joblistingcollection">
-      <div class="jobListItem" id="ABC123">
-        <a href="/gb/en/search-jobs/ABC123" class="jobListPosition">Senior AI Engineer</a>
-        <p class="jobListSkills">Build agentic systems. <a href="/gb/en/WABC123.jsjob">more</a></p>
-      </div>
-    </div><div id="actions"></div></form>`;
+    const submittedHtml = `<html><body>
+      <form>
+        <div id="joblistingcollection">
+          <div class="jobListItem" id="ABC123">
+            <a href="/gb/en/search-jobs/ABC123" class="jobListPosition">Senior AI Engineer</a>
+            <a href="/gb/en/WABC123.jsap" class="jobListApply">Apply</a>
+            <p class="jobListSkills">Build agentic systems. <a href="/gb/en/WABC123.jsjob">more</a></p>
+            <label class="jobListLabel left">Rate</label><span class="jobListDetail left">£600 per day</span>
+            <label class="jobListLabel left">Type</label><span class="jobListDetail left">Contract</span>
+          </div>
+        </div>
+      </form>
+    </body></html>`;
     const responses = [
       new Response(seedHtml),
-      new Response(
-        '<a href="/gb/en/JobListing.aspx?page=1" id="searchtogglelink">Classic View</a>',
-      ),
-      new Response(classicHtml),
+      new Response(submittedHtml),
       new Response("temporarily unavailable", { status: 503 }),
     ];
     globalThis.fetch = (async () => {

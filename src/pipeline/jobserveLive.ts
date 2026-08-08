@@ -1,7 +1,7 @@
 import { decodeHtmlEntities } from "./htmlEntities";
 import { htmlToReadableMarkdown } from "./httpPageExtract";
 import { classifyIr35Signals } from "./ir35Signals";
-import { isJobServeUsageRestriction, isMatchingJobServeDetailLanding } from "./jobservePageSignals";
+import { isJobServeUsageRestriction } from "./jobservePageSignals";
 import type { NormalizedJobInput } from "./normalizedJobIngest";
 
 export interface LiveJobServeOptions {
@@ -63,10 +63,12 @@ export interface LiveJobServeResult {
 
 const BASE_URL = "https://www.jobserve.com";
 const DEFAULT_SEARCH_URL = `${BASE_URL}/gb/en/JobSearch.aspx`;
+const WEB_SERVICE_BASE = `${BASE_URL}/WebServices/JobSearch.asmx`;
 const FORM_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+const JSON_CONTENT_TYPE = "application/json; charset=UTF-8";
+
 const ITEM_START_RE = /<div class="jobListItem\b[^>]* id="([A-Z0-9]+)">/gi;
-const CLASSIC_LINK_RE =
-  /<a href="([^"]+)"[^>]*id="searchtogglelink"[^>]*>\s*Classic View\s*<\/a>/is;
+const ITEM_ID_RE = /^<div class="jobListItem\b[^>]* id="([A-Z0-9]+)">/i;
 const JOB_POS_RE = /<a href="([^"]+)"[^>]*class="jobListPosition">(.+?)<\/a>/is;
 const JOB_APPLY_RE = /<a href="([^"]+)"[^>]*class="jobListApply"/is;
 const JOB_SKILLS_RE = /<p class="jobListSkills">(.*?)<\/p>/is;
@@ -74,6 +76,8 @@ const DETAIL_LABEL_RE =
   /<label class="jobListLabel left(?: [^"]*)?">([^<]+)<\/label>\s*<span[^>]*class="jobListDetail left"[^>]*?(?:title="([^"]*)")?[^>]*>(.*?)<\/span>/gis;
 const NEXT_LINK_RE = /<span class="nav_Next">\s*(?:<a href="([^"]+)".*?)?<\/span>/is;
 const PAGE_RE = /[?&]page=(\d+)/i;
+const DETAIL_EMPLOYER_RE = /Posted by:<\/span>\s*([^<]+)</is;
+const DETAIL_POSTED_DATE_RE = /<strong>Posted:<\/strong>\s*([^<]+)</is;
 
 class JobServeUsageRestrictionError extends Error {
   constructor() {
@@ -129,6 +133,8 @@ export async function fetchLiveJobServeRoles(
   const timeoutMs = options.timeoutMs;
   const seedUrl = options.searchUrl ?? DEFAULT_SEARCH_URL;
   const ageDays = options.ageDays ?? 3;
+  const maxPages = options.maxPages;
+  const detailLimit = options.detailLimit ?? 5;
 
   let seed: { text: string; url: string };
   try {
@@ -138,7 +144,7 @@ export async function fetchLiveJobServeRoles(
     });
   } catch (error) {
     if (error instanceof JobServeUsageRestrictionError) {
-      return blockedJobServeResult(options, seedUrl, "", error.message);
+      return blockedJobServeResult(options, seedUrl, error.message);
     }
     throw error;
   }
@@ -154,14 +160,15 @@ export async function fetchLiveJobServeRoles(
     });
   } catch (error) {
     if (error instanceof JobServeUsageRestrictionError) {
-      return blockedJobServeResult(options, seed.url, "", error.message);
+      return blockedJobServeResult(options, seed.url, error.message);
     }
     throw error;
   }
-  const classicUrl = extractClassicUrl(submitted.url, submitted.text);
-  const pageResult = await fetchClassicPages(fetcher, jar, {
-    classicUrl,
-    maxPages: options.maxPages,
+
+  const pageResult = await fetchResultPages(fetcher, jar, {
+    firstUrl: submitted.url,
+    firstHtml: submitted.text,
+    maxPages,
     timeoutMs,
   });
 
@@ -184,12 +191,16 @@ export async function fetchLiveJobServeRoles(
         roles.push(markJobServeDetailBlocked(role, blockedReason));
         continue;
       }
-      if (roles.length >= (options.detailLimit ?? 5)) {
+      if (roles.length >= detailLimit) {
         roles.push(role);
         continue;
       }
       try {
-        const detailedRole = await fetchJobServeRoleDetail(fetcher, jar, role, timeoutMs);
+        const detailedRole = await fetchJobServeWebServiceDetail(fetcher, jar, {
+          role,
+          referer: submitted.url,
+          timeoutMs,
+        });
         roles.push(detailedRole);
         if (detailedRole.detail_status === "error") {
           errors.push(jobServeDetailFailureMessage(detailedRole));
@@ -207,7 +218,7 @@ export async function fetchLiveJobServeRoles(
   return {
     query: options.query,
     searchUrl: submitted.url,
-    classicUrl,
+    classicUrl: pageResult.classicUrl,
     pagesFetched: pageResult.pages.length,
     roles,
     errors,
@@ -330,33 +341,44 @@ function buildSearchFormFields(
   return out;
 }
 
-async function fetchClassicPages(
+async function fetchResultPages(
   fetcher: typeof fetch,
   jar: JobServeRequestSession,
-  options: { classicUrl: string; maxPages: number; timeoutMs: number },
+  options: {
+    firstUrl: string;
+    firstHtml: string;
+    maxPages: number;
+    timeoutMs: number;
+  },
 ): Promise<{
   pages: Array<{ url: string; pageNumber: number; html: string }>;
+  classicUrl: string;
   blockedReason: string | null;
 }> {
   const pages: Array<{ url: string; pageNumber: number; html: string }> = [];
   const seen = new Set<string>();
-  let pageUrl = options.classicUrl;
+  const classicUrl = extractClassicUrl(options.firstUrl, options.firstHtml);
+  let pageUrl = options.firstUrl;
+  const firstBlockedReason: string | null = null;
 
   for (let index = 0; index < options.maxPages; index++) {
-    if (seen.has(pageUrl)) break;
-    seen.add(pageUrl);
-
     let page: { text: string; url: string };
-    try {
-      page = await requestText(fetcher, jar, pageUrl, {
-        timeoutMs: options.timeoutMs,
-        headers: { Accept: FORM_ACCEPT },
-      });
-    } catch (error) {
-      if (error instanceof JobServeUsageRestrictionError) {
-        return { pages, blockedReason: error.message };
+    if (index === 0) {
+      page = { text: options.firstHtml, url: options.firstUrl };
+    } else {
+      if (seen.has(pageUrl)) break;
+      seen.add(pageUrl);
+      try {
+        page = await requestText(fetcher, jar, pageUrl, {
+          timeoutMs: options.timeoutMs,
+          headers: { Accept: FORM_ACCEPT },
+        });
+      } catch (error) {
+        if (error instanceof JobServeUsageRestrictionError) {
+          return { pages, classicUrl, blockedReason: error.message };
+        }
+        throw error;
       }
-      throw error;
     }
     const collection = extractCollection(page.text);
     const pageNumber = Number.parseInt(pageUrl.match(PAGE_RE)?.[1] ?? "1", 10);
@@ -367,19 +389,96 @@ async function fetchClassicPages(
     pageUrl = absoluteUrl(nextUrl, page.url);
   }
 
-  return { pages, blockedReason: null };
+  return { pages, classicUrl, blockedReason: firstBlockedReason };
+}
+
+async function fetchJobServeWebServiceDetail(
+  fetcher: typeof fetch,
+  jar: JobServeRequestSession,
+  options: {
+    role: LiveJobServeRole;
+    referer: string;
+    timeoutMs: number;
+  },
+): Promise<LiveJobServeRole> {
+  const { role, referer, timeoutMs } = options;
+  try {
+    const url = `${WEB_SERVICE_BASE}/RetrieveSingleJobDetail`;
+    const response = await requestText(fetcher, jar, url, {
+      method: "POST",
+      body: `{ id: '${role.job_id}' }`,
+      timeoutMs,
+      headers: {
+        "Content-Type": JSON_CONTENT_TYPE,
+        "X-Requested-With": "XMLHttpRequest",
+        Origin: BASE_URL,
+        Referer: referer,
+      },
+    });
+    let envelope: { d?: Record<string, unknown> };
+    try {
+      envelope = JSON.parse(response.text) as { d?: Record<string, unknown> };
+    } catch (err) {
+      return {
+        ...role,
+        detail_status: "error",
+        detail_error: `JobServe detail response was not valid JSON: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+    const html = String(envelope.d?.JobDetailHtml ?? "");
+    if (!html.includes(role.job_id)) {
+      return {
+        ...role,
+        detail_status: "error",
+        detail_error: `JobServe detail response did not reference job ${role.job_id}.`,
+      };
+    }
+    const markdown = jobServeDetailMarkdownFromHtml(html, role.url);
+    const bodyLength = readableMarkdownBody(markdown).length;
+    if (bodyLength < Math.max(300, role.summary_snippet.length)) {
+      return {
+        ...role,
+        detail_status: "error",
+        detail_error: `JobServe detail extraction returned only ${bodyLength} readable character(s).`,
+      };
+    }
+    const employer = html.match(DETAIL_EMPLOYER_RE)?.[1]?.trim() ?? "";
+    const postedDate = html.match(DETAIL_POSTED_DATE_RE)?.[1]?.trim() ?? "";
+    return {
+      ...role,
+      employer_name: role.employer_name || employer,
+      posted_date: postedDate ? normalizeJobServePostedDate(postedDate) : role.posted_date,
+      detail_markdown: markdown.trim(),
+      detail_status: "success",
+      detail_error: "",
+    };
+  } catch (err) {
+    if (err instanceof JobServeUsageRestrictionError) throw err;
+    return {
+      ...role,
+      detail_status: "error",
+      detail_error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export function jobServeDetailMarkdownFromHtml(html: string, url: string): string {
+  return htmlToReadableMarkdown(html, url, {
+    contentSelectors: ["#md_skills", "#JobDetailPanel", "main", "article"],
+  });
 }
 
 function blockedJobServeResult(
   options: LiveJobServeOptions,
   searchUrl: string,
-  classicUrl: string,
   blockedReason: string,
 ): LiveJobServeResult {
   return {
     query: options.query,
     searchUrl,
-    classicUrl,
+    classicUrl: "",
     pagesFetched: 0,
     roles: [],
     errors: [blockedReason],
@@ -399,7 +498,7 @@ function markJobServeDetailBlocked(
 }
 
 function jobServeDetailFailureMessage(role: LiveJobServeRole): string {
-  return `JobServe detail fetch failed for ${role.detail_fetch_url || role.url}: ${role.detail_error}`;
+  return `JobServe detail fetch failed for ${role.url}: ${role.detail_error}`;
 }
 
 async function requestText(
@@ -449,8 +548,10 @@ async function requestText(
 
 function extractClassicUrl(searchUrl: string, html: string): string {
   if (searchUrl.includes("JobListing.aspx")) return searchUrl;
-  const match = html.match(CLASSIC_LINK_RE);
-  if (!match?.[1]) throw new Error("Could not find the JobServe Classic View link.");
+  const match = html.match(
+    /<a href="([^"]+)"[^>]*id="searchtogglelink"[^>]*>\s*Classic View\s*<\/a>/is,
+  );
+  if (!match?.[1]) return searchUrl;
   return absoluteUrl(match[1], searchUrl);
 }
 
@@ -475,7 +576,7 @@ function parseJobServeRoleBlock(
   block: string,
   options: { pageNumber: number; sourceRank: number; pageUrl: string },
 ): LiveJobServeRole {
-  const jobId = block.match(/<div class="jobListItem\b[^>]* id="([A-Z0-9]+)">/i)?.[1];
+  const jobId = block.match(ITEM_ID_RE)?.[1];
   if (!jobId) throw new Error("Could not determine JobServe job id from result block.");
 
   const titleMatch = block.match(JOB_POS_RE);
@@ -536,55 +637,12 @@ function parseJobServeRoleBlock(
   };
 }
 
-async function fetchJobServeRoleDetail(
-  fetcher: typeof fetch,
-  jar: JobServeRequestSession,
-  role: LiveJobServeRole,
-  timeoutMs: number,
-): Promise<LiveJobServeRole> {
-  if (!role.detail_fetch_url) return role;
-
-  try {
-    const detail = await requestText(fetcher, jar, role.detail_fetch_url, {
-      timeoutMs,
-      headers: { Accept: FORM_ACCEPT, Referer: role.url },
-    });
-    if (!isMatchingJobServeDetailLanding(role.job_id, detail.url)) {
-      return {
-        ...role,
-        detail_status: "error",
-        detail_error: `JobServe detail request landed on an unexpected URL: ${detail.url}`,
-      };
-    }
-    const markdown = jobServeDetailMarkdownFromHtml(detail.text, detail.url);
-    const bodyLength = readableMarkdownBody(markdown).length;
-    if (bodyLength < Math.max(300, role.summary_snippet.length)) {
-      return {
-        ...role,
-        detail_status: "error",
-        detail_error: `JobServe detail extraction returned only ${bodyLength} readable character(s).`,
-      };
-    }
-    return {
-      ...role,
-      detail_markdown: markdown.trim(),
-      detail_status: "success",
-      detail_error: "",
-    };
-  } catch (err) {
-    if (err instanceof JobServeUsageRestrictionError) throw err;
-    return {
-      ...role,
-      detail_status: "error",
-      detail_error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-export function jobServeDetailMarkdownFromHtml(html: string, url: string): string {
-  return htmlToReadableMarkdown(html, url, {
-    contentSelectors: ["#job", "main", '[role="main"]', "article"],
-  });
+function normalizeJobServePostedDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${parsed.getUTCFullYear()} 00:00:00`;
 }
 
 function readableMarkdownBody(markdown: string): string {

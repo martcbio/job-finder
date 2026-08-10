@@ -708,7 +708,7 @@ test("ingest records repair work without resolving or launching Codex", async ()
       spoolRoot,
       environment: {
         PATH: process.env.PATH,
-        JOBSRADAR_DOCTOR_GIT_PATH: "/opt/homebrew/bin/git",
+        JOBSRADAR_DOCTOR_GIT_PATH: TEST_GIT_EXECUTABLE,
         JOBSRADAR_DOCTOR_CODEX_PATH: "/definitely/missing/codex",
       },
     },

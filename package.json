@@ -69,7 +69,7 @@
     "test": "bun test src/**/__tests__/",
     "test:ui": "cd prototypes/ui && bun run test",
     "build:ui": "cd prototypes/ui && bun run build",
-    "check:ci": "bun run typecheck && bun run lint && bun run test && bun run test:ui && bun run build:ui && bash scripts/test-resolve-openings-artifacts.sh && python3 cloud/test_shapes.py",
+    "check:ci": "bun run typecheck && bun run lint && CAREERS_MARKET_DIR=cloud bun run test && bun run test:ui && bun run build:ui && bash scripts/test-resolve-openings-artifacts.sh && python3 cloud/test_shapes.py",
     "test:all": "bun run test && bun run test:integration && python3 cloud/test_shapes.py && bun run test:cloud:integration && bash scripts/test-resolve-openings-artifacts.sh && bash scripts/test-scheduled-run-policy.sh",
     "test:cloud:integration": "python3 cloud/test_publication_postgres.py",
     "test:e2e:cv-stage": "bun scripts/e2e-stage-cv-live.ts",

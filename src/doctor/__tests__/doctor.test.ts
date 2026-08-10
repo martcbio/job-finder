@@ -46,6 +46,7 @@ import {
 } from "../spool";
 
 const temporaryDirectories: string[] = [];
+const TEST_GIT_EXECUTABLE = "/usr/bin/git";
 
 afterEach(async () => {
   await Promise.all(
@@ -96,7 +97,7 @@ function config(root: string, executable: string): DoctorDispatcherConfig {
     repoRoot: process.cwd(),
     spoolRoot: join(root, "logs", "doctor"),
     agentExecutable: executable,
-    gitExecutable: "/opt/homebrew/bin/git",
+    gitExecutable: TEST_GIT_EXECUTABLE,
     timeoutMs: 5_000,
     cooldownMs: 60_000,
     maxRunsPerDay: 2,
@@ -463,7 +464,7 @@ test("isolated worktree uses the incident HEAD instead of dirty user files", asy
   temporaryDirectories.push(root);
   const repo = join(root, "repo");
   await mkdir(repo);
-  const git = "/opt/homebrew/bin/git";
+  const git = TEST_GIT_EXECUTABLE;
   await runCommand([git, "init"], repo);
   await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
   await runCommand([git, "config", "user.name", "Doctor Test"], repo);
@@ -496,7 +497,7 @@ test("terminal worktree changes are archived before the worktree is removed", as
   const dispatchDirectory = join(root, "dispatch");
   await mkdir(repo);
   await mkdir(dispatchDirectory);
-  const git = "/opt/homebrew/bin/git";
+  const git = TEST_GIT_EXECUTABLE;
   await runCommand([git, "init"], repo);
   await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
   await runCommand([git, "config", "user.name", "Doctor Test"], repo);
@@ -558,7 +559,7 @@ test("worktree archive refuses symlinks instead of copying host files", async ()
   await mkdir(repo);
   await mkdir(dispatchDirectory);
   await writeFile(outside, "must-not-copy\n");
-  const git = "/opt/homebrew/bin/git";
+  const git = TEST_GIT_EXECUTABLE;
   await runCommand([git, "init"], repo);
   await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
   await runCommand([git, "config", "user.name", "Doctor Test"], repo);
@@ -962,7 +963,7 @@ test("an absent dispatcher lock still reconciles and receipts an active attempt"
   temporaryDirectories.push(root);
   const repo = join(root, "repo");
   await mkdir(repo);
-  const git = "/opt/homebrew/bin/git";
+  const git = TEST_GIT_EXECUTABLE;
   await runCommand([git, "init"], repo);
   await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
   await runCommand([git, "config", "user.name", "Doctor Test"], repo);
@@ -1078,7 +1079,7 @@ test("recovery never signals a live PGID after its token heartbeat owner exits",
   temporaryDirectories.push(root);
   const repo = join(root, "repo");
   await mkdir(repo);
-  const git = "/opt/homebrew/bin/git";
+  const git = TEST_GIT_EXECUTABLE;
   await runCommand([git, "init"], repo);
   await runCommand([git, "config", "user.email", "doctor@example.test"], repo);
   await runCommand([git, "config", "user.name", "Doctor Test"], repo);

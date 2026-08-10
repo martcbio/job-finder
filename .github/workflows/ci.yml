@@ -2,14 +2,10 @@ name: ci
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run typecheck
-      - run: bash scripts/test-resolve-openings-artifacts.sh
-      - run: bun test src/**/__tests__/ prototypes/ui/src/prototypes/__tests__/*.test.ts
-      - run: python3 cloud/test_shapes.py
-      - name: ui build
-        run: cd prototypes/ui && bun install --frozen-lockfile && bun run build
+      - run: cd prototypes/ui && bun install --frozen-lockfile
+      - run: bun run check:ci

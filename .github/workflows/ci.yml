@@ -8,4 +8,5 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: cd prototypes/ui && bun install --frozen-lockfile
+      - run: python3 -m pip install --disable-pip-version-check httpx==0.28.1
       - run: bun run check:ci

@@ -1,7 +1,7 @@
 # Opportunity list and CLI
 
-The normal reading surface is the **Latest 50** view at
-`http://127.0.0.1:32002/`. It calls `GET /api/opportunities`, which reads local
+The normal reading surface is the **Recent 50** view at
+`https://jobsradar.test:8443/`. It calls `GET /api/opportunities`, which reads local
 Postgres and the latest completed lab artifact without contacting external
 sources. The CLI and API share the same loader and ranking implementation.
 
@@ -75,22 +75,21 @@ sources in strict mode.
 
 Every displayed opportunity contains:
 
-- source-reported posting date;
+- source-reported posting date, or an explicit first-seen date when unavailable;
 - source, company, and location;
 - literal URL;
 - `QUALIFIED (provisional)`, `CAVEAT`, or `DISQUALIFIED`;
 - plain-English reasons;
 - employment/contract/IR35 terms;
-- `⭐ ChatGPT Pick` when selected across the full current window.
+- `⭐ Recommended` when its deterministic score meets the configured threshold.
 
-Picks are chosen before recency fills the remaining slots, so a high-quality
-current Anthropic/OpenAI/Cohere role cannot be crowded out merely by JobServe
-volume. The final selected set is then ordered by posting date. Duplicate title
-variants do not consume multiple Pick slots.
+Recent is a pure chronological view ordered by source posting date, falling back
+to first-seen date. Recommended is a filter over those displayed recent rows; it
+does not inject older jobs into the list and it has no fixed item count.
 
-The report also includes source acquisition health and Pick distribution.
-Machine-readable JSON contains the same rows, decisions, URLs, health data, and
-Pick URLs.
+The report also includes source acquisition health and recommendation
+distribution. Machine-readable JSON contains the same rows, decisions, URLs,
+health data, and recommended URLs.
 
 ## Policy and overrides
 
@@ -98,7 +97,7 @@ Defaults are versioned in `config/opportunity-report.json`:
 
 - result limit;
 - current-window age;
-- Pick count;
+- minimum recommendation score;
 - acquisition-staleness threshold;
 - expected source families.
 
@@ -108,7 +107,7 @@ CLI flags override the numeric report settings:
 bun run jobs:opportunities -- \
   --limit 30 \
   --max-age-days 21 \
-  --pick-count 8 \
+  --recommendation-min-score 12 \
   --stale-after-hours 36
 ```
 

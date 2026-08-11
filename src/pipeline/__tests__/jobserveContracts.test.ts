@@ -151,4 +151,25 @@ describe("JobServe contract ranking", () => {
       }).map((job) => job.title),
     ).toEqual(["Fresh Adjacent Match"]);
   });
+
+  test("uses first-seen time instead of refresh time when no posted date exists", () => {
+    const ranked = rankJobServeContracts(
+      [
+        row({
+          title: "Old Undated Match",
+          firstSeenAt: "2026-06-01T12:00:00.000Z",
+          lastSeenAt: "2026-07-23T12:00:00.000Z",
+          markdown: "- Outside IR35: yes\n- Employment type: Contract\nAgentic AI",
+        }),
+      ],
+      { limit: 10 },
+    );
+
+    expect(
+      filterRecentJobServeContracts(ranked, {
+        maxAgeDays: 30,
+        now: new Date("2026-07-23T12:00:00.000Z"),
+      }),
+    ).toEqual([]);
+  });
 });

@@ -15,6 +15,7 @@ describe("GET /api/opportunities", () => {
             location: "London",
             url: "https://example.com/anthropic",
             postedAt: new Date("2026-07-22T00:00:00.000Z"),
+            discoveredAt: new Date("2026-07-22T00:00:00.000Z"),
             observedAt: new Date("2026-07-23T16:00:00.000Z"),
             terms: "employment type not assumed; inspect posting",
             screening: {
@@ -25,8 +26,8 @@ describe("GET /api/opportunities", () => {
             bodyAvailable: true,
           },
         ],
-        pickUrls: ["https://example.com/anthropic"],
-        pickDistribution: [{ source: "Lab ATS", count: 1 }],
+        recommendedUrls: ["https://example.com/anthropic"],
+        recommendationDistribution: [{ source: "Lab ATS", count: 1 }],
         sourceHealth: [],
         labMissingBodyCount: 0,
         requestedLimit: options.limit,
@@ -41,7 +42,7 @@ describe("GET /api/opportunities", () => {
       ok: boolean;
       data: {
         rows: Array<{ title: string; url: string }>;
-        pickUrls: string[];
+        recommendedUrls: string[];
         requestedLimit: number;
       };
     };
@@ -53,6 +54,6 @@ describe("GET /api/opportunities", () => {
       title: "Software Engineer",
       url: "https://example.com/anthropic",
     });
-    expect(body.data.pickUrls).toContain("https://example.com/anthropic");
+    expect(body.data.recommendedUrls).toContain("https://example.com/anthropic");
   });
 });

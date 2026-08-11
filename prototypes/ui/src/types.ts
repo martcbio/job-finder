@@ -215,7 +215,8 @@ export interface OpportunityRow {
   title: string;
   location: string;
   url: string;
-  postedAt: string;
+  postedAt: string | null;
+  discoveredAt: string;
   observedAt: string;
   terms: string;
   screening: {
@@ -224,16 +225,16 @@ export interface OpportunityRow {
     summary: string;
   };
   bodyAvailable: boolean;
-  pickScore?: number;
-  pickReasons?: string[];
+  recommendationScore?: number;
+  recommendationReasons?: string[];
 }
 
 export interface OpportunityReport {
   generatedAt: string;
   maxAgeDays: number;
   rows: OpportunityRow[];
-  pickUrls: string[];
-  pickDistribution: Array<{ source: string; count: number }>;
+  recommendedUrls: string[];
+  recommendationDistribution: Array<{ source: string; count: number }>;
   sourceHealth: Array<{
     source: string;
     rowCount: number;

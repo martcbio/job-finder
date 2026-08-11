@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     policyPath,
     limit: Math.min(30, options.limit + 5),
     maxAgeDays: options.maxAgeDays,
-    pickCount: options.pickCount,
+    recommendationMinScore: options.recommendationMinScore,
     staleAfterHours: options.staleAfterHours,
   });
   const urlChecks = await verifyOpportunityUrls(candidateReport.rows, {
@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     now: reportNow,
     limit: options.limit,
     maxAgeDays: options.maxAgeDays,
-    pickCount: options.pickCount,
+    recommendationMinScore: options.recommendationMinScore,
   });
   const report = {
     ...verifiedReport,
@@ -200,7 +200,11 @@ function parseOptions(
   return {
     limit: readSelectionLimitFlag(args, "--limit", policy.limit),
     maxAgeDays: readPositiveIntegerFlag(args, "--max-age-days", policy.maxAgeDays),
-    pickCount: readPositiveIntegerFlag(args, "--pick-count", policy.pickCount),
+    recommendationMinScore: readPositiveIntegerFlag(
+      args,
+      "--recommendation-min-score",
+      policy.recommendationMinScore,
+    ),
     staleAfterHours: readPositiveIntegerFlag(
       args,
       "--stale-after-hours",
@@ -304,7 +308,7 @@ async function sendSelectionEmail(report: OpportunityReport): Promise<void> {
       "--text-file",
       textPath,
       "--preheader",
-      "Verified current engineering roles, caveats, disqualifications, and ChatGPT Picks.",
+      "Verified recent engineering roles, caveats, disqualifications, and recommendations.",
     ],
     {
       cwd: process.cwd(),
@@ -346,7 +350,8 @@ Options:
   --refresh-jobserve         Run the bounded, paced JobServe refresh.
   --limit N                  Selection size; must be 20–30. Defaults to 25.
   --max-age-days N           Override the opportunity window.
-  --pick-count N             Override ChatGPT Pick count.
+  --recommendation-min-score N
+                             Minimum deterministic score for Recommended.
   --stale-after-hours N      Source acquisition age allowed before STALE.
   --strict-source-health     Exit 2 when a source is stale/missing or Lab ATS bodies are absent.
   --quiet                    Refresh and validate without printing the report.

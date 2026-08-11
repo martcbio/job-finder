@@ -10,7 +10,6 @@ import { resolveCodexExecutable, resolveGitExecutable } from "../src/doctor/gitW
 interface CliOptions {
   readonly command: "run-pending" | "status";
   readonly json: boolean;
-  readonly automatic: boolean;
 }
 
 function usage(): string {
@@ -27,21 +26,18 @@ function usage(): string {
 function parseArgs(argv: string[]): CliOptions | Error {
   let command: CliOptions["command"] = "status";
   let json = false;
-  let automatic = false;
   for (const argument of argv) {
     if (argument === "run-pending" || argument === "status") {
       command = argument;
     } else if (argument === "--json") {
       json = true;
-    } else if (argument === "--automatic") {
-      automatic = true;
     } else if (argument === "--help" || argument === "-h") {
       return new Error(usage());
     } else {
       return new Error(`Unknown argument: ${argument}\n\n${usage()}`);
     }
   }
-  return { command, json, automatic };
+  return { command, json };
 }
 
 function renderOutcome(outcome: DoctorDispatchOutcome): string {
@@ -133,9 +129,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  if (!options.automatic || outcome.value._tag === "dispatched") {
-    console.log(options.json ? JSON.stringify(outcome.value, null, 2) : renderOutcome(outcome.value));
-  }
+  console.log(options.json ? JSON.stringify(outcome.value, null, 2) : renderOutcome(outcome.value));
   process.exitCode =
     outcome.value._tag === "dispatched" && outcome.value.receipt.status !== "complete" ? 1 : 0;
 }

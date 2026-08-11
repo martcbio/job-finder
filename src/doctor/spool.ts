@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -226,6 +227,10 @@ async function ensureDirectories(paths: DoctorSpoolPaths): Promise<void> {
     mkdir(paths.recordLocks, { recursive: true, mode: 0o700 }),
     mkdir(paths.lockOwners, { recursive: true, mode: 0o700 }),
   ]);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 export interface FingerprintLockLease {
@@ -477,7 +482,13 @@ export interface ActiveDoctorDispatchAttempt {
 }
 
 async function readDispatchRecords(paths: DoctorSpoolPaths): Promise<DoctorDispatchRecords> {
-  const entries = await readdir(paths.dispatches, { withFileTypes: true });
+  let entries: Dirent[];
+  try {
+    entries = await readdir(paths.dispatches, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPathError(error)) return { attempts: [], receipts: [] };
+    throw error;
+  }
   const attempts: DoctorDispatchAttempt[] = [];
   const receipts: DoctorDispatchReceipt[] = [];
   for (const entry of entries) {
@@ -642,11 +653,14 @@ export async function listPendingDoctorIncidents(
 ): Promise<Result<ReadonlyArray<PendingDoctorIncident>, DoctorSpoolError>> {
   const paths = doctorSpoolPaths(spoolRoot);
   try {
-    await ensureDirectories(paths);
-    const [entries, receipts] = await Promise.all([
-      readdir(paths.incidents, { withFileTypes: true }),
-      readDispatchReceipts(paths),
-    ]);
+    let entries: Dirent[];
+    try {
+      entries = await readdir(paths.incidents, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPathError(error)) return ok([]);
+      throw error;
+    }
+    const receipts = await readDispatchReceipts(paths);
     const pending: PendingDoctorIncident[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -838,7 +852,6 @@ export async function readDoctorRuntimeState(
 ): Promise<Result<DoctorRuntimeState, DoctorSpoolError>> {
   const paths = doctorSpoolPaths(spoolRoot);
   try {
-    await ensureDirectories(paths);
     let state: DoctorRuntimeState;
     try {
       const text = await readFile(paths.runtimeState, "utf8");

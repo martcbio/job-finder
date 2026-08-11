@@ -1,15 +1,10 @@
 import { fileURLToPath } from "node:url";
 import {
-  launchDetachedDoctorDispatcher,
-  DetachedDispatcherError,
-} from "../src/doctor/detachedDispatcher";
-import {
   classifyIngestResult,
   classifyIngestThrow,
   type DoctorClassification,
 } from "../src/doctor/incident";
 import {
-  resolveCodexExecutable,
   resolveGitExecutable,
   resolveRepoHead,
   type DoctorGitError,
@@ -162,7 +157,7 @@ export async function dispatchDoctor(
     readonly environment: NodeJS.ProcessEnv;
   } = { repoRoot, spoolRoot: doctorSpoolRoot, environment: process.env },
 ): Promise<
-  Result<"not_needed" | "launched", DoctorSpoolError | DetachedDispatcherError | DoctorGitError>
+  Result<"not_needed" | "recorded", DoctorSpoolError | DoctorGitError>
 > {
   if (classification._tag !== "repair") return ok("not_needed");
   const now = new Date();
@@ -196,38 +191,22 @@ export async function dispatchDoctor(
     );
     if (attached._tag === "err") return attached;
   }
-  const codexExecutable = await resolveCodexExecutable(context.environment);
-  if (codexExecutable._tag === "err") {
-    await recordDoctorLauncherFailure(context.spoolRoot, codexExecutable.error.message, now);
-    return codexExecutable;
-  }
-  const launched = await launchDetachedDoctorDispatcher(
-    {
-      repoRoot: context.repoRoot,
-      spoolRoot: context.spoolRoot,
-      bunExecutable: process.execPath,
-      dispatcherScript: `${context.repoRoot}/scripts/jobsradar-doctor.ts`,
-      codexExecutable: codexExecutable.value,
-      gitExecutable: gitExecutable.value,
-    },
-    now,
-  );
-  return launched._tag === "err" ? launched : ok("launched");
+  return ok("recorded");
 }
 
 async function handleTerminalClassification(classification: DoctorClassification): Promise<void> {
   const dispatched = await dispatchDoctor(classification);
   if (dispatched._tag === "err") {
-    const artifact =
-      dispatched.error instanceof DetachedDispatcherError && dispatched.error.failureArtifact
-        ? `; recoverable failure artifact: ${dispatched.error.failureArtifact}`
-        : "";
     console.error(
-      `jobsradar doctor dispatch failed: ${dispatched.error.message}${artifact}; recover with bun run jobsradar:doctor -- run-pending`,
+      `jobsradar doctor incident preparation failed: ${dispatched.error.message}`,
     );
     if (process.exitCode === undefined || process.exitCode === 0) {
       process.exitCode = 1;
     }
+  } else if (dispatched.value === "recorded") {
+    console.error(
+      "jobsradar doctor incident recorded; inspect with bun run jobsradar:doctor -- status and run explicitly with bun run jobsradar:doctor -- run-pending",
+    );
   }
 }
 

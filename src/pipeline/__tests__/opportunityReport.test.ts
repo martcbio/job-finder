@@ -106,14 +106,14 @@ describe("opportunity report", () => {
     expect(markdown).toContain("Verdict: CAVEAT");
     expect(markdown).toContain("Why: regular office attendance");
     expect(markdown).toContain("Terms: employment type unknown");
-    expect(markdown).toContain("⭐ Recommended");
+    expect(markdown).toContain("⭐ Pick");
     expect(markdown).toContain("MISSING: JobServe returned no current rows");
-    expect(markdown).toContain("Recommendation distribution: Lab ATS 1");
+    expect(markdown).toContain("Pick distribution: Lab ATS 1");
     expect(markdown).toContain("## Method and limitations");
     expect(markdown).toContain("deterministic CLI code");
     expect(html).toContain('<a href="https://example.com/openai">');
     expect(html).toContain("CAVEAT");
-    expect(html).toContain("⭐ Recommended");
+    expect(html).toContain("⭐ Pick");
     expect(html).toContain("Method and limitations");
   });
 

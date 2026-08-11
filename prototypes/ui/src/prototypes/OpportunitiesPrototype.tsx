@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiEnvelope, OpportunityReport, OpportunityRow } from "../types";
 
-type Filter = "recent" | "recommended" | "qualified" | "caveat" | "disqualified";
+type Filter = "recent" | "picks" | "qualified" | "caveat" | "disqualified";
 
-function verdict(row: OpportunityRow): Exclude<Filter, "recent" | "recommended"> {
+function verdict(row: OpportunityRow): Exclude<Filter, "recent" | "picks"> {
   if (row.screening.status === "rejected") return "disqualified";
   if (row.screening.status === "needs_human_review") return "caveat";
   return "qualified";
@@ -70,7 +70,7 @@ export default function OpportunitiesPrototype() {
       ? report.rows
       : report.rows.filter((row) => sourceMatch(row, sourceFilter));
     if (filter === "recent") return bySource;
-    if (filter === "recommended") {
+    if (filter === "picks") {
       return bySource
         .filter((row) => recommendedUrls.has(row.url))
         .sort(
@@ -169,26 +169,26 @@ export default function OpportunitiesPrototype() {
         })}
         <button
           type="button"
-          aria-pressed={filter === "recommended"}
-          onClick={() => setFilter(filter === "recommended" ? "recent" : "recommended")}
+          aria-pressed={filter === "picks"}
+          onClick={() => setFilter(filter === "picks" ? "recent" : "picks")}
           className={`rounded-xl border p-4 text-left transition ${
-            filter === "recommended"
+            filter === "picks"
               ? "border-amber-300/40 bg-amber-300/[0.10]"
               : "border-amber-400/20 bg-amber-400/[0.06] hover:border-amber-300/35"
           }`}
         >
-          <span className="font-semibold text-amber-200">Recommended</span>
+          <span className="font-semibold text-amber-200">Picks</span>
           <p className="mt-3 text-2xl font-semibold text-white">{report.recommendedUrls.length}</p>
           <p className="text-xs text-zinc-500">
             {report.recommendationDistribution
               .map((item) => `${item.source} ${item.count}`)
-              .join(" · ") || "No current jobs meet the recommendation threshold"}
+              .join(" · ") || "No current jobs qualify as Picks"}
           </p>
         </button>
       </section>
 
       <section className="flex flex-wrap gap-2">
-        {(["recent", "recommended", "qualified", "caveat", "disqualified"] as const).map((value) => (
+        {(["recent", "picks", "qualified", "caveat", "disqualified"] as const).map((value) => (
           <button
             key={value}
             type="button"
@@ -233,7 +233,7 @@ export default function OpportunitiesPrototype() {
                 const why =
                   row.screening.reasons.map((reason) => reason.detail).join("; ") ||
                   row.screening.summary;
-                const isRecommended = recommendedUrls.has(row.url);
+                const isPick = recommendedUrls.has(row.url);
                 return (
                   <tr
                     key={row.url}
@@ -248,13 +248,13 @@ export default function OpportunitiesPrototype() {
                       >
                         {row.title}
                       </a>
-                      {isRecommended && row.recommendationScore !== undefined && (
+                      {isPick && row.recommendationScore !== undefined && (
                         <p className="mt-1 text-[10px] font-semibold text-amber-300">
-                          ★ Recommended · score {row.recommendationScore}
+                          ★ Pick · score {row.recommendationScore}
                         </p>
                       )}
                       <p className="mt-1 text-xs text-zinc-500">{row.company}</p>
-                      {isRecommended &&
+                      {isPick &&
                         row.recommendationReasons &&
                         row.recommendationReasons.length > 0 && (
                         <p className="mt-1 text-[10px] leading-4 text-amber-200/70">

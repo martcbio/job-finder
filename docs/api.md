@@ -125,7 +125,7 @@ routine refresh must not present it as a per-source opt-in:
 
 Returns the mixed JobServe and lab-ATS opportunity report used by the browser:
 source posting date or honest first-seen date, source, URL, verdict evidence,
-terms, dynamic recommendations, recommendation-source distribution, and
+terms, dynamic Picks, Pick-source distribution, and
 acquisition freshness. It reads local Postgres and the latest completed lab
 artifact only; it never refreshes an external source.
 

@@ -17,6 +17,7 @@ function opportunity(
     location: "London, UK",
     url,
     postedAt: new Date("2026-07-23T09:00:00Z"),
+    discoveredAt: new Date("2026-07-23T09:00:00Z"),
     observedAt: new Date("2026-07-23T10:00:00Z"),
     terms: "contract; IR35 unclear",
     screening: {
@@ -30,7 +31,7 @@ function opportunity(
 }
 
 describe("opportunity report", () => {
-  test("keeps globally strongest older roles while displaying the final list in date order", () => {
+  test("keeps the recent list chronological instead of injecting an older recommendation", () => {
     const rows = [
       opportunity({ title: "Recent Python Developer", url: "https://example.com/recent" }),
       opportunity({
@@ -56,15 +57,15 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 12,
     });
 
     expect(report.rows.map((row) => row.url)).toEqual([
       "https://example.com/recent",
-      "https://example.com/anthropic",
+      "https://example.com/project-manager",
     ]);
-    expect(report.pickUrls).toEqual(["https://example.com/anthropic"]);
-    expect(report.pickDistribution).toEqual([{ source: "Lab ATS", count: 1 }]);
+    expect(report.recommendedUrls).toEqual([]);
+    expect(report.rows.map((row) => row.url)).not.toContain("https://example.com/anthropic");
   });
 
   test("renders every decision field and source-health diagnostics", () => {
@@ -93,7 +94,7 @@ describe("opportunity report", () => {
         now: new Date("2026-07-23T12:00:00Z"),
         limit: 50,
         maxAgeDays: 30,
-        pickCount: 1,
+        recommendationMinScore: 10,
         expectedSources: ["JobServe", "Lab ATS"],
         staleAfterHours: 48,
       },
@@ -105,14 +106,14 @@ describe("opportunity report", () => {
     expect(markdown).toContain("Verdict: CAVEAT");
     expect(markdown).toContain("Why: regular office attendance");
     expect(markdown).toContain("Terms: employment type unknown");
-    expect(markdown).toContain("⭐ ChatGPT Pick");
+    expect(markdown).toContain("⭐ Recommended");
     expect(markdown).toContain("MISSING: JobServe returned no current rows");
-    expect(markdown).toContain("Pick distribution: Lab ATS 1");
+    expect(markdown).toContain("Recommendation distribution: Lab ATS 1");
     expect(markdown).toContain("## Method and limitations");
     expect(markdown).toContain("deterministic CLI code");
     expect(html).toContain('<a href="https://example.com/openai">');
     expect(html).toContain("CAVEAT");
-    expect(html).toContain("⭐ ChatGPT Pick");
+    expect(html).toContain("⭐ Recommended");
     expect(html).toContain("Method and limitations");
   });
 
@@ -140,13 +141,46 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 1,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/qualified"]);
+    expect(report.recommendedUrls).toEqual([
+      "https://example.com/qualified",
+      "https://example.com/caveated",
+    ]);
   });
 
-  test("can pick a caveated role because caveats are not disqualifiers", () => {
+  test("uses recency as part of recommendation ranking", () => {
+    const report = buildOpportunityReport(
+      [
+        opportunity({
+          title: "Applied AI Engineer",
+          url: "https://example.com/older",
+          postedAt: new Date("2026-07-10T09:00:00Z"),
+          discoveredAt: new Date("2026-07-10T09:00:00Z"),
+        }),
+        opportunity({
+          title: "Applied AI Engineer",
+          url: "https://example.com/newer",
+          postedAt: new Date("2026-07-23T09:00:00Z"),
+          discoveredAt: new Date("2026-07-23T09:00:00Z"),
+        }),
+      ],
+      {
+        now: new Date("2026-07-23T12:00:00Z"),
+        limit: 2,
+        maxAgeDays: 30,
+        recommendationMinScore: 1,
+      },
+    );
+
+    expect(report.recommendedUrls).toEqual([
+      "https://example.com/newer",
+      "https://example.com/older",
+    ]);
+  });
+
+  test("can recommend a caveated role because caveats are not disqualifiers", () => {
     const caveated = opportunity({
       source: "Lab ATS",
       company: "Anthropic",
@@ -169,10 +203,10 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 1,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 19,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/anthropic-hybrid"]);
+    expect(report.recommendedUrls).toEqual(["https://example.com/anthropic-hybrid"]);
   });
 
   test("ranks role, compensation, and work mode above source branding", () => {
@@ -197,10 +231,10 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 20,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/premium"]);
+    expect(report.recommendedUrls).toEqual(["https://example.com/premium"]);
   });
 
   test("recognises k-suffixed annual compensation", () => {
@@ -219,10 +253,10 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 14,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/140k"]);
+    expect(report.recommendedUrls).toEqual(["https://example.com/140k"]);
   });
 
   test("does not reward negated outside-IR35 text", () => {
@@ -241,13 +275,13 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 20,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/outside"]);
+    expect(report.recommendedUrls).toEqual(["https://example.com/outside"]);
   });
 
-  test("prevents one source from monopolising Picks when alternatives exist", () => {
+  test("returns every displayed row above the recommendation threshold without a fixed cap", () => {
     const rows = [
       ...Array.from({ length: 4 }, (_, index) =>
         opportunity({
@@ -273,12 +307,18 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 6,
       maxAgeDays: 30,
-      pickCount: 4,
+      recommendationMinScore: 11,
     });
 
-    expect(report.pickDistribution.find((item) => item.source === "JobServe")?.count).toBe(2);
-    expect(report.pickDistribution).toContainEqual({ source: "Lab ATS", count: 1 });
-    expect(report.pickDistribution).toContainEqual({ source: "Linear Careers", count: 1 });
+    expect(report.recommendedUrls).toHaveLength(6);
+    expect(
+      report.recommendationDistribution.find((item) => item.source === "JobServe")?.count,
+    ).toBe(4);
+    expect(report.recommendationDistribution).toContainEqual({ source: "Lab ATS", count: 1 });
+    expect(report.recommendationDistribution).toContainEqual({
+      source: "Linear Careers",
+      count: 1,
+    });
   });
 
   test("uses explicit AI-native and working-style company intelligence as a secondary signal", () => {
@@ -305,10 +345,10 @@ describe("opportunity report", () => {
       now: new Date("2026-07-23T12:00:00Z"),
       limit: 2,
       maxAgeDays: 30,
-      pickCount: 1,
+      recommendationMinScore: 15,
     });
 
-    expect(report.pickUrls).toEqual(["https://example.com/ramp"]);
+    expect(report.recommendedUrls).toEqual(["https://example.com/ramp"]);
   });
 
   test("measures source freshness from acquisition time rather than job posting date", () => {
@@ -325,7 +365,7 @@ describe("opportunity report", () => {
         now: new Date("2026-07-23T12:00:00Z"),
         limit: 10,
         maxAgeDays: 30,
-        pickCount: 1,
+        recommendationMinScore: 1,
         expectedSources: ["JobServe"],
         staleAfterHours: 48,
       },
@@ -354,7 +394,7 @@ describe("opportunity report", () => {
         now: new Date("2026-07-23T12:00:00Z"),
         limit: 1,
         maxAgeDays: 30,
-        pickCount: 1,
+        recommendationMinScore: 1,
       },
     );
 
@@ -383,13 +423,13 @@ describe("opportunity report", () => {
         now: new Date("2026-07-23T12:00:00Z"),
         limit: 3,
         maxAgeDays: 30,
-        pickCount: 3,
+        recommendationMinScore: 1,
       },
     );
 
     expect(report.rows.map((row) => row.url)).toEqual([
       "https://careers.example.com/jobs/verified",
     ]);
-    expect(report.pickUrls).toEqual(["https://careers.example.com/jobs/verified"]);
+    expect(report.recommendedUrls).toEqual(["https://careers.example.com/jobs/verified"]);
   });
 });

@@ -616,7 +616,7 @@ test("git worktree creation is hard-bounded", async () => {
   expect(Date.now() - started).toBeLessThan(1_000);
 });
 
-test("Doctor launchd template renders absolute tools and periodic command tokens", async () => {
+test("Doctor launchd template renders a periodic read-only status command", async () => {
   const root = await mkdtemp(join(tmpdir(), "jobsradar-doctor-launchd-"));
   temporaryDirectories.push(root);
   const destination = join(root, "doctor.plist");
@@ -639,6 +639,10 @@ test("Doctor launchd template renders absolute tools and periodic command tokens
   expect(rendered).toContain("<string>/opt/homebrew/bin/git</string>");
   expect(rendered).toContain("<string>/Users/mcb/.local/bin/bun</string>");
   expect(rendered).toContain("<integer>900</integer>");
+  expect(rendered).toContain("<string>status</string>");
+  expect(rendered).toContain("<string>--json</string>");
+  expect(rendered).not.toContain("<string>run-pending</string>");
+  expect(rendered).not.toContain("<string>--automatic</string>");
   expect(rendered).not.toContain("__");
 });
 
@@ -668,6 +672,7 @@ test("Doctor status does not resolve Codex or Git executables", async () => {
   const [exitCode, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
   expect(exitCode).toBe(0);
   expect(JSON.parse(stdout)).toMatchObject({ pendingCount: 0 });
+  expect(await readdir(root)).toEqual([]);
 });
 
 test("launcher persists a consumable incident before Git resolution fails", async () => {
@@ -690,6 +695,28 @@ test("launcher persists a consumable incident before Git resolution fails", asyn
   const pending = await listPendingDoctorIncidents(spoolRoot);
   expect(pending._tag === "ok" ? pending.value : []).toHaveLength(1);
   expect(pending._tag === "ok" ? pending.value[0]?.incident.repoHead : "missing").toBeNull();
+});
+
+test("ingest records repair work without resolving or launching Codex", async () => {
+  const root = await mkdtemp(join(tmpdir(), "jobsradar-doctor-explicit-only-"));
+  temporaryDirectories.push(root);
+  const spoolRoot = join(root, "spool");
+  const dispatched = await dispatchDoctor(
+    classifyIngestThrow(new TypeError("manual Doctor fixture")),
+    {
+      repoRoot: process.cwd(),
+      spoolRoot,
+      environment: {
+        PATH: process.env.PATH,
+        JOBSRADAR_DOCTOR_GIT_PATH: TEST_GIT_EXECUTABLE,
+        JOBSRADAR_DOCTOR_CODEX_PATH: "/definitely/missing/codex",
+      },
+    },
+  );
+  expect(dispatched).toEqual({ _tag: "ok", value: "recorded" });
+  const pending = await listPendingDoctorIncidents(spoolRoot);
+  expect(pending._tag === "ok" ? pending.value : []).toHaveLength(1);
+  expect(await Bun.file(join(spoolRoot, "dispatches")).exists()).toBe(false);
 });
 
 test("agent timeout terminates the owned process group", async () => {

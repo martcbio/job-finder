@@ -8,7 +8,8 @@ export interface Opportunity {
   title: string;
   location: string;
   url: string;
-  postedAt: Date;
+  postedAt: Date | null;
+  discoveredAt: Date;
   observedAt: Date;
   terms: string;
   screening: JobScreeningDecision;
@@ -20,15 +21,15 @@ export interface Opportunity {
     prestige: number;
     note: string;
   };
-  pickScore?: number;
-  pickReasons?: string[];
+  recommendationScore?: number;
+  recommendationReasons?: string[];
 }
 
 export interface OpportunityReportOptions {
   now: Date;
   limit: number;
   maxAgeDays: number;
-  pickCount: number;
+  recommendationMinScore: number;
   expectedSources?: readonly string[];
   staleAfterHours?: number;
 }
@@ -47,15 +48,16 @@ export interface OpportunityReport {
   generatedAt: string;
   maxAgeDays: number;
   rows: Opportunity[];
-  pickUrls: string[];
-  pickDistribution: Array<{ source: string; count: number }>;
+  recommendedUrls: string[];
+  recommendationDistribution: Array<{ source: string; count: number }>;
   sourceHealth: OpportunitySourceHealth[];
   labMissingBodyCount: number;
 }
 
-const EXCLUDED_PICK_TITLES =
+const EXCLUDED_RECOMMENDATION_TITLES =
   /\b(?:devops|sre|support|security|vfx|pmo|project manager|delivery manager|governance)\b/i;
-const PICK_TITLES = /\b(?:engineer|engineering|architect|scientist|developer|forward deployed)\b/i;
+const RECOMMENDATION_TITLES =
+  /\b(?:engineer|engineering|architect|scientist|developer|forward deployed)\b/i;
 
 export function buildOpportunityReport(
   opportunities: readonly Opportunity[],
@@ -63,23 +65,28 @@ export function buildOpportunityReport(
 ): OpportunityReport {
   assertPositiveInteger(options.limit, "limit");
   assertPositiveInteger(options.maxAgeDays, "maxAgeDays");
-  assertPositiveInteger(options.pickCount, "pickCount");
+  assertPositiveInteger(options.recommendationMinScore, "recommendationMinScore");
   const currentPool = opportunities
     .filter((row) => {
-      const ageMs = options.now.getTime() - row.postedAt.getTime();
+      const ageMs = options.now.getTime() - recentDate(row).getTime();
       return ageMs >= 0 && ageMs <= options.maxAgeDays * 86_400_000;
     })
-    .sort(comparePostedAtDescending);
+    .sort(compareRecentDescending);
   const recent = currentPool.filter((row) => row.bodyAvailable && isCanonicalJobUrl(row.url));
-  const picks = selectChatGptPicks(recent, Math.min(options.pickCount, options.limit));
-  const selected = selectRows(recent, picks, options.limit);
+  const selected = recent.slice(0, options.limit);
+  const recommendations = selectRecommendations(
+    selected,
+    options.recommendationMinScore,
+    options.now,
+  );
+  const recommendationsByUrl = new Map(recommendations.map((row) => [row.url, row]));
 
   return {
     generatedAt: options.now.toISOString(),
     maxAgeDays: options.maxAgeDays,
-    rows: selected,
-    pickUrls: picks.map((row) => row.url),
-    pickDistribution: countBySource(picks),
+    rows: selected.map((row) => recommendationsByUrl.get(row.url) ?? row),
+    recommendedUrls: recommendations.map((row) => row.url),
+    recommendationDistribution: countBySource(recommendations),
     sourceHealth: buildSourceHealth(currentPool, options),
     labMissingBodyCount: currentPool.filter((row) => row.source === "Lab ATS" && !row.bodyAvailable)
       .length,
@@ -87,12 +94,12 @@ export function buildOpportunityReport(
 }
 
 export function renderOpportunityMarkdown(report: OpportunityReport): string {
-  const pickUrls = new Set(report.pickUrls);
+  const recommendedUrls = new Set(report.recommendedUrls);
   const lines = [
-    "# Latest engineering opportunities",
+    "# Recent engineering opportunities",
     "",
     `Generated: ${report.generatedAt}`,
-    `Selected across the current ${report.maxAgeDays}-day pool, then ordered by posting date.`,
+    `Selected across the current ${report.maxAgeDays}-day pool, then ordered by posting or first-seen date.`,
     "",
     "## Source health",
     "",
@@ -102,8 +109,9 @@ export function renderOpportunityMarkdown(report: OpportunityReport): string {
   }
   lines.push(
     "",
-    `Pick distribution: ${
-      report.pickDistribution.map((item) => `${item.source} ${item.count}`).join("; ") || "none"
+    `Recommendation distribution: ${
+      report.recommendationDistribution.map((item) => `${item.source} ${item.count}`).join("; ") ||
+      "none"
     }`,
     "",
   );
@@ -114,8 +122,8 @@ export function renderOpportunityMarkdown(report: OpportunityReport): string {
         ? row.screening.reasons.map((reason) => reason.detail).join("; ")
         : row.screening.summary;
     lines.push(
-      `${index + 1}. ${escapeMarkdown(row.title)}${pickUrls.has(row.url) ? " — ⭐ ChatGPT Pick" : ""}`,
-      `   ${row.postedAt.toISOString().slice(0, 10)} | ${row.source} | ${row.company}${row.location ? ` | ${row.location}` : ""}`,
+      `${index + 1}. ${escapeMarkdown(row.title)}${recommendedUrls.has(row.url) ? " — ⭐ Recommended" : ""}`,
+      `   ${formatOpportunityDate(row)} | ${row.source} | ${row.company}${row.location ? ` | ${row.location}` : ""}`,
       `   URL: ${row.url}`,
       `   Verdict: ${formatVerdict(row.screening)}`,
       `   Why: ${reasons}`,
@@ -144,7 +152,7 @@ export function renderOpportunityMarkdown(report: OpportunityReport): string {
 }
 
 export function renderOpportunityHtml(report: OpportunityReport): string {
-  const pickUrls = new Set(report.pickUrls);
+  const recommendedUrls = new Set(report.recommendedUrls);
   const health = report.sourceHealth
     .map(
       (item) =>
@@ -168,9 +176,9 @@ export function renderOpportunityHtml(report: OpportunityReport): string {
           : "";
       return `<article>
   <h2>${index + 1}. <a href="${escapeHtml(row.url)}">${escapeHtml(row.title)}</a>${
-    pickUrls.has(row.url) ? " — ⭐ ChatGPT Pick" : ""
+    recommendedUrls.has(row.url) ? " — ⭐ Recommended" : ""
   }</h2>
-  <p>${escapeHtml(row.postedAt.toISOString().slice(0, 10))} · ${escapeHtml(row.source)} · ${escapeHtml(row.company)}${row.location ? ` · ${escapeHtml(row.location)}` : ""}</p>
+  <p>${escapeHtml(formatOpportunityDate(row))} · ${escapeHtml(row.source)} · ${escapeHtml(row.company)}${row.location ? ` · ${escapeHtml(row.location)}` : ""}</p>
   <p><strong>${escapeHtml(formatVerdict(row.screening))}</strong> — ${escapeHtml(reasons)}</p>
   <p><strong>Terms:</strong> ${escapeHtml(row.terms)}</p>
   ${signals}
@@ -182,10 +190,10 @@ export function renderOpportunityHtml(report: OpportunityReport): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
-  <title>Latest engineering opportunities</title>
+  <title>Recent engineering opportunities</title>
 </head>
 <body style="font-family:Arial,sans-serif;line-height:1.45;color:#18202b;max-width:760px;margin:0 auto;padding:24px">
-  <h1>Latest engineering opportunities</h1>
+  <h1>Recent engineering opportunities</h1>
   <p>Generated ${escapeHtml(report.generatedAt)}. Every primary link is an official job-detail URL with a captured full description; social links are discovery evidence only.</p>
   <h2>Source health</h2>
   <ul>${health}</ul>
@@ -202,81 +210,33 @@ export function renderOpportunityHtml(report: OpportunityReport): string {
 `;
 }
 
-function selectRows(
-  recent: readonly Opportunity[],
-  picks: readonly Opportunity[],
-  limit: number,
+function selectRecommendations(
+  rows: readonly Opportunity[],
+  minimumScore: number,
+  now: Date,
 ): Opportunity[] {
-  const selected = [...picks];
-  const selectedUrls = new Set(picks.map((row) => row.url));
-  for (const row of recent) {
-    if (selected.length >= limit) break;
-    if (selectedUrls.has(row.url)) continue;
-    selected.push(row);
-    selectedUrls.add(row.url);
-  }
-  return selected.sort(comparePostedAtDescending);
+  return rows
+    .filter(isRecommendationEligible)
+    .map((row) => {
+      const breakdown = scoreBreakdown(row, now);
+      return {
+        ...row,
+        recommendationScore: breakdown.total,
+        recommendationReasons: breakdown.reasons,
+      };
+    })
+    .filter((row) => (row.recommendationScore ?? 0) >= minimumScore)
+    .sort(
+      (left, right) =>
+        (right.recommendationScore ?? 0) - (left.recommendationScore ?? 0) ||
+        compareRecentDescending(left, right),
+    );
 }
 
-function selectChatGptPicks(rows: readonly Opportunity[], count: number): Opportunity[] {
-  const ranked = [...rows].sort((left, right) => score(right) - score(left));
-  const picks: Opportunity[] = [];
-  const seenTitles = new Set<string>();
-  const seenUrls = new Set<string>();
-  const sourceCounts = new Map<string, number>();
-  const companyCounts = new Map<string, number>();
-  const sourceLimit = Math.max(1, Math.ceil(count / 2));
-
-  const add = (
-    row: Opportunity,
-    enforceSourceLimit: boolean,
-    enforceCompanyLimit: boolean,
-  ): boolean => {
-    if (!isPickEligible(row)) return false;
-    if (seenUrls.has(row.url)) return false;
-    const titleKey = normalizedTitle(row.title);
-    if (seenTitles.has(titleKey)) return false;
-    if (enforceSourceLimit && (sourceCounts.get(row.source) ?? 0) >= sourceLimit) return false;
-    const companyKey = row.company.toLowerCase();
-    if (enforceCompanyLimit && (companyCounts.get(companyKey) ?? 0) >= 2) return false;
-    seenTitles.add(titleKey);
-    seenUrls.add(row.url);
-    sourceCounts.set(row.source, (sourceCounts.get(row.source) ?? 0) + 1);
-    companyCounts.set(companyKey, (companyCounts.get(companyKey) ?? 0) + 1);
-    const breakdown = scoreBreakdown(row);
-    picks.push({
-      ...row,
-      pickScore: breakdown.total,
-      pickReasons: breakdown.reasons,
-    });
-    return true;
-  };
-
-  const seededSources = new Set<string>();
-  for (const row of ranked) {
-    if (seededSources.has(row.source)) continue;
-    if (add(row, false, true)) seededSources.add(row.source);
-    if (picks.length === count) return picks;
-  }
-  for (const row of ranked) {
-    add(row, true, true);
-    if (picks.length === count) return picks;
-  }
-  for (const row of ranked) {
-    add(row, false, true);
-    if (picks.length === count) return picks;
-  }
-  for (const row of ranked) {
-    add(row, false, false);
-    if (picks.length === count) return picks;
-  }
-  return picks;
-}
-
-function isPickEligible(row: Opportunity): boolean {
+function isRecommendationEligible(row: Opportunity): boolean {
   if (row.screening.status === "rejected") return false;
   if (!row.bodyAvailable || !isCanonicalJobUrl(row.url)) return false;
-  return !EXCLUDED_PICK_TITLES.test(row.title) && PICK_TITLES.test(row.title);
+  return !EXCLUDED_RECOMMENDATION_TITLES.test(row.title) && RECOMMENDATION_TITLES.test(row.title);
 }
 
 function isCanonicalJobUrl(value: string): boolean {
@@ -294,14 +254,14 @@ function isCanonicalJobUrl(value: string): boolean {
   }
 }
 
-function score(row: Opportunity): number {
-  return scoreBreakdown(row).total;
-}
-
-function scoreBreakdown(row: Opportunity): { total: number; reasons: string[] } {
+function scoreBreakdown(row: Opportunity, now: Date): { total: number; reasons: string[] } {
   const text = `${row.title}\n${row.location}\n${row.terms}`;
   const reasons: string[] = [];
   let result = row.screening.status === "high_signal" ? 5 : 3;
+  const ageDays = Math.max(0, (now.getTime() - recentDate(row).getTime()) / 86_400_000);
+  const recency = ageDays <= 3 ? 4 : ageDays <= 7 ? 3 : ageDays <= 14 ? 2 : ageDays <= 30 ? 1 : 0;
+  result += recency;
+  if (recency > 0) reasons.push(`recency ${recency}`);
   if (/\b(?:agentic|applied ai)\b/i.test(text)) {
     result += 5;
     reasons.push("agentic / applied AI signal");
@@ -314,7 +274,7 @@ function scoreBreakdown(row: Opportunity): { total: number; reasons: string[] } 
     result += 3;
     reasons.push("AI in title");
   }
-  if (PICK_TITLES.test(row.title)) {
+  if (RECOMMENDATION_TITLES.test(row.title)) {
     result += 2;
     reasons.push("engineering title");
   }
@@ -401,10 +361,7 @@ function buildSourceHealth(
   const staleAfterHours = options.staleAfterHours ?? 48;
   return expectedSources.map((source) => {
     const sourceRows = rows.filter((row) => row.source === source);
-    const newest = sourceRows
-      .map((row) => row.postedAt)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
-    if (!newest) {
+    if (sourceRows.length === 0) {
       return {
         source,
         rowCount: 0,
@@ -415,6 +372,10 @@ function buildSourceHealth(
         message: `${source} returned no current rows`,
       };
     }
+    const newest = sourceRows
+      .map((row) => row.postedAt)
+      .filter((value): value is Date => value !== null)
+      .sort((a, b) => b.getTime() - a.getTime())[0];
     const newestObserved = sourceRows
       .map((row) => row.observedAt)
       .sort((a, b) => b.getTime() - a.getTime())[0];
@@ -424,17 +385,21 @@ function buildSourceHealth(
     return {
       source,
       rowCount: sourceRows.length,
-      newestPostedAt: newest.toISOString(),
+      newestPostedAt: newest?.toISOString() ?? null,
       newestObservedAt: newestObserved.toISOString(),
       ageHours,
       status,
-      message: `${source}: ${sourceRows.length} rows; captured ${newestObserved.toISOString()} (${ageHours.toFixed(1)}h old); newest posting ${newest.toISOString()}`,
+      message: `${source}: ${sourceRows.length} rows; captured ${newestObserved.toISOString()} (${ageHours.toFixed(1)}h old); ${newest ? `newest posting ${newest.toISOString()}` : "posting dates unavailable"}`,
     };
   });
 }
 
-function comparePostedAtDescending(left: Opportunity, right: Opportunity): number {
-  return right.postedAt.getTime() - left.postedAt.getTime();
+function recentDate(row: Opportunity): Date {
+  return row.postedAt ?? row.discoveredAt;
+}
+
+function compareRecentDescending(left: Opportunity, right: Opportunity): number {
+  return recentDate(right).getTime() - recentDate(left).getTime();
 }
 
 function countBySource(rows: readonly Opportunity[]): Array<{ source: string; count: number }> {
@@ -445,12 +410,10 @@ function countBySource(rows: readonly Opportunity[]): Array<{ source: string; co
     .sort((left, right) => right.count - left.count || left.source.localeCompare(right.source));
 }
 
-function normalizedTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/^[^-]+-\s*/, "")
-    .replace(/\W+/g, " ")
-    .trim();
+function formatOpportunityDate(row: Opportunity): string {
+  return row.postedAt
+    ? `posted ${row.postedAt.toISOString().slice(0, 10)}`
+    : `first seen ${row.discoveredAt.toISOString().slice(0, 10)}`;
 }
 
 function formatVerdict(screening: JobScreeningDecision): string {

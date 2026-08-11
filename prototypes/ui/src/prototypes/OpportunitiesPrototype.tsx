@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiEnvelope, OpportunityReport, OpportunityRow } from "../types";
 
-type Filter = "all" | "picks" | "qualified" | "caveat" | "disqualified";
+type Filter = "recent" | "recommended" | "qualified" | "caveat" | "disqualified";
 
-function verdict(row: OpportunityRow): Exclude<Filter, "all" | "picks"> {
+function verdict(row: OpportunityRow): Exclude<Filter, "recent" | "recommended"> {
   if (row.screening.status === "rejected") return "disqualified";
   if (row.screening.status === "needs_human_review") return "caveat";
   return "qualified";
@@ -28,11 +28,15 @@ function date(value: string): string {
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(value));
 }
 
+function displayDate(row: OpportunityRow): string {
+  return row.postedAt ? date(row.postedAt) : `First seen ${date(row.discoveredAt)}`;
+}
+
 export default function OpportunitiesPrototype() {
   const [report, setReport] = useState<OpportunityReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("recent");
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -56,16 +60,26 @@ export default function OpportunitiesPrototype() {
     void load();
   }, [load]);
 
-  const pickUrls = useMemo(() => new Set(report?.pickUrls ?? []), [report]);
+  const recommendedUrls = useMemo(
+    () => new Set(report?.recommendedUrls ?? []),
+    [report],
+  );
   const rows = useMemo(() => {
     if (!report) return [];
     const bySource = sourceFilter === null
       ? report.rows
       : report.rows.filter((row) => sourceMatch(row, sourceFilter));
-    if (filter === "all") return bySource;
-    if (filter === "picks") return bySource.filter((row) => pickUrls.has(row.url));
+    if (filter === "recent") return bySource;
+    if (filter === "recommended") {
+      return bySource
+        .filter((row) => recommendedUrls.has(row.url))
+        .sort(
+          (left, right) =>
+            (right.recommendationScore ?? 0) - (left.recommendationScore ?? 0),
+        );
+    }
     return bySource.filter((row) => verdict(row) === filter);
-  }, [filter, pickUrls, report, sourceFilter]);
+  }, [filter, recommendedUrls, report, sourceFilter]);
 
   if (loading && !report) {
     return (
@@ -101,11 +115,10 @@ export default function OpportunitiesPrototype() {
             Local data · no source refresh
           </p>
           <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl font-bold text-white">
-            Latest engineering opportunities
+            Recent engineering opportunities
           </h1>
           <p className="mt-1 text-sm text-zinc-500">
-            JobServe and company ATS roles, selected across {report.maxAgeDays} days and displayed
-            newest first.
+            Jobs with verified bodies, ordered by source posting date or honest first-seen date.
           </p>
         </div>
         <button
@@ -154,21 +167,33 @@ export default function OpportunitiesPrototype() {
             </button>
           );
         })}
-        <article className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
-          <span className="font-semibold text-amber-200">ChatGPT Picks</span>
-          <p className="mt-3 text-2xl font-semibold text-white">{report.pickUrls.length}</p>
+        <button
+          type="button"
+          aria-pressed={filter === "recommended"}
+          onClick={() => setFilter(filter === "recommended" ? "recent" : "recommended")}
+          className={`rounded-xl border p-4 text-left transition ${
+            filter === "recommended"
+              ? "border-amber-300/40 bg-amber-300/[0.10]"
+              : "border-amber-400/20 bg-amber-400/[0.06] hover:border-amber-300/35"
+          }`}
+        >
+          <span className="font-semibold text-amber-200">Recommended</span>
+          <p className="mt-3 text-2xl font-semibold text-white">{report.recommendedUrls.length}</p>
           <p className="text-xs text-zinc-500">
-            {report.pickDistribution.map((item) => `${item.source} ${item.count}`).join(" · ")}
+            {report.recommendationDistribution
+              .map((item) => `${item.source} ${item.count}`)
+              .join(" · ") || "No current jobs meet the recommendation threshold"}
           </p>
-        </article>
+        </button>
       </section>
 
       <section className="flex flex-wrap gap-2">
-        {(["all", "picks", "qualified", "caveat", "disqualified"] as const).map((value) => (
+        {(["recent", "recommended", "qualified", "caveat", "disqualified"] as const).map((value) => (
           <button
             key={value}
             type="button"
-            onClick={() => setFilter(value)}
+            aria-pressed={filter === value}
+            onClick={() => setFilter(filter === value && value !== "recent" ? "recent" : value)}
             className={`rounded-full border px-3 py-1.5 text-xs capitalize ${
               filter === value
                 ? "border-amber-300/40 bg-amber-300/10 text-amber-200"
@@ -208,7 +233,7 @@ export default function OpportunitiesPrototype() {
                 const why =
                   row.screening.reasons.map((reason) => reason.detail).join("; ") ||
                   row.screening.summary;
-                const isPick = pickUrls.has(row.url);
+                const isRecommended = recommendedUrls.has(row.url);
                 return (
                   <tr
                     key={row.url}
@@ -223,20 +248,22 @@ export default function OpportunitiesPrototype() {
                       >
                         {row.title}
                       </a>
-                      {isPick && row.pickScore !== undefined && (
+                      {isRecommended && row.recommendationScore !== undefined && (
                         <p className="mt-1 text-[10px] font-semibold text-amber-300">
-                          ★ ChatGPT Pick · score {row.pickScore}
+                          ★ Recommended · score {row.recommendationScore}
                         </p>
                       )}
                       <p className="mt-1 text-xs text-zinc-500">{row.company}</p>
-                      {isPick && row.pickReasons && row.pickReasons.length > 0 && (
+                      {isRecommended &&
+                        row.recommendationReasons &&
+                        row.recommendationReasons.length > 0 && (
                         <p className="mt-1 text-[10px] leading-4 text-amber-200/70">
-                          {row.pickReasons.join(" · ")}
+                          {row.recommendationReasons.join(" · ")}
                         </p>
                       )}
                     </td>
                     <td className="px-4 py-4 text-xs text-zinc-400">
-                      {date(row.postedAt)}
+                      {displayDate(row)}
                       <p className="mt-1 font-mono text-[9px] uppercase text-zinc-600">
                         {row.source}
                       </p>

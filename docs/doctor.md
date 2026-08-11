@@ -15,9 +15,9 @@ Pure external timeouts, blocking, rate limits, authentication failures, and
 operator input errors do not create Doctor work unless the same outcome includes
 unknown or internal evidence.
 
-After a repair-worthy incident is safely spooled, the ingest CLI starts a
-separate detached dispatcher. A launch failure is written under
-`logs/doctor/launcher-failures/` and can be recovered manually:
+After a repair-worthy incident is safely spooled, ingestion stops. It never
+starts a model or repair process. Inspect the incident, then start at most one
+bounded Doctor explicitly:
 
 ```bash
 bun run jobsradar:doctor -- run-pending
@@ -114,11 +114,11 @@ JOBSRADAR_DOCTOR_GIT_PATH
 ```
 
 Executable paths must be absolute. The interactive CLI resolves them from the
-current local installation. The launchd renderer persists the exact absolute
-Codex, Git, and Bun paths into the periodic 15-minute agent. The template is
+current local installation. The optional launchd template runs read-only
+`status --json` every 15 minutes; it never invokes a model. The template is
 integrated with `scripts/install-jobsradar-launchd.sh doctor`, but is not
 installed merely by merging these files.
 
 The Doctor never changes the ingest exit status from failure to success. A
-Doctor launch/spool failure is printed as an additional failure, and the
-immutable incident remains recoverable with `run-pending`.
+spool failure is printed as an additional failure. A successfully recorded
+incident remains pending until an operator explicitly runs `run-pending`.

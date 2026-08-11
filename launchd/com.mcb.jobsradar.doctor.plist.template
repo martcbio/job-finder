@@ -8,8 +8,8 @@
   <array>
     <string>__BUN_EXECUTABLE__</string>
     <string>__JOBSRADAR_ROOT__/scripts/jobsradar-doctor.ts</string>
-    <string>run-pending</string>
-    <string>--automatic</string>
+    <string>status</string>
+    <string>--json</string>
   </array>
   <key>WorkingDirectory</key>
   <string>__JOBSRADAR_ROOT__</string>

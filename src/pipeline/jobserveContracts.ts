@@ -3,6 +3,7 @@ export interface JobServeContractRow {
   title: string;
   company: string | null;
   url: string;
+  firstSeenAt?: string;
   lastSeenAt: string;
   markdown: string;
   description: string;
@@ -23,6 +24,7 @@ FROM (
     j.title_normalized AS title,
     j.company_hint AS company,
     j.canonical_url AS url,
+    j.first_seen_at::text AS "firstSeenAt",
     j.last_seen_at::text AS "lastSeenAt",
     COALESCE(MAX(jp.markdown) FILTER (WHERE jp.status = 'success'), '') AS markdown,
     COALESCE(string_agg(DISTINCT sr.description_raw, E'\\n'), '') AS description
@@ -32,7 +34,7 @@ FROM (
   JOIN job_search.search_queries sq ON sq.id = sr.query_id
   LEFT JOIN job_search.job_pages jp ON jp.job_id = j.id
   WHERE sq.source_id = 'jobserve'
-  GROUP BY j.id, j.title_normalized, j.company_hint, j.canonical_url, j.last_seen_at
+  GROUP BY j.id, j.title_normalized, j.company_hint, j.canonical_url, j.first_seen_at, j.last_seen_at
   ORDER BY j.last_seen_at DESC, j.id DESC
   LIMIT ${candidateLimit}
 ) rows;`;
@@ -78,7 +80,7 @@ export function filterRecentJobServeContracts(
   const now = options.now ?? new Date();
   const cutoff = now.getTime() - options.maxAgeDays * 24 * 60 * 60 * 1000;
   return rows.filter((row) => {
-    const timestamp = row.postedAt?.getTime() ?? Date.parse(row.lastSeenAt);
+    const timestamp = row.postedAt?.getTime() ?? Date.parse(row.firstSeenAt ?? row.lastSeenAt);
     return Number.isFinite(timestamp) && timestamp >= cutoff && timestamp <= now.getTime();
   });
 }
@@ -150,8 +152,8 @@ function compareRankedJobServeContracts(
   right: RankedJobServeContract,
 ): number {
   if (left.tier !== right.tier) return left.tier - right.tier;
-  const leftTime = left.postedAt?.getTime() ?? Date.parse(left.lastSeenAt);
-  const rightTime = right.postedAt?.getTime() ?? Date.parse(right.lastSeenAt);
+  const leftTime = left.postedAt?.getTime() ?? Date.parse(left.firstSeenAt ?? left.lastSeenAt);
+  const rightTime = right.postedAt?.getTime() ?? Date.parse(right.firstSeenAt ?? right.lastSeenAt);
   return rightTime - leftTime;
 }
 

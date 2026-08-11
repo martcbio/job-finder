@@ -10,6 +10,7 @@ function row(url: string): Opportunity {
     location: "London, UK",
     url,
     postedAt: new Date("2026-07-26T08:00:00Z"),
+    discoveredAt: new Date("2026-07-26T08:00:00Z"),
     observedAt: new Date("2026-07-26T09:00:00Z"),
     terms: "employment type unknown",
     screening: {

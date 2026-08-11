@@ -95,7 +95,7 @@ describe("opportunity report data", () => {
     expect(row).toBeNull();
   });
 
-  test("includes directly captured Linear roles using last-verified-open time", () => {
+  test("keeps direct-source discovery and observation times separate from posting time", () => {
     const direct: DirectCareerRow = {
       title: "Linear - Senior / Staff Product Engineer, AI",
       company: "Linear",
@@ -113,7 +113,9 @@ describe("opportunity report data", () => {
 
     expect(row?.source).toBe("Linear Careers");
     expect(row?.title).toBe("Senior / Staff Product Engineer, AI");
-    expect(row?.postedAt.toISOString()).toBe("2026-07-25T05:00:00.000Z");
+    expect(row?.postedAt).toBeNull();
+    expect(row?.discoveredAt.toISOString()).toBe("2026-05-23T02:00:00.000Z");
+    expect(row?.observedAt.toISOString()).toBe("2026-07-25T05:00:00.000Z");
     expect(row?.terms).toContain("last verified open");
   });
 
@@ -235,7 +237,7 @@ describe("opportunity report data", () => {
     const directory = await mkdtemp(resolve(tmpdir(), "opportunity-policy-"));
     const base = {
       maxAgeDays: 45,
-      pickCount: 12,
+      recommendationMinScore: 12,
       staleAfterHours: 48,
       expectedSources: ["JobServe"],
     };

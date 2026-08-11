@@ -26,7 +26,7 @@ export interface CompanyPriority {
 export interface OpportunityReportPolicy {
   limit: number;
   maxAgeDays: number;
-  pickCount: number;
+  recommendationMinScore: number;
   staleAfterHours: number;
   expectedSources: string[];
 }
@@ -68,7 +68,7 @@ export interface LoadOpportunityReportOptions {
   policyPath?: string;
   limit?: number;
   maxAgeDays?: number;
-  pickCount?: number;
+  recommendationMinScore?: number;
   staleAfterHours?: number;
 }
 
@@ -85,7 +85,7 @@ const opportunityReportPolicySchema = z
   .object({
     limit: z.number().int().min(20).max(30),
     maxAgeDays: z.number().int().positive(),
-    pickCount: z.number().int().positive(),
+    recommendationMinScore: z.number().int().positive(),
     staleAfterHours: z.number().int().positive(),
     expectedSources: z.array(z.string().trim().min(1)).min(1),
   })
@@ -149,7 +149,7 @@ export async function loadOpportunityReport(
     ...policy,
     limit: options.limit ?? policy.limit,
     maxAgeDays: options.maxAgeDays ?? policy.maxAgeDays,
-    pickCount: options.pickCount ?? policy.pickCount,
+    recommendationMinScore: options.recommendationMinScore ?? policy.recommendationMinScore,
     staleAfterHours: options.staleAfterHours ?? policy.staleAfterHours,
   };
   const labSnapshot = await readLatestLabOpenings(
@@ -189,7 +189,7 @@ export async function loadOpportunityReport(
       now: options.now,
       limit: effective.limit,
       maxAgeDays: effective.maxAgeDays,
-      pickCount: effective.pickCount,
+      recommendationMinScore: effective.recommendationMinScore,
       expectedSources: effective.expectedSources,
       staleAfterHours: effective.staleAfterHours,
     },
@@ -276,6 +276,7 @@ export function toLabOpportunity(row: LabOpening, observedAt: Date): Opportunity
     location: row.location,
     url: row.url,
     postedAt: new Date(row.postedAt),
+    discoveredAt: new Date(row.postedAt),
     observedAt,
     terms: ["employment type not assumed; inspect posting", extractCompensation(body)]
       .filter(Boolean)
@@ -338,7 +339,8 @@ export function toDirectCareerOpportunity(row: DirectCareerRow): Opportunity | n
     title,
     location,
     url: row.url,
-    postedAt: observedAt,
+    postedAt: null,
+    discoveredAt: new Date(row.firstSeenAt),
     observedAt,
     terms: [
       "posting date unavailable; last verified open",
@@ -459,7 +461,8 @@ function toJobServeOpportunity(row: RankedJobServeContract): Opportunity {
     title: row.title,
     location,
     url: row.url,
-    postedAt: row.postedAt ?? new Date(row.lastSeenAt),
+    postedAt: row.postedAt,
+    discoveredAt: new Date(row.firstSeenAt ?? row.lastSeenAt),
     observedAt: new Date(row.lastSeenAt),
     terms: [
       row.tier <= 2

@@ -81,13 +81,14 @@ Every displayed opportunity contains:
 - `QUALIFIED (provisional)`, `CAVEAT`, or `DISQUALIFIED`;
 - plain-English reasons;
 - employment/contract/IR35 terms;
-- `⭐ Recommended` when its deterministic score meets the configured threshold.
+- `⭐ Pick` when its deterministic score meets the configured threshold.
 
 Recent is a pure chronological view ordered by source posting date, falling back
-to first-seen date. Recommended is a filter over those displayed recent rows; it
-does not inject older jobs into the list and it has no fixed item count.
+to first-seen date. Picks is a filter over those displayed recent rows; it does
+not inject older jobs into the list and it has no fixed item count. The label does
+not claim that ChatGPT selected the jobs.
 
-The report also includes source acquisition health and recommendation
+The report also includes source acquisition health and Pick
 distribution. Machine-readable JSON contains the same rows, decisions, URLs,
 health data, and recommended URLs.
 

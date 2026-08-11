@@ -109,7 +109,7 @@ export function renderOpportunityMarkdown(report: OpportunityReport): string {
   }
   lines.push(
     "",
-    `Recommendation distribution: ${
+    `Pick distribution: ${
       report.recommendationDistribution.map((item) => `${item.source} ${item.count}`).join("; ") ||
       "none"
     }`,
@@ -122,7 +122,7 @@ export function renderOpportunityMarkdown(report: OpportunityReport): string {
         ? row.screening.reasons.map((reason) => reason.detail).join("; ")
         : row.screening.summary;
     lines.push(
-      `${index + 1}. ${escapeMarkdown(row.title)}${recommendedUrls.has(row.url) ? " — ⭐ Recommended" : ""}`,
+      `${index + 1}. ${escapeMarkdown(row.title)}${recommendedUrls.has(row.url) ? " — ⭐ Pick" : ""}`,
       `   ${formatOpportunityDate(row)} | ${row.source} | ${row.company}${row.location ? ` | ${row.location}` : ""}`,
       `   URL: ${row.url}`,
       `   Verdict: ${formatVerdict(row.screening)}`,
@@ -176,7 +176,7 @@ export function renderOpportunityHtml(report: OpportunityReport): string {
           : "";
       return `<article>
   <h2>${index + 1}. <a href="${escapeHtml(row.url)}">${escapeHtml(row.title)}</a>${
-    recommendedUrls.has(row.url) ? " — ⭐ Recommended" : ""
+    recommendedUrls.has(row.url) ? " — ⭐ Pick" : ""
   }</h2>
   <p>${escapeHtml(formatOpportunityDate(row))} · ${escapeHtml(row.source)} · ${escapeHtml(row.company)}${row.location ? ` · ${escapeHtml(row.location)}` : ""}</p>
   <p><strong>${escapeHtml(formatVerdict(row.screening))}</strong> — ${escapeHtml(reasons)}</p>

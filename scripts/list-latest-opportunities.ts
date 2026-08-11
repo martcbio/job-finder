@@ -308,7 +308,7 @@ async function sendSelectionEmail(report: OpportunityReport): Promise<void> {
       "--text-file",
       textPath,
       "--preheader",
-      "Verified recent engineering roles, caveats, disqualifications, and recommendations.",
+      "Verified recent engineering roles, caveats, disqualifications, and Picks.",
     ],
     {
       cwd: process.cwd(),
@@ -351,7 +351,7 @@ Options:
   --limit N                  Selection size; must be 20–30. Defaults to 25.
   --max-age-days N           Override the opportunity window.
   --recommendation-min-score N
-                             Minimum deterministic score for Recommended.
+                             Minimum deterministic score for Picks.
   --stale-after-hours N      Source acquisition age allowed before STALE.
   --strict-source-health     Exit 2 when a source is stale/missing or Lab ATS bodies are absent.
   --quiet                    Refresh and validate without printing the report.

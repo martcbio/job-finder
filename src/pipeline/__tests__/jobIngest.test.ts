@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import type { AtsOrgAcquisition } from "../../services/ats/types";
 import type { FastRefreshSourceSummary } from "../fastRefresh/types";
@@ -352,5 +352,8 @@ test("jobsradar wrapper supplies the standard local database without flags", asy
   const exitCode = await child.exited;
 
   expect(exitCode).toBe(0);
-  expect(await readFile(databasePath, "utf8")).toBe("postgres://mcb@localhost:5432/jobs");
+  const expectedUser = process.env.USER || userInfo().username;
+  expect(await readFile(databasePath, "utf8")).toBe(
+    `postgres://${expectedUser}@localhost:5432/jobs`,
+  );
 });
